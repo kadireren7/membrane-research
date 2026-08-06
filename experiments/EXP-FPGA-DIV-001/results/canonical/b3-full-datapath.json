@@ -1,0 +1,141 @@
+{
+  "_label": "MEASURED -- real Verilator RTL cosimulation of the full top-level datapath, not estimated",
+  "experiment": "EXP-FPGA-DIV-001",
+  "phase": "B3",
+  "test": "rtl/experimental/fp_div/tb_top_verilator_variant.cpp (shared across baseline/B1/B2/B3, compiled 7 ways: baseline, B1, B2, B3 at REORDER_DEPTH 1/2/4/8)",
+  "scope": "1,110,000 transactions per variant (200,000 per single-mode stage x4 + 100,000 mixed-mode + 3 x 70,000 adversarial-pattern stages: dense long Q4_0-encode burst, dense alternating Q4_0-encode/Q8_0-encode, dense random-mode), randomized valid/ready backpressure in the non-dense stages, 4 reset-safety stages (mid-stream flush, reset while Q4_0 encode divider busy, reset while queues non-empty [B3 only], all four preceding stages checked for 0 fails before any per-mode stage begins), id/mode/data checked every retirement against exact C quantizer golden vectors, 200,000-cycle-of-no-progress deadlock watchdog active throughout (never triggered)",
+  "note_on_scale_vs_phase_b2_committed_numbers": "This workload (1,110,000 txn, includes 3 dense adversarial stages) is DELIBERATELY larger and harsher than phase-b2.md's own committed 520,000-txn number -- task item 6 for this phase asks for >=1,000,000 transactions plus adversarial patterns specifically. Both B2 and baseline/B1 were re-run against this SAME new, larger workload here (not reused from the old 520k run) so every per-mode mean-latency number in this file is directly comparable across all 7 variants -- do not compare these B2 numbers to phase-b2.md's own 22.842-cycle Q8_ENC figure, which was measured against a smaller, less adversarial workload.",
+  "variants": {
+    "baseline": {
+      "dut": "membrane_quant_stream_top",
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 16.0, "total_cycles": 3121310, "overall_cycles_per_transaction": 2.812,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277561, "min": 9, "mean": 27.607, "max": 141 },
+        "Q8_DEC": { "count": 242504, "min": 9, "mean": 17.889, "max": 142 },
+        "Q4_ENC": { "count": 347392, "min": 9, "mean": 40.905, "max": 141 },
+        "Q4_DEC": { "count": 242543, "min": 9, "mean": 17.987, "max": 144 }
+      }
+    },
+    "b1": {
+      "dut": "membrane_quant_stream_top_b1",
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 15.1, "total_cycles": 3121310, "overall_cycles_per_transaction": 2.812,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277561, "min": 9, "mean": 27.607, "max": 141 },
+        "Q8_DEC": { "count": 242504, "min": 9, "mean": 17.889, "max": 142 },
+        "Q4_ENC": { "count": 347392, "min": 9, "mean": 40.905, "max": 141 },
+        "Q4_DEC": { "count": 242543, "min": 9, "mean": 17.987, "max": 144 }
+      },
+      "note": "byte-identical to baseline at this granularity, as expected -- B1 only changes q4_scale's constant-divisor path."
+    },
+    "b2": {
+      "dut": "membrane_quant_stream_top_b2",
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 53.6, "total_cycles": 12648122, "overall_cycles_per_transaction": 11.395,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277485, "min": 9, "mean": 71.229, "max": 369 },
+        "Q8_DEC": { "count": 242383, "min": 9, "mean": 37.127, "max": 392 },
+        "Q4_ENC": { "count": 347341, "min": 11, "mean": 442.465, "max": 560 },
+        "Q4_DEC": { "count": 242791, "min": 9, "mean": 37.237, "max": 423 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 2.580, "Q8_DEC": 2.075, "Q4_DEC": 2.070 },
+      "note": "reproduces phase-b3-root-cause.md's diagnosis: full serialization while any Q4_0 encode is in flight (q4enc_inflight gates ALL issuance) is the sole cause of the ~2.1-2.6x collateral slowdown on the three untouched fixed-latency chains."
+    },
+    "b3_depth1": {
+      "dut": "membrane_quant_stream_top_b3", "reorder_depth": 1,
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 66.1, "total_cycles": 17431973, "overall_cycles_per_transaction": 15.704,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277569, "min": 11, "mean": 185.990, "max": 416 },
+        "Q8_DEC": { "count": 242541, "min": 10, "mean": 166.101, "max": 421 },
+        "Q4_ENC": { "count": 347447, "min": 34, "mean": 467.070, "max": 574 },
+        "Q4_DEC": { "count": 242443, "min": 10, "mean": 166.067, "max": 416 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 6.737, "Q8_DEC": 9.285, "Q4_DEC": 9.233 },
+      "scheduler_stats": {
+        "reorder_buffer_high_water_mark": 1,
+        "issue_stall_cycles_depth_bound": 16321783, "issue_stall_pct_depth_bound": 93.63,
+        "issue_stall_cycles_q4busy": 0, "issue_stall_pct_q4busy": 0.00,
+        "issue_stall_cycles_out_fifo": 0, "issue_stall_pct_out_fifo": 0.00,
+        "q4enc_divider_busy_cycles_any_reason": 9874038, "q4enc_divider_busy_pct": 56.64,
+        "simultaneous_completion_cycles": 0
+      },
+      "verdict": "WORSE than B2 on every metric -- the uniform +1-cycle reorder-buffer tax applies to every transaction while REORDER_DEPTH=1 provides no real concurrency window (it degenerates to almost the same full-serialization behavior B2 already has, since only 1 transaction can ever be outstanding), so this depth is strictly dominated by B2 itself."
+    },
+    "b3_depth2": {
+      "dut": "membrane_quant_stream_top_b3", "reorder_depth": 2,
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 50.9, "total_cycles": 13376102, "overall_cycles_per_transaction": 12.051,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277160, "min": 10, "mean": 116.164, "max": 370 },
+        "Q8_DEC": { "count": 242943, "min": 10, "mean": 93.528, "max": 389 },
+        "Q4_ENC": { "count": 347335, "min": 34, "mean": 439.114, "max": 556 },
+        "Q4_DEC": { "count": 242562, "min": 10, "mean": 93.554, "max": 371 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 4.208, "Q8_DEC": 5.229, "Q4_DEC": 5.202 },
+      "scheduler_stats": {
+        "reorder_buffer_high_water_mark": 2,
+        "issue_stall_cycles_depth_bound": 4315544, "issue_stall_pct_depth_bound": 32.26,
+        "issue_stall_cycles_q4busy": 7950290, "issue_stall_pct_q4busy": 59.44,
+        "issue_stall_cycles_out_fifo": 0, "issue_stall_pct_out_fifo": 0.00,
+        "q4enc_divider_busy_cycles_any_reason": 9870748, "q4enc_divider_busy_pct": 73.79,
+        "simultaneous_completion_cycles": 0
+      },
+      "verdict": "Still WORSE than B2 on every metric. Better than depth=1 but the concurrency window (2 slots, one permanently occupied by whichever Q4_0 encode is in flight) is too small relative to this workload's Q4_0-encode frequency to offset the added buffering latency."
+    },
+    "b3_depth4": {
+      "dut": "membrane_quant_stream_top_b3", "reorder_depth": 4,
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 45.9, "total_cycles": 12138835, "overall_cycles_per_transaction": 10.936,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277249, "min": 10, "mean": 65.579, "max": 361 },
+        "Q8_DEC": { "count": 242563, "min": 10, "mean": 36.590, "max": 359 },
+        "Q4_ENC": { "count": 347403, "min": 11, "mean": 435.370, "max": 559 },
+        "Q4_DEC": { "count": 242785, "min": 10, "mean": 36.667, "max": 384 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 2.376, "Q8_DEC": 2.045, "Q4_DEC": 2.039 },
+      "scheduler_stats": {
+        "reorder_buffer_high_water_mark": 4,
+        "issue_stall_cycles_depth_bound": 819667, "issue_stall_pct_depth_bound": 6.75,
+        "issue_stall_cycles_q4busy": 9286071, "issue_stall_pct_q4busy": 76.50,
+        "issue_stall_cycles_out_fifo": 0, "issue_stall_pct_out_fifo": 0.00,
+        "q4enc_divider_busy_cycles_any_reason": 9872752, "q4enc_divider_busy_pct": 81.33,
+        "simultaneous_completion_cycles": 629
+      },
+      "verdict": "First depth to BEAT B2: overall cycles/transaction -4.03% vs B2 (10.936 vs 11.395), Q8_ENC collateral slowdown -7.9% (2.376x vs 2.580x), Q8_DEC/Q4_DEC collateral slowdown ~-1.5%. Depth-bound stall (6.75%) is now small relative to the structurally-unavoidable Q4_0-divider-busy stall (81.33% of all cycles), meaning most of the remaining stall is no longer a scheduling artifact."
+    },
+    "b3_depth8": {
+      "dut": "membrane_quant_stream_top_b3", "reorder_depth": 8,
+      "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 46.7, "total_cycles": 12049662, "overall_cycles_per_transaction": 10.856,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277448, "min": 10, "mean": 64.606, "max": 358 },
+        "Q8_DEC": { "count": 242622, "min": 10, "mean": 35.538, "max": 382 },
+        "Q4_ENC": { "count": 347470, "min": 17, "mean": 434.885, "max": 557 },
+        "Q4_DEC": { "count": 242460, "min": 10, "mean": 35.443, "max": 382 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 2.341, "Q8_DEC": 1.987, "Q4_DEC": 1.971 },
+      "scheduler_stats": {
+        "reorder_buffer_high_water_mark": 8,
+        "issue_stall_cycles_depth_bound": 130269, "issue_stall_pct_depth_bound": 1.08,
+        "issue_stall_cycles_q4busy": 9606701, "issue_stall_pct_q4busy": 79.73,
+        "issue_stall_cycles_out_fifo": 0, "issue_stall_pct_out_fifo": 0.00,
+        "q4enc_divider_busy_cycles_any_reason": 9875531, "q4enc_divider_busy_pct": 81.96,
+        "simultaneous_completion_cycles": 296
+      },
+      "verdict": "Marginal further improvement over depth=4 (overall cycles/transaction -0.73% vs depth=4, -4.73% vs B2). Q8_DEC/Q4_DEC collateral slowdown drops below 2x for the first time (1.987x, 1.971x). Depth-bound stall is now only 1.08% of all cycles -- almost all remaining stall (81.96%) is the structurally-unavoidable single-divider-busy cost, confirming diminishing returns beyond this depth."
+    }
+  },
+  "reset_safety_stages": {
+    "reset_mid_stream_flush": { "all_7_variants": "pass, 0 fails" },
+    "reset_while_q4_encode_divider_busy": { "all_7_variants": "pass, 0 fails" },
+    "reset_while_queues_non_empty_b3_only": {
+      "b3_depth1": "pass, 0 fails, outstanding correctly returned to 0",
+      "b3_depth2": "pass, 0 fails, outstanding correctly returned to 0",
+      "b3_depth4": "pass, 0 fails, outstanding correctly returned to 0",
+      "b3_depth8": "pass, 0 fails, outstanding correctly returned to 0"
+    }
+  },
+  "deadlock_watchdog": "200,000-cycle no-progress bound, active on every stage of every variant, never triggered (0 occurrences across 7 x 1,110,000 = 7,770,000 transaction-checks)"
+}

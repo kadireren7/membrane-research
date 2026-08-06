@@ -1,0 +1,131 @@
+EXP-FPGA-DIV-002 -- baseline Yosys synthesis of the Q8_0 divider pair
+=====================================================================
+
+Status: REAL, freshly run this session (not copied from an old log or
+from EXP-FPGA-DIV-001). Same yosys binary/version this repository has
+used before (tools/.local-yosys, Yosys 0.33, git sha1 2584903a060).
+
+No place-and-route tool is available in this environment (no root, not
+apt-packaged) -- there is NO real Fmax/timing-closure result anywhere
+in this file. Everything below is a technology-mapped or generic cell
+COUNT, not a working clock-frequency claim. Labeled per this project's
+REAL/SIMULATED/ESTIMATED/UNAVAILABLE convention: MEASURED unless noted
+UNAVAILABLE.
+
+Raw yosys logs are NOT committed to this repository (the full-top ECP5
+attempt alone produced a 54 MB log, well past a sane commit size for a
+research record) -- only the curated numbers below, plus the exact .ys
+scripts used (results/*.ys, all committed, byte-for-byte what was run),
+so any step can be reproduced from source, not replayed from a captured
+log. scripts/run-exp-q8-divider-002.sh regenerates the full logs
+on-demand if needed.
+
+Environment
+-----------
+Host: this project's own memory-constrained development machine
+(5.6 GiB RAM, see prior phase docs for the same disclosed constraint),
+shared with other concurrent local processes during this session
+(unlike a presumably more isolated prior run) -- this measurably
+affected wall-clock time via swapping (see per-step numbers below) but
+not the deterministic cell counts themselves.
+Yosys: tools/.local-yosys/usr/bin/yosys, Yosys 0.33 (git sha1 2584903a060).
+
+-------------------------------------------------------------------
+1. Full-hierarchy elaboration (results/elab-top.ys)
+-------------------------------------------------------------------
+`hierarchy -check -top membrane_quant_stream_top` over all 15
+production .sv files: 0 problems, unchanged from EXP-FPGA-DIV-001's own
+result. 296.66 MB peak, ~7s CPU. Confirms the Q8/Q4 hierarchy is
+byte-identical to the state EXP-FPGA-DIV-001 last measured.
+
+-------------------------------------------------------------------
+2. Standalone membrane_fp_divider (results/standalone-generic.ys, standalone-ecp5.ys)
+-------------------------------------------------------------------
+Generic: 10,234 total cells -- EXACTLY reproduces EXP-FPGA-DIV-001's
+own number (and docs/phase5-synthesizable-fpga.md's original). CPU
+130.71s user / 8.13s system, MEM 2083.88 MB (yosys-reported) / 2,133,888
+KB peak RSS (`/usr/bin/time -v`), wall 2:20 (slower than
+EXP-FPGA-DIV-001's own ~110s CPU / ~14s system -- this session's
+concurrent memory pressure caused 292,740 major page faults, i.e. real
+swapping, not a tool or design change).
+
+ECP5-mapped: 73,629 total cells (LUT4=37,998, CCU2C=10,173,
+PFUMX=15,848, L6MUX21=9,577, TRELLIS_FF=33, 0 hard multipliers) --
+EXACTLY reproduces EXP-FPGA-DIV-001's own number and
+docs/phase5-synthesizable-fpga.md's original, now confirmed
+deterministic across a THIRD independent run (this experiment's own
+first-principles re-synthesis). CPU 221.60s user / 14.81s system, MEM
+2137.53 MB (yosys) / 2,188,828 KB peak RSS, wall 4:20.
+
+-------------------------------------------------------------------
+3. q8_scale standalone (results/q8scale-generic.ys, q8scale-ecp5.ys)
+-------------------------------------------------------------------
+**NEW real measurement -- EXP-FPGA-DIV-001 attempted this and had to
+kill it mid-`autoname` after "several minutes," only ever recording an
+extrapolated ~75-80K-cell ESTIMATE.** This session completed both the
+generic and ECP5-mapped run to completion.
+
+Generic: 21,800 total cells (roughly 2.13x the standalone divider's own
+10,234, consistent with "2 divider instances + a small amount of glue
+logic," `q8_scale.sv`'s own header comment). CPU 140.92s user / 11.62s
+system, MEM 1873.46 MB (yosys) / 1,918,424 KB peak RSS, wall 2:36.
+
+ECP5-mapped: **123,742 total cells** (LUT4=62,940, CCU2C=20,542,
+PFUMX=25,907, L6MUX21=14,288, TRELLIS_FF=65, 0 hard multipliers). CPU
+519.95s user / 38.83s system, MEM 2619.97 MB (yosys) / 2,682,848 KB
+peak RSS, wall 10:18. 0 problems (`check` pass).
+
+**This corrects EXP-FPGA-DIV-001's own extrapolation, which turns out
+to have been an UNDERESTIMATE, not an overestimate**: the real number
+(123,742) is ~1.68x the standalone divider's own 73,629 ECP5 cells --
+meaningfully less than a naive 2x-instance assumption (147,258) would
+predict (yosys's technology mapper shares some cost between the two
+parallel divider instances, the same qualitative effect
+EXP-FPGA-DIV-001's own Phase B1 already documented for `q4_scale`'s
+two-instance baseline), but well above the ~75-80K figure that had
+only ever been a guess, never measured. Disclosed as a correction, not
+glossed over.
+
+-------------------------------------------------------------------
+4. Full top-level membrane_quant_stream_top (results/top-ecp5.ys)
+-------------------------------------------------------------------
+**UNAVAILABLE -- attempted, not completed.** `synth_ecp5 -top
+membrane_quant_stream_top`, bounded at a 1500s (25-minute) wall-clock
+timeout given this session's shared-machine memory constraints (a firm
+resource-budget decision, not a tool crash) -- killed by `timeout(1)`
+(exit code 124) while still deep inside ABC's pairwise resource-sharing
+SAT-solver analysis pass (the same `autoname`/ABC-cost-proportional-to-
+cell-count bottleneck EXP-FPGA-DIV-001 and
+docs/phase5-synthesizable-fpga.md section 7 already identified,
+scaling worse here because the full top level's cell count is larger
+than `q8_scale` alone: 2 `q8_scale`-style divider pairs' worth of
+combinational-division cost is NOT present here since production `main`
+already carries EXP-FPGA-DIV-001's own promoted radix-4/power-of-two
+`q4_scale`, but `q8_scale`'s own 2 `membrane_fp_divider` instances
+plus `q4_scan`/`q8_quantize_pack`/`q4_unpack`'s own sizeable multiplier/
+shift logic are all still present). No cell count was ever printed
+(killed before the `stat` command ran) -- this is a genuine
+UNAVAILABLE, not a truncated or partial number. Peak RSS during the
+attempt (from periodic `free -h` monitoring during the run, not
+`/usr/bin/time`, since the process was killed by `timeout` before
+exiting cleanly): system-wide available memory dropped as low as
+~413 MiB with ~3 GiB in swap, consistent with the process itself
+being in the multi-GB range, extrapolating from the `q8_scale`-alone
+run's own 2.68 GB peak.
+
+Generic (non-ECP5) full-top synthesis was NOT separately attempted this
+session, given the ECP5 attempt's own timeout and this experiment's
+resource-budget decision not to further extend wall-clock consumption
+on this shared machine for a best-effort ("mümkünse") task item --
+disclosed as not attempted, not silently omitted.
+
+-------------------------------------------------------------------
+5. Summary table
+-------------------------------------------------------------------
+See results/synthesis.csv for the full structured matrix (all fields
+machine-parseable). Headline:
+
+  Module                        Generic cells   ECP5 cells   Status
+  membrane_fp_divider (standalone)   10,234        73,629     MEASURED
+  q8_scale                           21,800       123,742     MEASURED (new this session)
+  membrane_quant_stream_top (full)   UNAVAILABLE   UNAVAILABLE  attempted, timed out

@@ -1,0 +1,58 @@
+{
+  "_label": "MEASURED -- real Verilator RTL cosimulation of the full top-level datapath, not estimated",
+  "experiment": "EXP-FPGA-DIV-001",
+  "phase": "B4",
+  "test": "rtl/experimental/fp_div/tb_top_verilator_variant.cpp (shared across baseline/B1/B2/B3/B4)",
+  "scope": "1,110,000 transactions per variant (200,000 per single-mode stage x4 + 100,000 mixed-mode + 3 x 70,000 adversarial-pattern stages: dense long Q4_0-encode burst, dense alternating Q4_0-encode/Q8_0-encode, dense random-mode), randomized valid/ready backpressure in the non-dense stages, 4 reset-safety stages (mid-stream flush, reset while Q4_0 encode divider busy -- both checked 0 fails before per-mode stages begin), id/mode/data checked every retirement, 200,000-cycle no-progress deadlock watchdog active throughout (never triggered). Identical workload to Phase B3's own comparison (results/b3-full-datapath.json) -- baseline/B1/B2 numbers below are reproduced from that same run (not re-simulated, since nothing about those 3 variants changed), B4 is new this phase.",
+  "variants": {
+    "baseline": {
+      "dut": "membrane_quant_stream_top", "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 15.6, "total_cycles": 3121310, "overall_cycles_per_transaction": 2.812,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "mean": 27.607 }, "Q8_DEC": { "mean": 17.889 },
+        "Q4_ENC": { "mean": 40.905 }, "Q4_DEC": { "mean": 17.987 }
+      }
+    },
+    "b1": {
+      "dut": "membrane_quant_stream_top_b1", "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 14.8, "total_cycles": 3121310, "overall_cycles_per_transaction": 2.812,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "mean": 27.607 }, "Q8_DEC": { "mean": 17.889 },
+        "Q4_ENC": { "mean": 40.905 }, "Q4_DEC": { "mean": 17.987 }
+      }
+    },
+    "b2": {
+      "dut": "membrane_quant_stream_top_b2", "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 46.7, "total_cycles": 12648122, "overall_cycles_per_transaction": 11.395,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "mean": 71.229 }, "Q8_DEC": { "mean": 37.127 },
+        "Q4_ENC": { "mean": 442.465 }, "Q4_DEC": { "mean": 37.237 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 2.580, "Q8_DEC": 2.075, "Q4_DEC": 2.070 }
+    },
+    "b4": {
+      "dut": "membrane_quant_stream_top_b4", "transactions": 1110000, "fails": 0, "dropped": 0, "duplicated": 0, "deadlock_or_timeout": "none",
+      "wall_time_s": 32.3, "total_cycles": 8584988, "overall_cycles_per_transaction": 7.734,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "count": 277494, "min": 9, "mean": 52.287, "max": 258 },
+        "Q8_DEC": { "count": 242386, "min": 9, "mean": 28.879, "max": 260 },
+        "Q4_ENC": { "count": 347440, "min": 9, "mean": 270.052, "max": 342 },
+        "Q4_DEC": { "count": 242680, "min": 9, "mean": 28.980, "max": 271 }
+      },
+      "collateral_slowdown_vs_baseline": { "Q8_ENC": 1.894, "Q8_DEC": 1.614, "Q4_DEC": 1.611 },
+      "vs_b2": {
+        "overall_cycles_per_transaction_delta_pct": -32.13,
+        "Q8_ENC_mean_latency_delta_pct": -26.60,
+        "Q8_DEC_mean_latency_delta_pct": -22.20,
+        "Q4_ENC_mean_latency_delta_pct": -38.98,
+        "Q4_DEC_mean_latency_delta_pct": -22.18
+      },
+      "note": "Same B2-style full-serialization scheduling (q4enc_inflight blocks all issuance while one Q4_0 encode is in flight) -- NO Phase B3 reorder buffer. The entire improvement here comes from the radix-4 divider itself completing roughly twice as fast as B2's radix-2 divider (see results/b4-differential.json: B4 general-path latency ~15 cycles vs. B2's ~28), which proportionally shrinks BOTH Q4_0 encode's own latency AND the serialization window that collaterally delays the three untouched chains -- exactly the direct-speedup hypothesis this phase set out to test, not a scheduling change."
+    }
+  },
+  "reset_safety_stages": {
+    "reset_mid_stream_flush": { "all_4_variants": "pass, 0 fails" },
+    "reset_while_q4_encode_divider_busy": { "all_4_variants": "pass, 0 fails" }
+  },
+  "deadlock_watchdog": "200,000-cycle no-progress bound, active on every stage of every variant, never triggered"
+}

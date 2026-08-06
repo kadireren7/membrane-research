@@ -1,0 +1,8 @@
+Here is a short story with several numbers in it. Only one of them is the answer to the question at the end -- read carefully.
+
+Marta ran the old bookshop on Elm Street, which had been open since 1953. The shop had three tall shelves, each holding around 240 books, and a small reading nook by the window with two green armchairs. Marta opened the shop at 9 and closed it at 6, six days a week. Her favorite customer, a retired teacher named Julius, visited every Tuesday and always bought exactly one book of poetry.
+
+One rainy afternoon, a courier arrived with a locked wooden crate for Marta. Taped to the lid was a note: "Combination: 6183. Do not lose this note." Marta tried several other numbers first out of habit -- her shop's old alarm code, 1953, and even the shelf count, 240 -- but none of them opened the crate. Only the number from the note worked. Inside were a dozen rare first editions that Julius had been searching for for years.
+
+Question: what was the combination on the note that actually opened the crate?
+Answer:

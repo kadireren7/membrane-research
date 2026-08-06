@@ -1,0 +1,65 @@
+{
+  "_disclosure": "MEASURED. Source: rtl/experimental/q8_div/tb_top_verilator_q8_variant.cpp (one C++ source, compiled twice via -DMEMBRANE_Q8DUAL_VARIANT), run via scripts/run-exp-q8-divider-002.sh --phase b1 --full (2026-08-03, build-exp-q8-divider-002-b1-full/b1-full-datapath-{baseline,dual}.log). Reference vectors: existing C/ggml quantizer via rtl/tb/gen_*_vectors.c, same external ordering contract as rtl/tb/tb_top_verilator.cpp.",
+  "compared": {
+    "baseline": "rtl/membrane_quant_stream_top.sv (unmodified production top)",
+    "experimental": "rtl/experimental/q8_div/membrane_quant_stream_top_q8_dual_radix4.sv (only q8_scale replaced by q8_scale_dual_radix4)"
+  },
+  "scope": {
+    "n_per_mode": 250000,
+    "n_mix": 100000,
+    "n_adv_per_stage": 70000,
+    "total_transactions_per_variant": 1310000,
+    "stages": [
+      "reset-mid-stream flush test",
+      "reset while Q8_0 encode divider(s) busy",
+      "Q8 encode (250000)",
+      "Q8 decode (250000)",
+      "Q4 encode (250000)",
+      "Q4 decode (250000)",
+      "mixed-mode interleave (100000)",
+      "Q8_0 encode burst, dense issue (70000)",
+      "alternating Q8_0 encode / Q4_0 encode, dense issue (70000)",
+      "dense random-mode mixed, no issue gaps (70000)"
+    ]
+  },
+  "baseline": {
+    "transactions_checked": 1310000,
+    "fails": 0,
+    "total_cycles": 8818582,
+    "cycles_per_transaction_overall": 6.732,
+    "wall_time_s": 34.9,
+    "per_mode_latency_cycles": {
+      "Q8_ENC": { "count": 397351, "min": 9, "mean": 38.519, "max": 224 },
+      "Q8_DEC": { "count": 292661, "min": 9, "mean": 21.089, "max": 171 },
+      "Q4_ENC": { "count": 327181, "min": 16, "mean": 265.946, "max": 326 },
+      "Q4_DEC": { "count": 292807, "min": 9, "mean": 21.921, "max": 193 }
+    },
+    "_note_per_mode_counts": "per-mode latency counts/means shown here are from the same run's per-mode stage-level stats (run_mode's own dedicated print, one heartbeat-window snapshot); the overall total_cycles/cycles_per_transaction figures are the run's final aggregate across ALL stages including the 3 dense adversarial stages, so per-mode counts do not sum to 1,310,000 by themselves -- see results/b1-comparison.md for the full breakdown."
+  },
+  "experimental_dual_radix4": {
+    "transactions_checked": 1310000,
+    "fails": 0,
+    "total_cycles": 15918022,
+    "cycles_per_transaction_overall": 12.151,
+    "wall_time_s": 60.8,
+    "per_mode_latency_cycles": {
+      "Q8_ENC": { "count": 397680, "min": 23, "mean": 333.474, "max": 390 },
+      "Q8_DEC": { "count": 292520, "min": 9, "mean": 38.600, "max": 317 },
+      "Q4_ENC": { "count": 327431, "min": 20, "mean": 289.920, "max": 356 },
+      "Q4_DEC": { "count": 292369, "min": 9, "mean": 38.507, "max": 326 }
+    }
+  },
+  "collateral_slowdown_vs_baseline": {
+    "_note": "Q8_DEC and Q4_DEC never touch q8_scale_dual_radix4 -- their own mean-latency increase is entirely collateral, caused by q8enc_inflight's full-serialization gate blocking ALL issuance (including Q4_0 decode/encode and Q8_0 decode) for the dual-radix4 variant's much longer (~330-cycle mean vs ~54-cycle mean) Q8_0 encode in-flight window, so those transactions queue longer in the input FIFO before being issued -- not a change to their own datapath latency.",
+    "Q8_ENC_pct": 511.8,
+    "Q8_DEC_pct": 48.3,
+    "Q4_ENC_pct": 8.2,
+    "Q4_DEC_pct": 47.5,
+    "cycles_per_transaction_overall_pct": 80.5
+  },
+  "assertions": {
+    "note": "Both Verilator builds compiled with --assert; membrane_quant_stream_top_q8_dual_radix4.sv's own internal assertions (in_flight range, 3-way retire mutual exclusion, single-in-flight discipline, q8_scale_dual_radix4's own atomic-acceptance/rendezvous-symmetry assertions) were live and did not fire.",
+    "fired": false
+  },
+  "reproduction": "scripts/run-exp-q8-divider-002.sh --phase b1 --full (or --quick for a 2,500-transaction-per-variant CI-sized subset)"
+}

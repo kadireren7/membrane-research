@@ -1,0 +1,4 @@
+read_verilog -sv rtl/membrane_fp_pkg.sv rtl/membrane_fp_adder.sv rtl/membrane_fp_divider.sv rtl/membrane_fp_multiplier.sv rtl/stream_fifo.sv rtl/valid_delay_line.sv rtl/q4_pack.sv rtl/q4_scale.sv rtl/q4_scan.sv rtl/q4_unpack.sv rtl/q8_dequantize.sv rtl/q8_maxabs_reduce.sv rtl/q8_quantize_pack.sv rtl/q8_scale.sv rtl/membrane_fp_scale_neg_pow2.sv rtl/membrane_fp_divider_radix4.sv rtl/membrane_quant_stream_top.sv
+hierarchy -check -top membrane_quant_stream_top
+synth_ecp5 -top membrane_quant_stream_top
+stat

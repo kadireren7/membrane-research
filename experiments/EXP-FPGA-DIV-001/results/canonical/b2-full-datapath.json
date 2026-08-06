@@ -1,0 +1,68 @@
+{
+  "_label": "MEASURED -- real Verilator RTL cosimulation of the full top-level datapath, not estimated",
+  "experiment": "EXP-FPGA-DIV-001",
+  "phase": "B2",
+  "test": "rtl/experimental/fp_div/tb_top_verilator_variant.cpp (shared across baseline/B1/B2, compiled 3 ways)",
+  "scope": "520,000 transactions (120,000 per mode x4 + 40,000 mixed-mode), randomized valid/ready backpressure both directions, reset-mid-stream flush test, id/mode/data checked every retirement, exact C quantizer golden vectors (rtl/tb/gen_top_x_vectors.c and friends)",
+  "variants": {
+    "baseline": {
+      "dut": "membrane_quant_stream_top",
+      "transactions": 520000,
+      "fails": 0,
+      "dropped": 0,
+      "duplicated": 0,
+      "deadlock_or_timeout": "none",
+      "wall_time_s": 7.6,
+      "total_cycles": 1562919,
+      "overall_cycles_per_transaction": 3.006,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "min": 9, "mean": 12.009, "max": 38 },
+        "Q8_DEC": { "min": 9, "mean": 11.973, "max": 39 },
+        "Q4_ENC": { "min": 9, "mean": 11.998, "max": 44 },
+        "Q4_DEC": { "min": 9, "mean": 11.955, "max": 43 }
+      }
+    },
+    "b1": {
+      "dut": "membrane_quant_stream_top_b1",
+      "transactions": 520000,
+      "fails": 0,
+      "dropped": 0,
+      "duplicated": 0,
+      "deadlock_or_timeout": "none",
+      "wall_time_s": 7.6,
+      "total_cycles": 1562919,
+      "overall_cycles_per_transaction": 3.006,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "min": 9, "mean": 12.009, "max": 38 },
+        "Q8_DEC": { "min": 9, "mean": 11.973, "max": 39 },
+        "Q4_ENC": { "min": 9, "mean": 11.998, "max": 44 },
+        "Q4_DEC": { "min": 9, "mean": 11.955, "max": 43 }
+      },
+      "note": "identical to baseline at this granularity -- expected: B1 only changes q4_scale's constant-divisor path, which does not change L_MAX or any latency number, exactly the claim phase-b1.md already made, re-confirmed here with per-mode instrumentation that did not previously exist."
+    },
+    "b2": {
+      "dut": "membrane_quant_stream_top_b2",
+      "transactions": 520000,
+      "fails": 0,
+      "dropped": 0,
+      "duplicated": 0,
+      "deadlock_or_timeout": "none",
+      "wall_time_s": 18.9,
+      "total_cycles": 4986444,
+      "overall_cycles_per_transaction": 9.589,
+      "per_mode_latency_cycles": {
+        "Q8_ENC": { "min": 9, "mean": 22.842, "max": 363 },
+        "Q8_DEC": { "min": 9, "mean": 22.814, "max": 363 },
+        "Q4_ENC": { "min": 20, "mean": 473.225, "max": 556 },
+        "Q4_DEC": { "min": 9, "mean": 22.803, "max": 357 }
+      },
+      "note": "Q4_ENC's own mean latency (473 cycles) reflects membrane_quant_stream_top_b2.sv's full serialization discipline (only one Q4_0 encode transaction in flight at a time, blocking all other issuance -- see that file's header) PLUS the iterative divider's own ~29-cycle general-path latency PLUS q4_pack's fixed 2-cycle tail; Q8_ENC/Q8_DEC/Q4_DEC's mean latency also rose (~12 -> ~22.8 cycles) purely from occasionally queuing behind an in-flight, fully-serializing Q4_0 encode transaction -- this is the real, measured, disclosed throughput cost of Phase B2's area-first single-in-flight design point, not a bug."
+    }
+  },
+  "throughput_cost_summary": {
+    "overall_cycles_per_transaction_ratio_b2_over_baseline": 3.190,
+    "q4_enc_mean_latency_ratio_b2_over_baseline": 39.44,
+    "non_q4enc_mean_latency_ratio_b2_over_baseline": 1.90,
+    "caveat": "measured at this test's specific mode mix (25% Q4 encode + 40,000 mixed-mode transactions); a real workload's actual Q4-encode fraction would change the overall ratio -- see phase-b2.md for the corresponding structural discussion, not a single universal number"
+  }
+}

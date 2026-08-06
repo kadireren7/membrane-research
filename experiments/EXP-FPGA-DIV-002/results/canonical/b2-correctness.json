@@ -1,0 +1,41 @@
+{
+  "_disclosure": "MEASURED_BY_TOOL unless noted otherwise. Source: rtl/experimental/q8_div/tb_top_verilator_q8_b2_variant.cpp, one C++ source compiled three times (baseline / -DMEMBRANE_B1_VARIANT / -DMEMBRANE_B2_VARIANT), run via scripts/run-exp-q8-divider-002.sh --phase b2 --full (2026-08-04, build-exp-q8-divider-002-b2-full/{b2-baseline,b2-b1,b2-b2}.log) plus a manually-run SHADOW_DEPTH=2 build (build-exp-q8-divider-002-b2-full/b2-depth2.log) for the task-item-10 sweep. Each build checks its own DUT against the SAME golden vectors with the SAME strict FIFO-order id/mode/data checks -- 0 mismatches on all four builds means they agree with each other by transitivity.",
+  "ordering_contract": {
+    "conclusion": "A: strict output order matching accepted input order",
+    "basis": "rtl/membrane_quant_stream_top.sv's own header ('---- ordering guarantee ----') states this unconditionally and it is enforced by that file's own live `ifndef SYNTHESIS assertions, and by every existing differential testbench's own single-FIFO-order inflight-deque check. Confirmed from source, not assumed. See results/b2-stall-root-cause.md section 0."
+  },
+  "scheduler_architecture": {
+    "mechanism": "global monotonic issue-sequence-number tag (SEQ_WIDTH=8 bits) assigned to every transaction at issue; a transaction may write to the shared output FIFO only when its own seq equals a free-running next_retire_seq counter",
+    "q8_encode": "single-in-flight (unchanged discipline), one hold register for its own completed-but-not-yet-its-turn result",
+    "q4_encode": "single-in-flight (unchanged discipline), one hold register, now issued independently of Q8_0 encode (no longer mutually exclusive with it, unlike Phase B1)",
+    "tag_pipe_q8dec_q4dec": "unchanged fixed-latency shared shift register (L_MAX=7), NEVER stalled/frozen (stalling it would lose in-flight q8_dequantize/q4_unpack results with no ready/valid backpressure of their own -- see phase-b2.md); a shared SHADOW_DEPTH-entry (1 or 2) hold queue catches the bounded number of tag_pipe entries admitted while an older Q8_0/Q4_0 encode transaction is still outstanding",
+    "shadow_depth_evaluated": [1, 2],
+    "shadow_depth_default": 1,
+    "reorder_buffer": "none built -- explicitly smaller than every configuration EXP-FPGA-DIV-001 Phase B3 already evaluated and rejected"
+  },
+  "correctness_full_run": {
+    "transactions_per_variant": 6250000,
+    "baseline": { "fails": 0, "wall_time_s": 131.3, "cycles_per_txn": 5.309 },
+    "b1_full_serialization": { "fails": 0, "wall_time_s": 267.6, "cycles_per_txn": 11.590 },
+    "b2_shadow_depth_1": { "fails": 0, "wall_time_s": 262.0, "cycles_per_txn": 10.257 },
+    "b2_shadow_depth_2": { "fails": 0, "wall_time_s": 264.2, "cycles_per_txn": 10.158 },
+    "scope_note": "correctness scope includes deliberately adversarial stress stages (long Q8_0-encode bursts, Q8_0-encode-then-long-Q4_0-decode-burst, three alternating patterns, dense random-mode heavy-backpressure, queue-full boundary, reset in every externally-observable scheduler state) -- its own aggregate cycles/transaction number is NOT the basis for the item-8 collateral-slowdown/improvement thresholds, which use the performance-matrix profiles instead (results/b2-performance.csv) since those isolate specific, controlled traffic shapes"
+  },
+  "ordering_and_drop_checks": {
+    "mismatches": 0,
+    "ordering_errors": 0,
+    "drops": 0,
+    "duplicates": 0,
+    "reset_recovery_failures": 0,
+    "deadlocks_timeouts": 0,
+    "internal_assertion_firings": 0,
+    "note": "internal assertion firings checked by grepping all four run logs for this module's own $error message prefix -- none found, across all four (baseline has no such assertions to fire; B1's and B2's own live `ifndef SYNTHESIS assertions, compiled in via Verilator --assert, never fired)"
+  },
+  "sequence_tag_wraparound": {
+    "seq_width_bits": 8,
+    "wrap_period_transactions": 256,
+    "wraps_exercised_per_variant": "~24414 (6,250,000 / 256)",
+    "note": "real wraparound coverage from scale alone, not a special-cased scenario -- the live_seq_count assertion (module-internal, checks issue_seq_ctr - next_retire_seq computed at the SAME 8-bit modular width, not width-promoted) never fired across any of the four full runs"
+  },
+  "reproduction": "scripts/run-exp-q8-divider-002.sh --phase b2 --full (or --quick for a ~121,750-transaction-per-variant CI-sized subset); SHADOW_DEPTH=2 sweep is a manual -GSHADOW_DEPTH=2 Verilator elaboration, not yet wired into the script's own --phase b2 flag (see phase-b2.md limitations)"
+}

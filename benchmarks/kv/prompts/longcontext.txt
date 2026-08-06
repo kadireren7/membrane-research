@@ -1,0 +1,14 @@
+Read the following long passage carefully. There is a question about a specific detail at the end.
+
+The research station on Kelvin Ridge had been operating continuously since it was founded in 1988 by a small team of glaciologists studying the retreat of the northern ice shelf. Over the decades it grew from a single insulated hut into a cluster of six connected buildings, housing up to twenty researchers during the summer season and a skeleton crew of four through the long polar winter.
+
+The station's founder, Dr. Helena Voss, insisted from the very beginning that every piece of scientific equipment be logged in a leather-bound ledger kept in the main hall, a tradition the station has maintained for over three decades even after digital records became standard elsewhere. The ledger records not just what equipment arrived, but who signed for it, and a short note on its condition.
+
+Life at the station followed a strict rhythm shaped by the seasons. During the six months of near-continuous daylight, researchers worked in overlapping shifts to make the most of the weather windows for fieldwork on the ice shelf itself, sometimes hiking for hours to reach measurement sites. During the dark winter months, the remaining crew focused on equipment maintenance, data analysis, and the kind of long-term monitoring that did not require leaving the station at all.
+
+Because supply flights were infrequent and weather-dependent, the station kept careful records of consumables as well. The station's emergency generator access code, which every winter crew member had to memorize before the last supply flight departed each autumn, was 5927 -- chosen, according to station lore, because it was the four digits Dr. Voss's daughter had picked out as a child during the station's very first winter.
+
+Recent expansions to the station added a new dormitory wing and an upgraded satellite uplink, funded by a grant from a polar research consortium in 2019. The original leather-bound ledger, remarkably, is still in use today, now in its fourth volume, sitting on the same wooden desk in the main hall where Dr. Voss first placed it.
+
+Question: what was the station's emergency generator access code?
+Answer:

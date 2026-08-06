@@ -1,0 +1,125 @@
+# --------------------------------------------------
+# Build outputs
+# --------------------------------------------------
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+install_manifest.txt
+
+# --------------------------------------------------
+# Compiled objects and binaries
+# --------------------------------------------------
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+*.elf
+*.hex
+
+# --------------------------------------------------
+# Debug and profiling
+# --------------------------------------------------
+*.dSYM/
+*.pdb
+*.ilk
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+gmon.out
+perf.data
+perf.data.old
+coverage/
+coverage.xml
+lcov.info
+htmlcov/
+
+# --------------------------------------------------
+# Model weights and out-of-core simulator scratch data (regenerated
+# deterministically -- see docs/phase6-out-of-core-simulator.md)
+# --------------------------------------------------
+models/
+*.gguf
+*.attntrace3
+*.ckpt
+
+# --------------------------------------------------
+# LaTeX build output (paper/main.pdf is a CI build artifact, never
+# committed -- see paper/scripts/README.md)
+# --------------------------------------------------
+paper/main.pdf
+paper/*.aux
+paper/*.out
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/*.toc
+paper/figures/generated/*.pdf
+
+# --------------------------------------------------
+# Python tooling
+# --------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# --------------------------------------------------
+# Editors and IDEs
+# --------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+.clangd/
+
+# --------------------------------------------------
+# Operating systems
+# --------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# --------------------------------------------------
+# Secrets and local configuration
+# --------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+local.config
+config.local.*
+
+# --------------------------------------------------
+# Packaging
+# --------------------------------------------------
+*.deb
+*.rpm
+*.tar
+*.tar.gz
+*.zip

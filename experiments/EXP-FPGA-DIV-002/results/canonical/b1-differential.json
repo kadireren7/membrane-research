@@ -1,0 +1,46 @@
+{
+  "_disclosure": "MEASURED unless noted otherwise. Source: rtl/tb/tb_q8_scale_dual_radix4.cpp, run via scripts/run-exp-q8-divider-002.sh --phase b1 --full (2026-08-03, build-exp-q8-divider-002-b1-full/b1-differential.log). Real Verilated RTL vs real Verilated RTL (rtl/q8_scale.sv vs rtl/experimental/q8_div/q8_scale_dual_radix4.sv), not a hand-written model on either side.",
+  "compared": {
+    "baseline": "rtl/q8_scale.sv (2 parallel membrane_fp_divider instances)",
+    "experimental": "rtl/experimental/q8_div/q8_scale_dual_radix4.sv (2 parallel membrane_fp_divider_radix4 instances)"
+  },
+  "case_composition": {
+    "edge_cases": 223,
+    "uniform_random_amax_set_1": 2000000,
+    "uniform_random_amax_set_2": 2000000,
+    "real_q8_runtime_amax_distribution_sample": 50000,
+    "reset_recovery_followup_case": 1,
+    "throughput_back_to_back_cases": 2000,
+    "planned_total_excl_throughput_and_recovery": 4050223,
+    "total_cases_run": 4052224
+  },
+  "results": {
+    "mismatches_d": 0,
+    "mismatches_id": 0,
+    "accepted_inputs": 4052224,
+    "retired_outputs": 4052224,
+    "dropped": 0,
+    "duplicated": 0,
+    "order_errors": 0,
+    "reset_recovery_fails": 0,
+    "pass": true
+  },
+  "latency_cycles": {
+    "with_random_backpressure": { "min": 2, "mean": 14.888, "max": 34 },
+    "no_backpressure": { "min": 2, "mean": 14.599, "max": 15, "n": 2875557 }
+  },
+  "initiation_interval": {
+    "measured_back_to_back_no_backpressure_cases": 2000,
+    "cycles": 16.0,
+    "total_cycles_for_throughput_run": 32000
+  },
+  "all_zero_behavior": {
+    "note": "amax_zero_pos and amax_zero_neg are part of the 223-case edge set, checked with the same 0-mismatch bit-exact criterion as every other case -- both variants agree bit-for-bit, including baseline q8_scale.sv's own pre-existing negative-zero quirk (amax=-0.0 leaves id UNMASKED, i.e. membrane_fp_divider(127.0, -0.0)/membrane_fp_divider_radix4(127.0, -0.0) both special-case b_is_zero with result_sign=sign_a^sign_b=1, producing id=-Infinity, not 0.0 -- this experiment reproduces the quirk exactly, it does not fix it).",
+    "amax_zero_pos_d_mismatch": 0,
+    "amax_zero_pos_id_mismatch": 0,
+    "amax_zero_neg_d_mismatch": 0,
+    "amax_zero_neg_id_mismatch": 0
+  },
+  "wall_time_s": 11.6,
+  "reproduction": "scripts/run-exp-q8-divider-002.sh --phase b1 --full (or --quick for a 44,224-case CI-sized subset)"
+}

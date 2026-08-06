@@ -1,0 +1,66 @@
+name: Research CI
+
+on: [push, pull_request]
+
+# Minimal, research-repository-appropriate CI. Deliberately does NOT
+# include CodeQL or CodeRabbit -- see RESEARCH_POLICY.md's "Scope
+# boundary with kadireren7/membrane" section for why: there is no
+# shipped binary or user-facing attack surface here for either tool to
+# usefully gate. This workflow instead enforces the discipline
+# RESEARCH_POLICY.md and CONTRIBUTING.md describe: every relative link
+# resolves, every result artifact is structurally well-formed, every
+# migrated file still matches its recorded provenance hash, every
+# script at least parses, and the automated claim verifiers for the
+# paper and outreach package both still pass.
+
+jobs:
+  links-and-structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check every relative Markdown link resolves
+        run: python3 scripts/verify-links.py
+
+  provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Re-hash imported files against provenance/import-manifest.json;
+          structurally validate results/canonical and results/schemas
+        run: python3 scripts/verify-provenance.py
+
+  script-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Byte-compile every Python script (syntax check only)
+        run: |
+          python3 -m py_compile $(find scripts paper/scripts -name "*.py")
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Shellcheck every shell script (error severity only -- this
+          repository's scripts intentionally leave a few multi-file
+          $VAR expansions unquoted for deliberate word-splitting;
+          info/style-level findings are not a CI gate)
+        run: shellcheck --severity=error scripts/*.sh
+      - name: Bash syntax check every shell script
+        run: |
+          for f in scripts/*.sh; do
+            bash -n "$f"
+          done
+
+  outreach-and-paper-claims:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify outreach package claims
+        run: python3 scripts/verify-outreach.py
+      - name: Verify paper claims
+        run: python3 paper/scripts/verify-paper.py
+
+  fpga-experiment-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate EXP-FPGA-DIV-002 canonical result provenance
+        run: python3 scripts/verify-exp-q8-divider-002-results.py --canonical --phase b4

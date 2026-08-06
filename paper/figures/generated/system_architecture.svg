@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="520" viewBox="0 0 860 520">
+<rect x="0" y="0" width="860" height="520" fill="white"/>
+<text x="430" y="30" font-size="17" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="bold" fill="#111" >MEMBRANE end-to-end system</text>
+<rect x="60" y="60" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="190.0" y="80" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >LLM runtime (real)</text>
+<text x="190.0" y="96" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >llama.cpp inference</text>
+<rect x="60" y="130" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="190.0" y="150" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Trace capture (real)</text>
+<text x="190.0" y="166" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >membrane-kv-{capture,attn-trace-capture}</text>
+<rect x="60" y="200" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="190.0" y="220" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Policy engine</text>
+<text x="190.0" y="236" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >hot/warm/cold decision</text>
+<rect x="60" y="270" width="120" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="120.0" y="290" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Hot KV store</text>
+<text x="120.0" y="306" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >FP16</text>
+<rect x="200" y="270" width="120" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="260.0" y="290" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Quant (bit-exact)</text>
+<text x="260.0" y="306" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Q8/Q4 vs. ggml</text>
+<rect x="60" y="340" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="190.0" y="360" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Exact sparse retrieval</text>
+<text x="190.0" y="376" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >predictor + prefetch + compulsory fetch</text>
+<rect x="440" y="60" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="570.0" y="80" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >CXL / near-memory appliance</text>
+<text x="570.0" y="96" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >(simulated, no real hardware)</text>
+<rect x="440" y="130" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="570.0" y="150" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Compressed / cold store</text>
+<text x="570.0" y="166" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >(file-backed backend)</text>
+<rect x="440" y="200" width="260" height="45" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="570.0" y="220" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >FPGA datapath</text>
+<text x="570.0" y="236" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >(Verilator-cosimulated, not on silicon)</text>
+<rect x="440" y="340" width="260" height="90" fill="#EDF2F7" stroke="#4C78A8"/>
+<text x="570.0" y="360" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >Out-of-core simulation +</text>
+<text x="570.0" y="376" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >artifact verification</text>
+<text x="570.0" y="392" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >(checkpoint/resume, SHA-256 manifest)</text>
+<line x1="190" y1="105" x2="190" y2="130" stroke="#666" stroke-width="1.5" />
+<polygon points="186,126 194,126 190,135" fill="#666"/>
+<line x1="190" y1="175" x2="190" y2="200" stroke="#666" stroke-width="1.5" />
+<polygon points="186,196 194,196 190,205" fill="#666"/>
+<line x1="190" y1="245" x2="120" y2="270" stroke="#666" stroke-width="1.5" />
+<polygon points="116,266 124,266 120,275" fill="#666"/>
+<line x1="190" y1="245" x2="260" y2="270" stroke="#666" stroke-width="1.5" />
+<polygon points="256,266 264,266 260,275" fill="#666"/>
+<line x1="190" y1="315" x2="190" y2="340" stroke="#666" stroke-width="1.5" />
+<polygon points="186,336 194,336 190,345" fill="#666"/>
+<line x1="320" y1="220" x2="440" y2="220" stroke="#666" stroke-width="1.5" />
+<polygon points="436,216 444,216 440,225" fill="#666"/>
+<line x1="320" y1="152" x2="440" y2="152" stroke="#666" stroke-width="1.5" />
+<polygon points="436,148 444,148 440,157" fill="#666"/>
+<line x1="320" y1="82" x2="440" y2="82" stroke="#666" stroke-width="1.5" />
+<polygon points="436,78 444,78 440,87" fill="#666"/>
+<line x1="320" y1="362" x2="440" y2="385" stroke="#666" stroke-width="1.5" />
+<polygon points="436,381 444,381 440,390" fill="#666"/>
+<text x="430" y="500" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#666" >See docs/architecture.md for the full Mermaid diagram set (A-D).</text>
+</svg>

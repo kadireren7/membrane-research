@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="480" viewBox="0 0 900 480">
+<rect x="0" y="0" width="900" height="480" fill="white"/>
+<text x="450.0" y="28" font-size="16" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="bold" fill="#111" >Oracle vs. real predictor bytes/token (2TiB device, all-Q8)</text>
+<line x1="90" y1="55" x2="90" y2="390" stroke="#333" stroke-width="1" />
+<line x1="90" y1="390" x2="870" y2="390" stroke="#333" stroke-width="1" />
+<line x1="90" y1="390.0" x2="870" y2="390.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="394.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >0</text>
+<line x1="90" y1="323.0" x2="870" y2="323.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="327.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >2,927,215</text>
+<line x1="90" y1="256.0" x2="870" y2="256.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="260.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >5,854,429</text>
+<line x1="90" y1="189.0" x2="870" y2="189.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="193.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >8,781,644</text>
+<line x1="90" y1="122.0" x2="870" y2="122.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="126.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >11,708,859</text>
+<line x1="90" y1="55.0" x2="870" y2="55.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="59.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >14,636,073</text>
+<text x="20" y="222.5" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" transform="rotate(-90 20 222.5)">mean bytes/token</text>
+<rect x="105.6" y="156.59137364872524" width="26.52" height="233.40862635127476" fill="#4C78A8" stroke="none"/>
+<rect x="136.8" y="273.2892654128438" width="26.52" height="116.7107345871562" fill="#E45756" stroke="none"/>
+<rect x="168.0" y="55.0" width="26.52" height="335.0" fill="#54A24B" stroke="none"/>
+<rect x="199.2" y="222.4775967011671" width="26.52" height="167.5224032988329" fill="#EECA3B" stroke="none"/>
+<text x="168.0" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >64MiB</text>
+<rect x="261.6" y="273.38271131307226" width="26.52" height="116.61728868692774" fill="#4C78A8" stroke="none"/>
+<rect x="292.8" y="273.2892654128438" width="26.52" height="116.7107345871562" fill="#E45756" stroke="none"/>
+<rect x="324.0" y="222.5912658705007" width="26.52" height="167.4087341294993" fill="#54A24B" stroke="none"/>
+<rect x="355.2" y="222.4775967011671" width="26.52" height="167.5224032988329" fill="#EECA3B" stroke="none"/>
+<text x="324.0" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >256MiB</text>
+<rect x="417.6" y="275.6907224846615" width="26.52" height="114.30927751533852" fill="#4C78A8" stroke="none"/>
+<rect x="448.8" y="273.2892654128438" width="26.52" height="116.7107345871562" fill="#E45756" stroke="none"/>
+<rect x="480.0" y="224.59955677251372" width="26.52" height="165.40044322748628" fill="#54A24B" stroke="none"/>
+<rect x="511.2" y="222.4775967011671" width="26.52" height="167.5224032988329" fill="#EECA3B" stroke="none"/>
+<text x="480.0" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >1024MiB</text>
+<rect x="573.6" y="281.2661492571708" width="26.52" height="108.73385074282919" fill="#4C78A8" stroke="none"/>
+<rect x="604.8" y="281.26978374633524" width="26.52" height="108.73021625366476" fill="#E45756" stroke="none"/>
+<rect x="636.0" y="235.26907614192845" width="26.52" height="154.73092385807155" fill="#54A24B" stroke="none"/>
+<rect x="667.2" y="236.86791513995794" width="26.52" height="153.13208486004206" fill="#EECA3B" stroke="none"/>
+<text x="636.0" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >4096MiB</text>
+<rect x="729.6" y="281.9003558287032" width="26.52" height="108.0996441712968" fill="#4C78A8" stroke="none"/>
+<rect x="760.8" y="281.9071150767361" width="26.52" height="108.09288492326391" fill="#E45756" stroke="none"/>
+<rect x="792.0" y="237.53674560533682" width="26.52" height="152.46325439466318" fill="#54A24B" stroke="none"/>
+<rect x="823.2" y="237.54078064592372" width="26.52" height="152.45921935407628" fill="#EECA3B" stroke="none"/>
+<text x="792.0" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >8192MiB</text>
+<text x="480.0" y="450" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >host cache size</text>
+<rect x="90" y="25" width="12" height="12" fill="#4C78A8" stroke="none"/>
+<text x="106" y="35" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-135M oracle</text>
+<rect x="297" y="25" width="12" height="12" fill="#E45756" stroke="none"/>
+<text x="313" y="35" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-135M predictor</text>
+<rect x="531" y="25" width="12" height="12" fill="#54A24B" stroke="none"/>
+<text x="547" y="35" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-360M oracle</text>
+<rect x="738" y="25" width="12" height="12" fill="#EECA3B" stroke="none"/>
+<text x="754" y="35" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-360M predictor</text>
+<text x="870" y="472" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#666" >Source: benchmarks/cxl-sim/unified-sweep.csv</text>
+</svg>

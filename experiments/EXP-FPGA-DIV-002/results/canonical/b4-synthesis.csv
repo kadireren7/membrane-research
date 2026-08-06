@@ -1,0 +1,11 @@
+target,label,flow,classification,total_cells,LUT4,CCU2C,PFUMX,L6MUX21,TRELLIS_FF,TRELLIS_IO,$_DFF_P_,$_DFF_PP0_,$_MUX_,$_NOT_,$_AND_,$_OR_,$_XOR_
+ref-q8scale-dual-radix4,"q8_scale_dual_radix4 (component reference, unmodified since Phase B1)",generic,MEASURED_BY_TOOL,1556,,,,,,,,,629,286,83,814,385
+ref-q8scale-dual-radix4,"q8_scale_dual_radix4 (component reference, unmodified since Phase B1)",ecp5,MEASURED_BY_TOOL,2775,1659,319,360,180,257,,,,,,,,
+wrap-b3split,"membrane_quant_stream_top_q8_dual_radix4_b4_b3split_synth_wrapper (B3-split scheduler, isolated)",generic,MEASURED_BY_TOOL,11916,,,,,,,13727,,65295,22667,67141,145606,114069
+wrap-b3split,"membrane_quant_stream_top_q8_dual_radix4_b4_b3split_synth_wrapper (B3-split scheduler, isolated)",ecp5,UNAVAILABLE,,,,,,,,,,,,,,
+wrap-r1,"membrane_quant_stream_top_q8_dual_radix4_b4_r1_synth_wrapper (R1 scheduler, isolated)",generic,MEASURED_BY_TOOL,11916,,,,,,,13727,,63699,21206,67135,145414,114027
+wrap-r1,"membrane_quant_stream_top_q8_dual_radix4_b4_r1_synth_wrapper (R1 scheduler, isolated)",ecp5,UNAVAILABLE,,,,,,,,,,,,,,
+wrap-r2,"membrane_quant_stream_top_q8_dual_radix4_b4_r2_synth_wrapper (R2 scheduler, isolated)",generic,MEASURED_BY_TOOL,11916,,,,,,,13727,,64229,21210,67134,145354,114058
+wrap-r2,"membrane_quant_stream_top_q8_dual_radix4_b4_r2_synth_wrapper (R2 scheduler, isolated)",ecp5,UNAVAILABLE,,,,,,,,,,,,,,
+wrap-r3,"membrane_quant_stream_top_q8_dual_radix4_b4_r3_synth_wrapper (R3 scheduler, isolated)",generic,MEASURED_BY_TOOL,11916,,,,,,,13727,,65743,22685,67130,146167,114092
+wrap-r3,"membrane_quant_stream_top_q8_dual_radix4_b4_r3_synth_wrapper (R3 scheduler, isolated)",ecp5,UNAVAILABLE,,,,,,,,,,,,,,

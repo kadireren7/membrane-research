@@ -1,0 +1,35 @@
+{
+  "_label": "MEASURED -- real 3-way Verilator RTL cosimulation (membrane_fp_divider vs. fp32_div_iterative_exact vs. fp32_div_iterative_radix4_exact), not estimated",
+  "experiment": "EXP-FPGA-DIV-001",
+  "phase": "B4",
+  "test": "rtl/tb/tb_fp32_div_iterative_radix4_exact.cpp",
+  "scope": "4,456,685 total cases: 4,096 boundary sweep + 576 specials-cross-product + 12 powers-of-two + 4,200,000 random denominator (numerator=1.0f -- reproduces Phase B2's own 2,200,000-case count plus >=2,000,000 additional, task item 4's explicit ask) + 200,000 random-both-operands + 50,000 real Q4 runtime d-distribution + 1 reset-recovery follow-up + 2,000 back-to-back throughput cases. Random reset timing (mid-ITER, randomized offset 1-6 cycles into B4's own shorter iteration), random out_ready backpressure on both candidates independently, per-case 10,000-cycle timeout/deadlock bound (never hit).",
+  "result": {
+    "total_cases": 4456685,
+    "mismatches_baseline_vs_b2": 0,
+    "mismatches_baseline_vs_b4": 0,
+    "mismatches_b2_vs_b4": 0,
+    "accepted_inputs": 4456685,
+    "retired_outputs_b2": 4456685,
+    "retired_outputs_b4": 4456685,
+    "reset_recovery_fails": 0,
+    "deadlock_or_timeout": "none",
+    "wall_time_s": 29.0
+  },
+  "latency_cycles": {
+    "b2_radix2": { "min": 2, "mean": 28.139, "max": 48, "no_backpressure": { "min": 2, "mean": 27.890, "max": 28, "n": 3350018 } },
+    "b4_radix4": { "min": 2, "mean": 15.194, "max": 35, "no_backpressure": { "min": 2, "mean": 14.945, "max": 15, "n": 3350018 } }
+  },
+  "initiation_interval": {
+    "b2_radix2_measured": 29.000,
+    "b4_radix4": "not independently measured this run -- see note",
+    "note": "B2's II was measured directly from a dedicated back-to-back stage (2,000 cases, 58,000 cycles, no backpressure) in the shared 3-DUT loop. That loop only issues the NEXT case once BOTH B2 and B4 have retired, so B4's own recorded per-case latency here is real and correct, but its back-to-back cadence in this specific stage is paced by B2 (the slower of the two), not purely by B4's own throughput. B4's own II is nonetheless well-determined structurally: like B2, B4 asserts in_ready only from its IDLE state (single transaction in flight by construction, see fp32_div_iterative_radix4_exact.sv's own header), so II == general-path latency by the same argument used for B2 -- consistent with the no-backpressure general-path latency measured directly above (min=max=15 cycles, n=3,350,018 real cases, not just the 2,000-case throughput stage)."
+  },
+  "early_out_special_cases": {
+    "note": "Not tracked as a separate running counter in this report. Structurally guaranteed correct by construction (both B2 and B4 share the identical, verbatim-copied is_special decode/priority-chain logic from membrane_fp_divider.sv -- see fp32_div_iterative_radix4_exact.sv's own header) and empirically covered by the boundary sweep (4,096 cases spanning every exponent value, including 0x00 and 0xFF), the full specials x specials cross product (576 cases, every NaN/Inf/zero combination), and the min=2 entries in both candidates' latency histograms above (the EARLY_OUT_SPECIAL 2-cycle path) -- all with 0 mismatches against membrane_fp_divider.sv."
+  },
+  "comparison_to_b2_own_committed_differential_result": {
+    "b2_own_run_b2_only_2456685_cases_0_mismatches": "phase-b2.md / results/b2-differential.json",
+    "this_run_reproduces_and_exceeds_that_scope": "same category structure (boundary/specials/pow2/random-num1/random-general/q4-dist/reset/throughput), random-num1 count raised from 2,200,000 to 4,200,000 (+2,000,000, task item 4's explicit ask), PLUS a third simultaneous comparison (B4) -- total this run: 4,456,685 cases vs. B2's own 2,456,685"
+  }
+}

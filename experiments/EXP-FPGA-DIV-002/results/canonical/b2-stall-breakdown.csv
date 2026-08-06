@@ -1,0 +1,13 @@
+profile,mode,baseline_mean_latency_cyc,b1_mean_latency_cyc,b2_depth1_mean_latency_cyc,b2_depth2_mean_latency_cyc,b1_avoidable_collateral_stall_cyc,b1_avoidable_collateral_stall_pct,b2_depth1_residual_collateral_cyc,b2_depth1_residual_collateral_pct,b2_depth1_stall_eliminated_cyc,b2_depth1_pct_of_b1_collateral_eliminated,b2_depth1_meets_10pct_threshold,b2_depth2_residual_collateral_cyc,b2_depth2_residual_collateral_pct,b2_depth2_stall_eliminated_cyc,b2_depth2_pct_of_b1_collateral_eliminated,b2_depth2_meets_10pct_threshold
+uniform_random_modes,Q8_DEC,110.065,195.093,138.305,133.418,85.028,77.25,28.24,25.66,56.788,66.79,NO,23.353,21.22,61.675,72.53,NO
+uniform_random_modes,Q4_ENC,121.852,206.942,146.311,142.34,85.09,69.83,24.459,20.07,60.631,71.26,NO,20.488,16.81,64.602,75.92,NO
+uniform_random_modes,Q4_DEC,110.049,194.633,137.808,133.226,84.584,76.86,27.759,25.22,56.825,67.18,NO,23.177,21.06,61.407,72.6,NO
+10pct_Q8ENC_90pct_other,Q8_DEC,125.066,160.659,120.286,115.429,35.593,28.46,-4.78,-3.82,40.373,113.43,YES,-9.637,-7.71,45.23,127.08,YES
+10pct_Q8ENC_90pct_other,Q4_ENC,137.433,173.531,130.335,126.601,36.098,26.27,-7.098,-5.16,43.196,119.66,YES,-10.832,-7.88,46.93,130.01,YES
+10pct_Q8ENC_90pct_other,Q4_DEC,125.091,160.855,119.886,115.192,35.764,28.59,-5.205,-4.16,40.969,114.55,YES,-9.899,-7.91,45.663,127.68,YES
+25pct_Q8ENC_75pct_other,Q8_DEC,109.815,195.741,137.523,132.644,85.926,78.25,27.708,25.23,58.218,67.75,NO,22.829,20.79,63.097,73.43,NO
+25pct_Q8ENC_75pct_other,Q4_ENC,121.938,207.593,145.874,141.44,85.655,70.24,23.936,19.63,61.719,72.06,NO,19.502,15.99,66.153,77.23,NO
+25pct_Q8ENC_75pct_other,Q4_DEC,109.628,195.61,137.531,132.417,85.982,78.43,27.903,25.45,58.079,67.55,NO,22.789,20.79,63.193,73.5,NO
+realistic_reconstructed_mix_SIMULATED,Q8_DEC,60.258,134.996,101.73,98.469,74.738,124.03,41.472,68.82,33.266,44.51,NO,38.211,63.41,36.527,48.87,NO
+realistic_reconstructed_mix_SIMULATED,Q4_ENC,68.6,147.516,108.071,104.808,78.916,115.04,39.471,57.54,39.445,49.98,NO,36.208,52.78,42.708,54.12,NO
+realistic_reconstructed_mix_SIMULATED,Q4_DEC,60.234,135.247,101.796,98.365,75.013,124.54,41.562,69.0,33.451,44.59,NO,38.131,63.3,36.882,49.17,NO

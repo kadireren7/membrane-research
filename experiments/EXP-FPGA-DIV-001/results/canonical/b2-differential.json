@@ -1,0 +1,45 @@
+{
+  "_label": "MEASURED -- real Verilator RTL-vs-RTL cosimulation, not estimated",
+  "experiment": "EXP-FPGA-DIV-001",
+  "phase": "B2",
+  "test": "rtl/tb/tb_fp32_div_iterative_exact.cpp",
+  "reference_rtl": "rtl/membrane_fp_divider.sv (unmodified production divider)",
+  "candidate_rtl": "rtl/experimental/fp_div/fp32_div_iterative_exact.sv",
+  "operation_under_test": "1.0f / d (Q4_0's id = 1/d), plus general-purpose a/b coverage",
+  "toolchain": {
+    "verilator": "tools/.local-verilator (same version used by Phase A/B1)",
+    "compiler": "g++ 13.3.0 -O2 -std=c++17"
+  },
+  "invocation": "build-exp-fpga-div-001/tb_fp32_div_iterative_exact 2200000 200000 50000",
+  "case_breakdown": {
+    "denominator_boundary_sweep_num1": 4096,
+    "specials_x_specials_cross_product": 576,
+    "powers_of_two_num1": 12,
+    "random_denominator_num1_real_q4_op": 2200000,
+    "random_both_operands_general_purpose": 200000,
+    "q4_runtime_d_distribution_num1": 50000,
+    "reset_recovery_followup_case": 1,
+    "throughput_measurement_general_path": 2000
+  },
+  "results": {
+    "total_cases": 2456685,
+    "exact_matches": 2456685,
+    "mismatches": 0,
+    "accepted_inputs": 2456685,
+    "retired_outputs": 2456685,
+    "reset_recovery_fails": 0,
+    "wall_time_s": 10.3
+  },
+  "latency_cycles": {
+    "all_cases_incl_backpressure_stalls": { "min": 3, "mean": 29.134, "max": 48 },
+    "no_backpressure": { "min": 3, "mean": 28.886, "max": 29, "n": 1850018 },
+    "note": "min=3 is the EARLY_OUT_SPECIAL path (NaN/Inf/zero operands, no iteration needed); max=29 (no-backpressure) is the full general-path iterative-division latency (26 restoring-division cycles + 1 issue cycle + 1 round cycle + 1 retire-wait cycle, OUT_REG_DEPTH=0); backpressure-affected cases extend measured latency up to 48 cycles purely from held-low out_ready, not from extra computation."
+  },
+  "initiation_interval": {
+    "value_cycles": 29.0,
+    "measured_via": "2000 back-to-back general-path transactions (58000 cycles / 2000 txn), no backpressure",
+    "note": "single in-flight design point: II == general-path latency, by construction (task spec explicitly does not target II=1 for this first variant)"
+  },
+  "throughput_txn_per_cycle": 0.034483,
+  "decision_input": "0 mismatches across 2,456,685 cases (including full specials x specials cross product, exhaustive denominator exponent/mantissa boundary sweep, real q4 runtime d-distribution, and 2.2M+ uniform random cases) -- exact bit-for-bit parity achieved against membrane_fp_divider.sv for the 1.0f/d operation. Integration into q4_scale (Phase B2 Q4 path) is authorized by this result per the task's own gating rule."
+}

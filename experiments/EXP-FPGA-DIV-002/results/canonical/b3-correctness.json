@@ -1,0 +1,55 @@
+{
+  "baseline": {
+    "label": "membrane_quant_stream_top (baseline)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8042500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 5.477
+  },
+  "b1": {
+    "label": "Phase B1 (full serialization)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8042500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 11.407
+  },
+  "b2": {
+    "label": "Phase B2 (scheduler-improved)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8042500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.831
+  },
+  "b3l2": {
+    "label": "Phase B3 (lookahead=2)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8042500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.671
+  },
+  "b3l4": {
+    "label": "Phase B3 (lookahead=4)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8042500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.575
+  },
+  "b3split": {
+    "label": "Phase B3 (split queues)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8042500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.302
+  },
+  "_meta": {
+    "tool": "Verilator 5.x cosim, tb_top_verilator_q8_b3_variant.cpp",
+    "classification": "SIMULATED (Verilator cosim against golden C reference); not a real FPGA measurement",
+    "total_variants_failed": 0
+  }
+}

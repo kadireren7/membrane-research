@@ -1,0 +1,8 @@
+variant,reorder_depth,transactions,fails,dropped,duplicated,deadlock_timeout,total_cycles,overall_cycles_per_transaction,q8_enc_mean_latency,q8_dec_mean_latency,q4_enc_mean_latency,q4_dec_mean_latency,q8_enc_collateral_vs_baseline,q8_dec_collateral_vs_baseline,q4_dec_collateral_vs_baseline,reorder_high_water_mark,stall_pct_depth_bound,stall_pct_q4_divider_busy,stall_pct_out_fifo,simultaneous_completion_cycles,wall_time_s
+baseline,n/a,1110000,0,0,0,none,3121310,2.812,27.607,17.889,40.905,17.987,1.000,1.000,1.000,n/a,n/a,n/a,n/a,n/a,16.0
+b1,n/a,1110000,0,0,0,none,3121310,2.812,27.607,17.889,40.905,17.987,1.000,1.000,1.000,n/a,n/a,n/a,n/a,n/a,15.1
+b2,n/a,1110000,0,0,0,none,12648122,11.395,71.229,37.127,442.465,37.237,2.580,2.075,2.070,n/a,n/a,n/a,n/a,n/a,53.6
+b3,1,1110000,0,0,0,none,17431973,15.704,185.990,166.101,467.070,166.067,6.737,9.285,9.233,1,93.63,0.00,0.00,0,66.1
+b3,2,1110000,0,0,0,none,13376102,12.051,116.164,93.528,439.114,93.554,4.208,5.229,5.202,2,32.26,59.44,0.00,0,50.9
+b3,4,1110000,0,0,0,none,12138835,10.936,65.579,36.590,435.370,36.667,2.376,2.045,2.039,4,6.75,76.50,0.00,629,45.9
+b3,8,1110000,0,0,0,none,12049662,10.856,64.606,35.538,434.885,35.443,2.341,1.987,1.971,8,1.08,79.73,0.00,296,46.7

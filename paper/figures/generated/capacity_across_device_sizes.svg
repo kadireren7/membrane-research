@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="480" viewBox="0 0 820 480">
+<rect x="0" y="0" width="820" height="480" fill="white"/>
+<text x="410.0" y="28" font-size="16" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="bold" fill="#111" >Effective capacity ratio vs. device size (8GiB host, exact-predictor)</text>
+<line x1="100" y1="55" x2="100" y2="390" stroke="#333" stroke-width="1" />
+<line x1="100" y1="390" x2="790" y2="390" stroke="#333" stroke-width="1" />
+<line x1="100" y1="55.0" x2="790" y2="55.0" stroke="#eee" stroke-width="1" />
+<line x1="100" y1="122.0" x2="790" y2="122.0" stroke="#eee" stroke-width="1" />
+<line x1="100" y1="189.0" x2="790" y2="189.0" stroke="#eee" stroke-width="1" />
+<line x1="100" y1="256.0" x2="790" y2="256.0" stroke="#eee" stroke-width="1" />
+<line x1="100" y1="323.0" x2="790" y2="323.0" stroke="#eee" stroke-width="1" />
+<line x1="100" y1="390.0" x2="790" y2="390.0" stroke="#eee" stroke-width="1" />
+<polyline points="100.0,345.4486603801826 445.0,300.9098563089358 790.0,211.80717706930102" fill="none" stroke="#4C78A8" stroke-width="2.5"/>
+<circle cx="100.0" cy="345.4486603801826" r="4" fill="#4C78A8"/>
+<circle cx="445.0" cy="300.9098563089358" r="4" fill="#4C78A8"/>
+<circle cx="790.0" cy="211.80717706930102" r="4" fill="#4C78A8"/>
+<text x="110" y="71" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#4C78A8" >SmolLM2-135M (fp16)</text>
+<polyline points="100.0,306.25 445.0,222.5 790.0,55.0" fill="none" stroke="#E45756" stroke-width="2.5"/>
+<circle cx="100.0" cy="306.25" r="4" fill="#E45756"/>
+<circle cx="445.0" cy="222.5" r="4" fill="#E45756"/>
+<circle cx="790.0" cy="55.0" r="4" fill="#E45756"/>
+<text x="110" y="87" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#E45756" >SmolLM2-135M (all-q8)</text>
+<polyline points="100.0,364.941438407424 445.0,339.8703412662775 790.0,289.740682532555" fill="none" stroke="#54A24B" stroke-width="2.5"/>
+<circle cx="100.0" cy="364.941438407424" r="4" fill="#54A24B"/>
+<circle cx="445.0" cy="339.8703412662775" r="4" fill="#54A24B"/>
+<circle cx="790.0" cy="289.740682532555" r="4" fill="#54A24B"/>
+<text x="110" y="103" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#54A24B" >SmolLM2-360M (fp16)</text>
+<polyline points="100.0,342.8788729232151 445.0,295.75774584643017 790.0,201.51549169286037" fill="none" stroke="#EECA3B" stroke-width="2.5"/>
+<circle cx="100.0" cy="342.8788729232151" r="4" fill="#EECA3B"/>
+<circle cx="445.0" cy="295.75774584643017" r="4" fill="#EECA3B"/>
+<circle cx="790.0" cy="201.51549169286037" r="4" fill="#EECA3B"/>
+<text x="110" y="119" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#EECA3B" >SmolLM2-360M (all-q8)</text>
+<text x="445.0" y="435" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >device size (1=512GiB, 2=1TiB, 3=2TiB)</text>
+<text x="25" y="222.5" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" transform="rotate(-90 25 222.5)">cap_effective_capacity_ratio</text>
+<text x="790" y="472" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#666" >Source: benchmarks/cxl-sim/unified-sweep.csv</text>
+</svg>

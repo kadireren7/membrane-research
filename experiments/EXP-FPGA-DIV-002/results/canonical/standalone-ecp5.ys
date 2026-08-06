@@ -1,0 +1,4 @@
+read_verilog -sv rtl/valid_delay_line.sv rtl/membrane_fp_divider.sv
+hierarchy -check -top membrane_fp_divider
+synth_ecp5 -top membrane_fp_divider
+stat

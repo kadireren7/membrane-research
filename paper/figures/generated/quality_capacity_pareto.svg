@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="460" viewBox="0 0 760 460">
+<rect x="0" y="0" width="760" height="460" fill="white"/>
+<text x="380.0" y="28" font-size="16" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="bold" fill="#111" >Quality (top-1 match %) vs. capacity ratio, by precision tier</text>
+<line x1="90" y1="55" x2="90" y2="370" stroke="#333" stroke-width="1" />
+<line x1="90" y1="370" x2="730" y2="370" stroke="#333" stroke-width="1" />
+<circle cx="296.95901202711354" cy="138.30578512396696" r="6" fill="#4C78A8"/>
+<text x="305.95901202711354" y="142.30578512396696" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >fp16</text>
+<circle cx="688.2072221326257" cy="138.30578512396696" r="6" fill="#4C78A8"/>
+<text x="697.2072221326257" y="142.30578512396696" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >all-q8</text>
+<circle cx="688.2072221326257" cy="294.5041322314049" r="6" fill="#4C78A8"/>
+<text x="697.2072221326257" y="298.5041322314049" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >safe-mixed (approx., see caption)</text>
+<circle cx="102.50780711657164" cy="138.30578512396696" r="6" fill="#E45756"/>
+<text x="111.50780711657164" y="142.30578512396696" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >fp16</text>
+<circle cx="322.6377058073218" cy="155.66115702479345" r="6" fill="#E45756"/>
+<text x="331.6377058073218" y="159.66115702479345" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >all-q8</text>
+<circle cx="322.6377058073218" cy="242.43801652892563" r="6" fill="#E45756"/>
+<text x="331.6377058073218" y="246.43801652892563" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >safe-mixed (approx., see caption)</text>
+<circle cx="100" cy="36" r="5" fill="#4C78A8"/>
+<text x="112" y="40" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-135M</text>
+<circle cx="100" cy="52" r="5" fill="#E45756"/>
+<text x="112" y="56" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-360M</text>
+<text x="410.0" y="415" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >cap_effective_capacity_ratio (8GiB host / 2TiB device)</text>
+<text x="20" y="212.5" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" transform="rotate(-90 20 212.5)">top-1 match rate (%, mean over recall/distractor/longcontext prompts)</text>
+<text x="730" y="452" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#666" >Sources: unified-sweep.csv + quality-reverify/*.jsonl</text>
+</svg>

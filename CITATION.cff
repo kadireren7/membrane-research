@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: >-
+  If you use this research record (experiment methodology, RTL,
+  simulators, or reported results), please cite it as below. For the
+  maintained MEMBRANE runtime itself, cite kadireren7/membrane instead.
+title: "MEMBRANE Research: experiment record, simulators, and exploratory RTL"
+type: software
+authors:
+  - family-names: "Altıntaş"
+    given-names: "Kadir Eren"
+repository-code: "https://github.com/kadireren7/membrane-research"
+license: Apache-2.0
+abstract: >-
+  Full research record for MEMBRANE, a mixed-precision KV-cache and
+  exact-retrieval decision engine for LLM inference: phased experiment
+  documentation, out-of-core and CXL/near-memory simulators, exploratory
+  FPGA divider/scheduler RTL and cosimulation testbenches, the project
+  paper, and outreach materials. Every result in this repository is
+  labeled MEASURED_BY_TOOL, SIMULATED, ESTIMATED, or UNAVAILABLE — see
+  the top-level README and each experiment's own methodology.md for the
+  classification discipline. This repository holds research evidence and
+  exploratory code only; the maintained, production runtime lives in
+  kadireren7/membrane and is not duplicated here.
+identifiers:
+  - type: url
+    value: "https://github.com/kadireren7/membrane"
+    description: "The maintained MEMBRANE runtime this research record supports"
+preferred-citation:
+  type: software
+  title: "MEMBRANE Research: experiment record, simulators, and exploratory RTL"
+  authors:
+    - family-names: "Altıntaş"
+      given-names: "Kadir Eren"
+  repository-code: "https://github.com/kadireren7/membrane-research"
+  license: Apache-2.0

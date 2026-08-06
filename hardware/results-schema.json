@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kadireren7/membrane/hardware/results-schema.json",
+  "title": "MEMBRANE physical hardware result record",
+  "description": "Schema for every real FPGA/CXL hardware measurement produced by hardware/experiment-protocol.md. No conformant record with result_label=REAL_HARDWARE exists in this repository as of Phase 7.3 -- no physical hardware has been used. See hardware/results-example.json for a schema-conformant but explicitly fictional illustration (result_label=DOCUMENTED_EXAMPLE, never REAL_HARDWARE).",
+  "type": "object",
+  "required": [
+    "board", "fpga", "toolchain", "bitstream_hash", "clock_mhz",
+    "pcie_generation", "pcie_width", "host_cpu", "operation", "precision",
+    "batch_size", "queue_depth", "bytes", "throughput_bytes_per_sec",
+    "latency_ns", "cpu_utilization_pct", "board_power_watts",
+    "temperature_celsius", "parity_failures", "timestamp_utc", "result_label"
+  ],
+  "properties": {
+    "board": {
+      "type": "string",
+      "description": "Board model, e.g. 'Alveo U250'. Must match an entry in hardware/board-targets.md or be a disclosed deviation."
+    },
+    "fpga": {
+      "type": "string",
+      "description": "FPGA part number, e.g. 'XCU250-FIGD2104-2L-E'."
+    },
+    "toolchain": {
+      "type": "string",
+      "description": "Vendor toolchain + version, e.g. 'Vivado 2024.1' or 'Quartus Prime Pro 23.4'."
+    },
+    "bitstream_hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the exact bitstream file used for this measurement (hardware/experiment-protocol.md step 3)."
+    },
+    "clock_mhz": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Real, measured/achieved clock frequency -- never the 100/200/300 MHz assumption from docs/phase5-synthesizable-fpga.md unless independently confirmed via a real Level A place-and-route run."
+    },
+    "pcie_generation": {
+      "type": "integer",
+      "enum": [3, 4, 5],
+      "description": "PCIe generation actually in use for this measurement."
+    },
+    "pcie_width": {
+      "type": "integer",
+      "enum": [1, 2, 4, 8, 16],
+      "description": "PCIe lane width actually in use (e.g. 16 for x16)."
+    },
+    "host_cpu": {
+      "type": "string",
+      "description": "Host CPU model string, e.g. from /proc/cpuinfo."
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["q8_encode", "q8_decode", "q4_encode", "q4_decode", "mixed"],
+      "description": "Which of membrane_quant_stream_top's four modes (or a mixed-mode run) this record measures."
+    },
+    "precision": {
+      "type": "string",
+      "enum": ["q8_0", "q4_0"],
+      "description": "Target quantization format for this operation."
+    },
+    "batch_size": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Blocks per DMA descriptor (hardware/experiment-protocol.md step 10)."
+    },
+    "queue_depth": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "In-flight descriptors (hardware/experiment-protocol.md step 9)."
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total bytes moved during this measurement window."
+    },
+    "throughput_bytes_per_sec": {
+      "type": "number",
+      "minimum": 0
+    },
+    "latency_ns": {
+      "type": "object",
+      "required": ["p50", "p95", "p99"],
+      "properties": {
+        "p50": { "type": "number", "minimum": 0 },
+        "p95": { "type": "number", "minimum": 0 },
+        "p99": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "cpu_utilization_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Host CPU utilization during the DMA transfer (hardware/experiment-protocol.md step 8/11)."
+    },
+    "board_power_watts": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Real vendor-sensor power reading -- never an estimate (Level A's pre-bitstream power estimate is a different, separately-labeled number, not this field)."
+    },
+    "temperature_celsius": {
+      "type": "number",
+      "description": "Real vendor-sensor junction/board temperature reading."
+    },
+    "parity_failures": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of bit-exactness mismatches vs. the CPU reference in this measurement's block set (hardware/experiment-protocol.md steps 6-7). Must be 0 for any 'hardware bit-exact' claim."
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "result_label": {
+      "type": "string",
+      "enum": ["REAL_HARDWARE", "DOCUMENTED_EXAMPLE"],
+      "description": "REAL_HARDWARE: an actual measurement from real physical hardware, produced by hardware/experiment-protocol.md. DOCUMENTED_EXAMPLE: a fictional, schema-conformant illustration only (see hardware/results-example.json) -- MUST NEVER be cited as evidence of a real result anywhere in paper/, README.md, or outreach/."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional free-text notes (e.g. a disclosed deviation from board-targets.md, or an explanation of a non-zero parity_failures count)."
+    }
+  },
+  "additionalProperties": false
+}

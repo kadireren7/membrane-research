@@ -1,0 +1,64 @@
+{
+  "baseline": {
+    "label": "membrane_quant_stream_top (baseline)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 5.471
+  },
+  "b1": {
+    "label": "Phase B1 (full serialization)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 11.264
+  },
+  "b2": {
+    "label": "Phase B2 (scheduler-improved)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.674
+  },
+  "b3split": {
+    "label": "Phase B3 (split queues, this phase's own baseline)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.133
+  },
+  "r1": {
+    "label": "Phase B4 R1 (per-class single completion slots)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.823
+  },
+  "r2": {
+    "label": "Phase B4 R2 (two-entry completion queue)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 9.39
+  },
+  "r3": {
+    "label": "Phase B4 R3 (direct-retire bypass)",
+    "classification": "MEASURED_BY_TOOL",
+    "transactions_checked": 8382500,
+    "fails": 0,
+    "result": "PASS",
+    "overall_cycles_per_txn": 8.721
+  },
+  "_meta": {
+    "tool": "Verilator 5.x cosim, tb_top_verilator_q8_b4_variant.cpp",
+    "classification": "SIMULATED (Verilator cosim against golden C reference); not a real FPGA measurement",
+    "total_variants_failed": 0,
+    "reference_variant": "b3split"
+  }
+}

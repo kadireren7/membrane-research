@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="480" viewBox="0 0 900 480">
+<rect x="0" y="0" width="900" height="480" fill="white"/>
+<text x="450.0" y="28" font-size="16" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="bold" fill="#111" >Mean bytes/token by comparison (8GiB host / 2TiB device / all-Q8)</text>
+<line x1="90" y1="55" x2="90" y2="390" stroke="#333" stroke-width="1" />
+<line x1="90" y1="390" x2="870" y2="390" stroke="#333" stroke-width="1" />
+<line x1="90" y1="390.0" x2="870" y2="390.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="394.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >2,361,277</text>
+<line x1="90" y1="323.0" x2="870" y2="323.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="327.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >11,088,060</text>
+<line x1="90" y1="256.0" x2="870" y2="256.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="260.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >52,067,201</text>
+<line x1="90" y1="189.00000000000009" x2="870" y2="189.00000000000009" stroke="#ddd" stroke-width="1" />
+<text x="82" y="193.00000000000009" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >244,496,644</text>
+<line x1="90" y1="122.0" x2="870" y2="122.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="126.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >1,148,104,913</text>
+<line x1="90" y1="55.0" x2="870" y2="55.0" stroke="#ddd" stroke-width="1" />
+<text x="82" y="59.0" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#111" >5,391,259,648</text>
+<text x="20" y="222.5" font-size="12" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" transform="rotate(-90 20 222.5)">mean bytes/token (log scale)</text>
+<rect x="108.57142857142857" y="109.94074179048272" width="31.571428571428573" height="280.0592582095173" fill="#4C78A8" stroke="none"/>
+<rect x="145.71428571428572" y="85.02642442461433" width="31.571428571428573" height="304.97357557538567" fill="#E45756" stroke="none"/>
+<text x="145.71428571428572" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >full-scan
+(analytical)</text>
+<rect x="220.00000000000003" y="137.28678723429846" width="31.571428571428573" height="252.71321276570154" fill="#4C78A8" stroke="none"/>
+<rect x="257.14285714285717" y="112.37246986838579" width="31.571428571428573" height="277.6275301316142" fill="#E45756" stroke="none"/>
+<text x="257.14285714285717" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >compressed
+(analytical)</text>
+<rect x="331.42857142857144" y="359.9735755753856" width="31.571428571428573" height="30.02642442461439" fill="#4C78A8" stroke="none"/>
+<rect x="368.5714285714286" y="345.0759101038152" width="31.571428571428573" height="44.924089896184796" fill="#E45756" stroke="none"/>
+<text x="368.5714285714286" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >exact-no-prefetch</text>
+<rect x="442.85714285714283" y="359.9735755753856" width="31.571428571428573" height="30.02642442461439" fill="#4C78A8" stroke="none"/>
+<rect x="480.0" y="345.0759101038152" width="31.571428571428573" height="44.924089896184796" fill="#E45756" stroke="none"/>
+<text x="480.0" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >exact-predictor</text>
+<rect x="554.2857142857143" y="336.6015257986858" width="31.571428571428573" height="53.39847420131417" fill="#4C78A8" stroke="none"/>
+<rect x="591.4285714285716" y="323.3122371853191" width="31.571428571428573" height="66.68776281468092" fill="#E45756" stroke="none"/>
+<text x="591.4285714285714" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >exact-predictor-prefetch</text>
+<rect x="665.7142857142857" y="336.6015257986858" width="31.571428571428573" height="53.39847420131417" fill="#4C78A8" stroke="none"/>
+<rect x="702.8571428571429" y="323.3122371853191" width="31.571428571428573" height="66.68776281468092" fill="#E45756" stroke="none"/>
+<text x="702.8571428571428" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >exact-predictor-coalescing</text>
+<rect x="777.1428571428571" y="359.9708668445289" width="31.571428571428573" height="30.029133155471072" fill="#4C78A8" stroke="none"/>
+<rect x="814.2857142857142" y="345.0747636234356" width="31.571428571428573" height="44.925236376564385" fill="#E45756" stroke="none"/>
+<text x="814.2857142857142" y="408" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="middle" font-weight="normal" fill="#111" >oracle</text>
+<rect x="90" y="25" width="12" height="12" fill="#4C78A8" stroke="none"/>
+<text x="106" y="35" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-135M</text>
+<rect x="234" y="25" width="12" height="12" fill="#E45756" stroke="none"/>
+<text x="250" y="35" font-size="11" font-family="Helvetica,Arial,sans-serif" text-anchor="start" font-weight="normal" fill="#111" >SmolLM2-360M</text>
+<text x="870" y="472" font-size="10" font-family="Helvetica,Arial,sans-serif" text-anchor="end" font-weight="normal" fill="#666" >Source: benchmarks/cxl-sim/unified-sweep.csv</text>
+</svg>

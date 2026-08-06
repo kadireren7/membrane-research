@@ -1,0 +1,6 @@
+{
+  "trace_file": "benchmarks/cxl-sim/traces/SmolLM2-135M-Instruct-f16-long.attntrace",
+  "sha256": "bd17dd6220447209f89c9cf84d1812e880c00523c15df969f3fc9f61ee58084a",
+  "file_size_bytes": 13331131,
+  "reproduce_command": "./build-llama/tools/membrane-kv-attn-trace-capture/membrane-kv-attn-trace-capture --model models/SmolLM2-135M-Instruct-f16.gguf --prompt-file benchmarks/kv/prompts/longcontext.txt --out benchmarks/cxl-sim/traces/SmolLM2-135M-Instruct-f16-long.attntrace --n-tokens 512 --gen-steps 4096 --block-size 32 --top-k 8"
+}

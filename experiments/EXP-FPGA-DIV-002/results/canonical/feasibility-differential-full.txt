@@ -1,0 +1,128 @@
+=== q8_scale divider-pair feasibility differential report ===
+total cases:   2050239
+wall_time_s:   3.5
+cycles:        10251196
+
+--- candidate: B: reconstructed 1/d (vs. current id) ---
+  total:        2050239
+  exact_match:  1536806 (74.957407%)
+  mismatch:     513433 (25.042593%)
+  max_ulp:      2139095040
+  mismatch categories:
+    boundary_sweep           30
+    normal_largest_finite    1
+    pow2_sweep               3
+    q8_runtime_amax_dist     10585
+    random_amax_magnitude    502812
+    zero_neg                 1
+    zero_pos                 1
+  first 25 mismatch examples:
+    amax=0x00000000 reference=0x00000000 candidate=0x7F800000 category=zero_pos
+    amax=0x80000000 reference=0x00000000 candidate=0xFF800000 category=zero_neg
+    amax=0x7F7FFFFF reference=0x02FE0001 candidate=0x02FE0000 category=normal_largest_finite
+    amax=0x00000000 reference=0x00000000 candidate=0x7F800000 category=boundary_sweep
+    amax=0x80000000 reference=0x00000000 candidate=0xFF800000 category=boundary_sweep
+    amax=0x08FFFFFF reference=0x797E0001 candidate=0x797E0000 category=boundary_sweep
+    amax=0x88FFFFFF reference=0xF97E0001 candidate=0xF97E0000 category=boundary_sweep
+    amax=0x117FFFFF reference=0x70FE0001 candidate=0x70FE0000 category=boundary_sweep
+    amax=0x917FFFFF reference=0xF0FE0001 candidate=0xF0FE0000 category=boundary_sweep
+    amax=0x19FFFFFF reference=0x687E0001 candidate=0x687E0000 category=boundary_sweep
+    amax=0x99FFFFFF reference=0xE87E0001 candidate=0xE87E0000 category=boundary_sweep
+    amax=0x227FFFFF reference=0x5FFE0001 candidate=0x5FFE0000 category=boundary_sweep
+    amax=0xA27FFFFF reference=0xDFFE0001 candidate=0xDFFE0000 category=boundary_sweep
+    amax=0x2AFFFFFF reference=0x577E0001 candidate=0x577E0000 category=boundary_sweep
+    amax=0xAAFFFFFF reference=0xD77E0001 candidate=0xD77E0000 category=boundary_sweep
+    amax=0x337FFFFF reference=0x4EFE0001 candidate=0x4EFE0000 category=boundary_sweep
+    amax=0xB37FFFFF reference=0xCEFE0001 candidate=0xCEFE0000 category=boundary_sweep
+    amax=0x3BFFFFFF reference=0x467E0001 candidate=0x467E0000 category=boundary_sweep
+    amax=0xBBFFFFFF reference=0xC67E0001 candidate=0xC67E0000 category=boundary_sweep
+    amax=0x447FFFFF reference=0x3DFE0001 candidate=0x3DFE0000 category=boundary_sweep
+    amax=0xC47FFFFF reference=0xBDFE0001 candidate=0xBDFE0000 category=boundary_sweep
+    amax=0x4CFFFFFF reference=0x357E0001 candidate=0x357E0000 category=boundary_sweep
+    amax=0xCCFFFFFF reference=0xB57E0001 candidate=0xB57E0000 category=boundary_sweep
+    amax=0x557FFFFF reference=0x2CFE0001 candidate=0x2CFE0000 category=boundary_sweep
+    amax=0xD57FFFFF reference=0xACFE0001 candidate=0xACFE0000 category=boundary_sweep
+
+--- candidate: B: reconstructed 1/id (vs. current d) ---
+  total:        2050239
+  exact_match:  1472765 (71.833820%)
+  mismatch:     577474 (28.166180%)
+  max_ulp:      2139095040
+  mismatch categories:
+    boundary_sweep           2
+    pow2_sweep               1
+    q8_runtime_amax_dist     16176
+    random_amax_magnitude    561293
+    zero_neg                 1
+    zero_pos                 1
+  first 25 mismatch examples:
+    amax=0x00000000 reference=0x00000000 candidate=0x7F800000 category=zero_pos
+    amax=0x80000000 reference=0x80000000 candidate=0x7F800000 category=zero_neg
+    amax=0x00000000 reference=0x00000000 candidate=0x7F800000 category=boundary_sweep
+    amax=0x80000000 reference=0x80000000 candidate=0x7F800000 category=boundary_sweep
+    amax=0x00000000 reference=0x00000000 candidate=0x7F800000 category=pow2_sweep
+    amax=0x08C35970 reference=0x0544E336 candidate=0x0544E337 category=random_amax_magnitude
+    amax=0x6E3A8157 reference=0x6ABBF94A candidate=0x6ABBF949 category=random_amax_magnitude
+    amax=0x71BDE51B reference=0x6E3F63E3 candidate=0x6E3F63E2 category=random_amax_magnitude
+    amax=0x6328A1CC reference=0x5FA9F5B7 candidate=0x5FA9F5B8 category=random_amax_magnitude
+    amax=0x6EC1979A reference=0x6B431DD6 candidate=0x6B431DD5 category=random_amax_magnitude
+    amax=0x37E3D61F reference=0x3465A162 candidate=0x3465A161 category=random_amax_magnitude
+    amax=0x0BFAD319 reference=0x087CCCB2 candidate=0x087CCCB3 category=random_amax_magnitude
+    amax=0x46D57EC5 reference=0x43572D1F candidate=0x43572D20 category=random_amax_magnitude
+    amax=0x7F7D1EBD reference=0x7BFF1CF7 candidate=0x7BFF1CF6 category=random_amax_magnitude
+    amax=0x193223D2 reference=0x15B38AE8 candidate=0x15B38AE7 category=random_amax_magnitude
+    amax=0x716793F0 reference=0x6DE966BD candidate=0x6DE966BE category=random_amax_magnitude
+    amax=0x54E26B13 reference=0x5164337A candidate=0x51643379 category=random_amax_magnitude
+    amax=0x5896621B reference=0x5517913D candidate=0x5517913E category=random_amax_magnitude
+    amax=0x11B6EF76 reference=0x0E386036 candidate=0x0E386037 category=random_amax_magnitude
+    amax=0x186831B4 reference=0x14EA05BF candidate=0x14EA05C0 category=random_amax_magnitude
+    amax=0x3A6AAD16 reference=0x36EC8622 candidate=0x36EC8623 category=random_amax_magnitude
+    amax=0x1266DFA4 reference=0x0EE8B106 candidate=0x0EE8B107 category=random_amax_magnitude
+    amax=0x76096B37 reference=0x728A8037 candidate=0x728A8038 category=random_amax_magnitude
+    amax=0x4CFB4ACB reference=0x497D4556 candidate=0x497D4555 category=random_amax_magnitude
+    amax=0x7F5FC785 reference=0x7BE18A9A candidate=0x7BE18A9B category=random_amax_magnitude
+
+--- candidate: C: constant-reciprocal amax*(1/127) (vs. current d) ---
+  total:        2050239
+  exact_match:  1957196 (95.461846%)
+  mismatch:     93043 (4.538154%)
+  max_ulp:      1
+  mismatch categories:
+    boundary_sweep           28
+    normal_largest_finite    1
+    q8_runtime_amax_dist     2391
+    random_amax_magnitude    90623
+  first 25 mismatch examples:
+    amax=0x7F7FFFFF reference=0x7C010204 candidate=0x7C010203 category=normal_largest_finite
+    amax=0x08FFFFFF reference=0x05810204 candidate=0x05810203 category=boundary_sweep
+    amax=0x88FFFFFF reference=0x85810204 candidate=0x85810203 category=boundary_sweep
+    amax=0x117FFFFF reference=0x0E010204 candidate=0x0E010203 category=boundary_sweep
+    amax=0x917FFFFF reference=0x8E010204 candidate=0x8E010203 category=boundary_sweep
+    amax=0x19FFFFFF reference=0x16810204 candidate=0x16810203 category=boundary_sweep
+    amax=0x99FFFFFF reference=0x96810204 candidate=0x96810203 category=boundary_sweep
+    amax=0x227FFFFF reference=0x1F010204 candidate=0x1F010203 category=boundary_sweep
+    amax=0xA27FFFFF reference=0x9F010204 candidate=0x9F010203 category=boundary_sweep
+    amax=0x2AFFFFFF reference=0x27810204 candidate=0x27810203 category=boundary_sweep
+    amax=0xAAFFFFFF reference=0xA7810204 candidate=0xA7810203 category=boundary_sweep
+    amax=0x337FFFFF reference=0x30010204 candidate=0x30010203 category=boundary_sweep
+    amax=0xB37FFFFF reference=0xB0010204 candidate=0xB0010203 category=boundary_sweep
+    amax=0x3BFFFFFF reference=0x38810204 candidate=0x38810203 category=boundary_sweep
+    amax=0xBBFFFFFF reference=0xB8810204 candidate=0xB8810203 category=boundary_sweep
+    amax=0x447FFFFF reference=0x41010204 candidate=0x41010203 category=boundary_sweep
+    amax=0xC47FFFFF reference=0xC1010204 candidate=0xC1010203 category=boundary_sweep
+    amax=0x4CFFFFFF reference=0x49810204 candidate=0x49810203 category=boundary_sweep
+    amax=0xCCFFFFFF reference=0xC9810204 candidate=0xC9810203 category=boundary_sweep
+    amax=0x557FFFFF reference=0x52010204 candidate=0x52010203 category=boundary_sweep
+    amax=0xD57FFFFF reference=0xD2010204 candidate=0xD2010203 category=boundary_sweep
+    amax=0x5DFFFFFF reference=0x5A810204 candidate=0x5A810203 category=boundary_sweep
+    amax=0xDDFFFFFF reference=0xDA810204 candidate=0xDA810203 category=boundary_sweep
+    amax=0x667FFFFF reference=0x63010204 candidate=0x63010203 category=boundary_sweep
+    amax=0xE67FFFFF reference=0xE3010204 candidate=0xE3010203 category=boundary_sweep
+
+=== summary ===
+current d = amax/127 and current id = 127/amax are the PRODUCTION reference (unmodified).
+B (1/d matches id):     1536806/2050239 exact (74.957407%)
+B (1/id matches d):     1472765/2050239 exact (71.833820%)
+C (amax*(1/127) matches d):  1957196/2050239 exact (95.461846%)
+
+DONE: q8_scale feasibility differential, 2050239/2050239 planned cases completed

@@ -1,0 +1,4 @@
+read_verilog -sv rtl/membrane_fp_pkg.sv rtl/valid_delay_line.sv rtl/membrane_fp_divider.sv rtl/q8_scale.sv
+hierarchy -check -top q8_scale
+synth_ecp5 -top q8_scale
+stat

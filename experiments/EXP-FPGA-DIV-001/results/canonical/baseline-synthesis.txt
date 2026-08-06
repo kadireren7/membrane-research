@@ -1,0 +1,155 @@
+EXP-FPGA-DIV-001 -- baseline Yosys synthesis of membrane_fp_divider
+=====================================================================
+
+Status: REAL, freshly reproduced this session (not copied from an old
+log). Same yosys binary/version this repository has used before
+(tools/.local-yosys, Yosys 0.33, git sha1 2584903a060).
+
+No place-and-route tool is available in this environment (no root, not
+apt-packaged) -- there is NO real Fmax/timing-closure result anywhere
+in this file. Everything below is a technology-mapped or generic cell
+COUNT, not a working clock-frequency claim. Labeled per this
+experiment's REAL/SIMULATED/ESTIMATED/UNAVAILABLE convention:
+MEASURED below.
+
+Environment
+-----------
+Host: this project's own memory-constrained development machine
+(5.6 GiB RAM, see prior phase docs for the same disclosed constraint).
+Yosys: tools/.local-yosys/usr/bin/yosys, Yosys 0.33 (git sha1 2584903a060).
+RTL under synthesis: rtl/membrane_fp_divider.sv + rtl/valid_delay_line.sv,
+at commit 52b08959302174bb7da81850418ead0b44d9d6c5 (branch main HEAD at
+experiment start; unmodified by this experiment).
+
+=====================================================================
+1. Generic (technology-independent) synthesis
+=====================================================================
+
+Script:
+  read_verilog -sv rtl/valid_delay_line.sv rtl/membrane_fp_divider.sv
+  hierarchy -check -top membrane_fp_divider
+  proc
+  opt
+  synth -top membrane_fp_divider
+  stat
+
+Result (MEASURED, `stat` output for module membrane_fp_divider):
+
+   Number of wires:              10198
+   Number of wire bits:          10739
+   Number of public wires:          28
+   Number of public wire bits:     538
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              10234
+     $_ANDNOT_                    3882
+     $_AND_                         35
+     $_DFF_PN0_                      1
+     $_DFF_P_                       31
+     $_MUX_                       1404
+     $_NAND_                        72
+     $_NOR_                        706
+     $_NOT_                        339
+     $_ORNOT_                      676
+     $_OR_                        1167
+     $_SDFF_PP1_                     1
+     $_XNOR_                       112
+     $_XOR_                       1808
+
+`hierarchy -check` reported 0 problems. 1 warning (non-fatal, unrelated
+to correctness -- see full CHECK pass output, not committed, see
+"Reproduction" below to regenerate it).
+
+Run cost (MEASURED): CPU user 110.32s, system 14.09s; peak memory
+1943.79 MB. Dominant cost: opt_merge (48% of wall time across 84
+invocations), then techmap (18%) -- driven by the same root cause as
+section 2 below: `num64/den64` is a single wide combinational integer
+divide that techmap must expand into many `$lcu` (lookahead-carry-unit)
+paramod templates.
+
+=====================================================================
+2. ECP5-targeted synthesis (ecp5, Lattice-family stand-in target --
+   see docs/phase5-synthesizable-fpga.md section 8 for why no real
+   Xilinx/Altera/ASIC target is available in this environment)
+=====================================================================
+
+Script:
+  read_verilog -sv rtl/valid_delay_line.sv rtl/membrane_fp_divider.sv
+  hierarchy -check -top membrane_fp_divider
+  synth_ecp5 -top membrane_fp_divider
+  stat
+
+Result (MEASURED, `stat` output for module membrane_fp_divider):
+
+   Number of wires:              57281
+   Number of wire bits:         134281
+   Number of public wires:       57281
+   Number of public wire bits:  134281
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              73629
+     CCU2C                       10173
+     L6MUX21                      9577
+     LUT4                        37998
+     PFUMX                       15848
+     TRELLIS_FF                     33
+
+`CHECK` pass: 0 problems found. 1 warning (non-fatal).
+
+Run cost (MEASURED): CPU user 198.62s, system 38.36s; peak memory
+1489.86 MB. Dominant cost: `autoname` (61% of wall time, ~160s) --
+a bookkeeping/naming-uniqueness pass proportional to raw cell count,
+not ABC's LUT technology-mapping itself (~10% of wall time).
+
+This EXACTLY reproduces the cell counts already on record in
+docs/phase5-synthesizable-fpga.md section 7 (LUT4=37,998, CCU2C=10,173,
+PFUMX=15,848, L6MUX21=9,577, TRELLIS_FF=33, 0 hard MULT18X18D) --
+confirmed deterministic and reproducible, not re-measured from scratch
+methodology, same result both times.
+
+=====================================================================
+3. What this experiment did NOT (re-)run
+=====================================================================
+
+- `q4_scale`/`q8_scale`/`membrane_quant_stream_top` were NOT separately
+  synthesized to completion this session (each instantiates 2 copies of
+  this same divider; docs/phase5-synthesizable-fpga.md section 7
+  already disclosed that a full `synth_ecp5` run on `q8_scale` was
+  started and killed after several minutes still in `autoname`, and
+  estimated ~75-80K LUT-class cells each by direct 2x extrapolation --
+  that extrapolation is unchanged and NOT re-verified by this
+  experiment). A plain `hierarchy -check -top membrane_quant_stream_top`
+  elaboration (not a full synth) WAS re-run this session and passed
+  with 0 problems (fast, ~7s CPU) -- see baseline.md.
+- No place-and-route, no Fmax/timing-closure measurement (UNAVAILABLE,
+  no tool in this environment, unchanged from every prior phase's
+  disclosure).
+- No RTL behavior was changed. No new divider variant was written.
+
+=====================================================================
+4. Reproduction
+=====================================================================
+
+  YOSYS=tools/.local-yosys/usr/bin/yosys
+  $YOSYS -p '
+    read_verilog -sv rtl/valid_delay_line.sv rtl/membrane_fp_divider.sv
+    hierarchy -check -top membrane_fp_divider
+    proc; opt
+    synth -top membrane_fp_divider
+    stat'
+
+  $YOSYS -p '
+    read_verilog -sv rtl/valid_delay_line.sv rtl/membrane_fp_divider.sv
+    hierarchy -check -top membrane_fp_divider
+    synth_ecp5 -top membrane_fp_divider
+    stat'
+
+Full raw logs (with the complete techmap/autoname trace) were generated
+locally during this experiment but are not committed here -- the ECP5
+log alone is ~3 MB, almost entirely repetitive `$paramod`/template
+bookkeeping lines, not additional information beyond the `stat` summary
+above. Anyone can regenerate them byte-for-byte with the commands above
+(deterministic: two full runs in this session already produced
+identical cell counts).
