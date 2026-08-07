@@ -1070,7 +1070,7 @@
       "classification": "historical-research",
       "decision": "move",
       "reason": "EXP-FPGA-DIV-001 concluded (see decision.md, promotion-*.md); real synthesis/differential evidence. Already on main as docs-only; moves to membrane-research reunited with its own RTL evidence (see rtl/experimental/fp_div/ above).",
-      "destination_sha256": "e24c0d085bfaf97183da22b421ed4d3d9ea87077c9b98a2b50f26acf0a94b519",
+      "destination_sha256": "93b3b7448571fec3e8e58de2e3549905741c3570b9bfd026df9f947cbe1375fc",
       "destination_sha256_note": "VERIFIED equal to source_sha256",
       "dependency_info": null,
       "ci_reproduction_dependency": null

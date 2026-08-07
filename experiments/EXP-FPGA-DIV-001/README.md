@@ -7,7 +7,7 @@ divider change now in `main`'s FPGA datapath (`rtl/membrane_fp_scale_neg_pow2.sv
 test, or benchmark file lives under this directory; the production source
 these documents describe is in `rtl/`.
 
-## Experiment purpose
+## Problem
 
 `membrane_fp_divider.sv` (the FPGA quant/dequant datapath's general-purpose
 FP32 divider, `docs/phase5-synthesizable-fpga.md` §7) is a single-cycle,
@@ -17,6 +17,27 @@ exists in this project's development environment. This experiment
 characterized that risk's four actual call sites and evaluated whether any
 could be replaced by an alternative construction using meaningfully fewer
 synthesized cells, without changing the datapath's bit-exact behavior.
+
+## Baseline
+
+Two call sites inside `q4_scale`: a constant-divisor `mx/-8.0f` and a
+variable-divisor `1/d`, both using `membrane_fp_divider.sv`. (The other
+two call sites, `q8_scale`'s `d=amax/127.0` and `id=127.0/amax`, are a
+related but separate investigation — see `EXP-FPGA-DIV-002`.) Phase A's
+real synthesis plus a 520,000-transaction cosimulation confirmed both
+`q4_scale` sites unchanged and identified 4 candidate directions for
+Phase B, before any design work began (`archive/baseline.md`,
+`results/canonical/synthesis.csv`).
+
+## Key measurements
+
+The headline result promoted to production: **-32.13% cycles/transaction
+vs. Phase B2's own already-working radix-2 divider, for +25.0% ECP5
+cells** at the `q4_scale` integration point — exact parity maintained
+throughout (4,456,685 differential cases, 0 mismatches, Phase B4 vs. both
+the original combinational divider and B2 simultaneously). Full
+per-phase numbers are in the table below; nothing here is rounded past
+what `results/canonical/` actually records.
 
 ## Phase summary
 
@@ -64,7 +85,20 @@ here).
 - `results/canonical/b4-comparison.md`, `results/canonical/b4-differential.json`, `results/canonical/b4-full-datapath.json`, `results/canonical/b4-synthesis.csv` -- Phase B4.
 
 See `methodology.md` for test design, toolchain, exactness rules, and
-measurement classification; `reproduction/README.md` for exact commands.
+measurement classification.
+
+## Reproduction
+
+See `reproduction/README.md` for exact `--phase`/`--quick`/`--full`
+commands (A/B1/B2/B3/B4, all of them — including B4, the phase that was
+promoted) against this repository's own `rtl/experimental/fp_div/`,
+compared against a real `kadireren7/membrane` checkout's production RTL
+via `MEMBRANE_PRODUCTION_ROOT`. For a quicker check of just the promoted
+result as it exists in production today (no experimental-RTL checkout
+needed), use `kadireren7/membrane`'s own `docs/reproduction.md` Level 1.4
+instead — the two paths exercise the same production RTL from opposite
+directions (this one also runs the rejected/superseded B2/B3 alternatives
+alongside it, for comparison).
 
 ## Provenance
 

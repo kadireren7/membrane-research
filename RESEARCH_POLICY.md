@@ -36,9 +36,41 @@ is treated as a defect in the document, not an acceptable omission.
 Nothing in this repository is described as physical FPGA behavior,
 physical CXL hardware behavior, measured Fmax, timing closure, or
 measured power unless a real board or vendor toolchain actually
-produced it — synthesis-tool cell counts (Yosys generic or
-`synth_ecp5`) are proxy results for relative comparison, never
-physical-utilization claims.
+produced it. The three terms this repository uses for a number that
+isn't a physical hardware measurement are kept distinct, not used
+interchangeably: **simulation** (a software model stands in for
+hardware that wasn't run — e.g. the CXL near-memory simulator, the
+retirement-pressure taxonomy model), **synthesis** (a real EDA tool
+processed real RTL and produced a real, tool-verified output — e.g.
+Yosys `stat` cell counts, `hierarchy -check` results), and **proxy**
+(a synthesis or simulation number stands in for a physical quantity it
+resembles but is not — e.g. an ECP5 cell count as a proxy for area,
+never presented as LUT/FF utilization on a real device). A number can
+be MEASURED_BY_TOOL (real synthesis ran) and still be a proxy (for
+physical area) at the same time — those are two different, both-true
+labels, not alternatives to pick one of.
+
+## Quick/smoke results are never canonical
+
+`--quick`-mode runs exist for fast iteration and CI-sized checks — they
+use small transaction counts and, where synthesis is involved,
+elaboration-only or truncated flows. They are never written into an
+experiment's `results/canonical/` directory, never cited in a README or
+paper claim, and never substituted for a full (`--full`) run "because
+the numbers look similar." Only a full research-scale run, passed
+through its experiment's own promotion/validation step (see
+`experiments/EXP-FPGA-DIV-002/results/canonical/b4-run-provenance.md`
+for a real worked example of that step, including two bugs it caught
+during its own first real use), is eligible to become canonical.
+
+## Every experiment pins a membrane commit
+
+Any experiment that evaluates or compares against `kadireren7/membrane`
+production source records the exact commit SHA it was run against, in
+that experiment's own README "Provenance" section. A claim like "this
+result is X% faster than production" is only ever a claim against a
+named, fixed commit — never against "current main," which can and does
+change after the claim was made.
 
 ## Nothing is deleted when a conclusion changes
 
