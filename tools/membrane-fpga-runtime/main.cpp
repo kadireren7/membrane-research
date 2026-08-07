@@ -1090,9 +1090,12 @@ int	main(int argc, char **argv)
 	const char	*repo_root;
 	const char	*mode;
 
+	// Default assumes the conventional side-by-side checkout layout
+	// (membrane-research/ and membrane/ under the same parent directory);
+	// set MEMBRANE_REPO_ROOT to override for any other layout.
 	repo_root = getenv("MEMBRANE_REPO_ROOT");
 	if (!repo_root)
-		repo_root = "/home/kadirerenaltintas/membrane";
+		repo_root = "../membrane";
 	mode = (argc > 1) ? argv[1] : "smoke";
 	if (strcmp(mode, "smoke") == 0)
 		return (cmd_smoke());

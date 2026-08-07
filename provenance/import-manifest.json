@@ -2574,8 +2574,8 @@
       "classification": "active-research",
       "decision": "move",
       "reason": "KV-cache/CXL/near-memory research simulator, implementing one specific phaseN research question. Referenced by the research-side reproduction guide (Decision 2) after docs/reproduction.md is split.",
-      "destination_sha256": "de7e549950a78d32dc6a7e050094f36793c596bb2facccbf9e34317a6a20decd",
-      "destination_sha256_note": "VERIFIED equal to source_sha256",
+      "destination_sha256": "4a7b86d0661cafe30aa4739c3ac4437f0e990e76db30a8b48a45b7055391034a",
+      "destination_sha256_note": "DIVERGES from source_sha256: post-import path-only hygiene fix replaced the hardcoded personal absolute default for repo_root with a portable relative default (../membrane), overridable via MEMBRANE_REPO_ROOT. No experiment results, provenance data, or research logic changed.",
       "dependency_info": null,
       "ci_reproduction_dependency": null
     },
