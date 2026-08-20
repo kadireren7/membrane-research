@@ -1,0 +1,1528 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a5e10b7..d18cd12 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -192,6 +192,16 @@ add_library(membrane_adaptive_kv_policy STATIC
+ target_include_directories(membrane_adaptive_kv_policy PUBLIC
+   tools/membrane-run)
+ 
++# Phase 12A: RAM<->VRAM KV tiering placement/accounting arithmetic,
++# RESEARCH ONLY (experiment/kv-ram-vram-tiering branch) -- llama-free,
++# standalone, same testable-without-a-model/GPU pattern as
++# membrane_adaptive_kv_policy above. Never linked into membrane-run;
++# does not modify or depend on tools/membrane-run/adaptive_kv_policy.*.
++add_library(membrane_tiering_placement_policy STATIC
++  tools/membrane-kv-tiering/placement_policy.c)
++target_include_directories(membrane_tiering_placement_policy PUBLIC
++  tools/membrane-kv-tiering)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -312,6 +322,7 @@ if(MEMBRANE_ENABLE_LLAMA)
+   add_subdirectory(tools/membrane-kv-runtime)
+   add_subdirectory(tools/membrane-kv-runtime-optimizer)
+   add_subdirectory(tools/membrane-kv-variance)
++  add_subdirectory(tools/membrane-kv-tiering)
+ 
+   # Product Phase 5: the live llama.cpp shadow runtime (membrane-llama-
+   # run). Deliberately does NOT use the kv_type_override patch above --
+@@ -576,6 +587,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_adaptive_kv_policy COMMAND test_adaptive_kv_policy)
+ 
++  add_executable(test_tiering_placement_policy
++    tools/membrane-kv-tiering/test_placement_policy.c)
++  target_link_libraries(test_tiering_placement_policy PRIVATE
++    membrane_tiering_placement_policy)
++  target_include_directories(test_tiering_placement_policy PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_tiering_placement_policy COMMAND test_tiering_placement_policy)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 1a5a1a3..67de10d 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1315,6 +1315,183 @@ def _c63():
+ 	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported claims, snapshot caveat disclosed"
+ 
+ 
++V12A_DIR = REPO_ROOT / "results" / "phase12" / "tiering-feasibility"
++_V12A_CACHE = {}
++
++
++def _load_v12a(name):
++	key = name
++	if key not in _V12A_CACHE:
++		path = V12A_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12A_CACHE[key] = rows
++		else:
++			_V12A_CACHE[key] = json.loads(path.read_text())
++	return _V12A_CACHE[key]
++
++
++@check("Phase 12A: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual .json/.jsonl file in the directory and no "
++	"others")
++def _c64():
++	if not (V12A_DIR / "manifest.json").exists():
++		return False, f"{V12A_DIR}/manifest.json does not exist"
++	m = _load_v12a("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V12A_DIR.glob("*") if p.suffix in (".json", ".jsonl")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
++@check("Phase 12A: memory_accounting.json's GPU_KV + RAM_KV == expected "
++	"total KV bytes, exactly, for every recorded configuration")
++def _c65():
++	ma = _load_v12a("memory_accounting.json")
++	bad = []
++	ex = ma.get("example_smollm2_135m_ctx16384_q8", {})
++	for cfg_name in ("full_gpu_30_of_30_layers", "tiered_15_of_30_layers"):
++		cfg = ex.get(cfg_name, {})
++		gpu = cfg.get("gpu_kv_bytes")
++		ram = cfg.get("ram_kv_bytes")
++		total = cfg.get("kv_allocated_bytes_total")
++		if gpu is None or ram is None or total is None or gpu + ram != total:
++			bad.append(f"{cfg_name}: gpu_kv_bytes({gpu}) + ram_kv_bytes({ram}) != kv_allocated_bytes_total({total})")
++	check_block = ex.get("gpu_kv_plus_ram_kv_equals_expected_total", {})
++	if check_block.get("holds") is not True:
++		bad.append("gpu_kv_plus_ram_kv_equals_expected_total.holds is not true")
++	return len(bad) == 0, "; ".join(bad) if bad else "GPU_KV + RAM_KV == expected total KV bytes exactly, in every recorded configuration"
++
++
++@check("Phase 12A: vram_reduction.json's per-context saving figures are "
++	"recomputed exactly from raw_vram_reduction.jsonl's own peak/idle "
++	"VRAM numbers (not just trusted)")
++def _c66():
++	rows = _load_v12a("raw_vram_reduction.jsonl")
++	vr = _load_v12a("vram_reduction.json")
++	by_ctx = {}
++	for r in rows:
++		ctx = r["ctx"]
++		key = r["label"].split("_ctx")[0]
++		by_ctx.setdefault(ctx, {})[key] = r["peak_vram_mib"] - r["idle_vram_mib"]
++	bad = []
++	for ctx_str, expect in vr.get("results_by_ctx", {}).items():
++		ctx = int(ctx_str)
++		d = by_ctx.get(ctx, {})
++		recomputed_tiering_alone = d.get("A_full_gpu_q8", 0) - d.get("C_tiered_q8", 0)
++		if recomputed_tiering_alone != expect.get("tiering_alone_saving_mib"):
++			bad.append(f"ctx={ctx}: recomputed tiering_alone_saving={recomputed_tiering_alone} != claimed {expect.get('tiering_alone_saving_mib')}")
++	return len(bad) == 0, "; ".join(bad) if bad else "every ctx's tiering-alone saving recomputed exactly from raw nvidia-smi deltas"
++
++
++@check("Phase 12A: pressure_test.json's boundary claims (last "
++	"succeeding / first failing context for tiered Q5) are backed by "
++	"raw_pressure_test.jsonl's own exit codes, and the whole-cache "
++	"boundary-already-failed claim is real")
++def _c67():
++	rows = _load_v12a("raw_pressure_test.jsonl")
++	by_label = {r["label"]: r for r in rows}
++	bad = []
++	if by_label.get("adaptive_186k", {}).get("exit_code") != 5:
++		bad.append("adaptive_186k did not actually fail (exit_code != 5) in raw data")
++	if by_label.get("full_q5_186k", {}).get("exit_code") != 5:
++		bad.append("full_q5_186k did not actually fail (exit_code != 5) in raw data")
++	if by_label.get("tiered_q5_half_186k", {}).get("exit_code") != 0:
++		bad.append("tiered_q5_half_186k did not actually succeed (exit_code != 0) in raw data")
++	return len(bad) == 0, "; ".join(bad) if bad else "the core pressure-test claim (tiering succeeds where whole-cache adaptive/Q5 fail, at the identical context) is backed by real raw exit codes"
++
++
++@check("Phase 12A: no unsupported product claims -- no '--kv-tiering' "
++	"flag documented as real/shipped without disclaiming it, no "
++	"undisclaimed 'merged' claim, product CLI (tools/membrane-run/"
++	"product_cli.cpp) unmodified by this phase and contains no "
++	"'tiering' reference, product adaptive_kv_policy unmodified")
++def _c68():
++	bad = []
++	for path in sorted(V12A_DIR.glob("*.json")):
++		text = path.read_text()
++		if re.search(r"--kv-tiering\b", text) and not re.search(
++				r"not (a real|yet exposed|shipped)|never expose|research-only|research only|do not add", text, re.IGNORECASE):
++			bad.append(f"{path.name}: documents '--kv-tiering' without disclaiming it as unshipped")
++		if re.search(r"\bmerged\b", text, re.IGNORECASE) and not re.search(
++				r"not merged|never merged|do not merge", text, re.IGNORECASE):
++			bad.append(f"{path.name}: mentions 'merged' without an explicit not-merged disclaimer")
++	product_cli = REPO_ROOT / "tools" / "membrane-run" / "product_cli.cpp"
++	if product_cli.exists() and "tiering" in product_cli.read_text().lower():
++		bad.append("tools/membrane-run/product_cli.cpp references 'tiering' -- forbidden by this phase")
++	adaptive_policy = REPO_ROOT / "tools" / "membrane-run" / "adaptive_kv_policy.c"
++	if adaptive_policy.exists() and "tiering" in adaptive_policy.read_text().lower():
++		bad.append("tools/membrane-run/adaptive_kv_policy.c references 'tiering' -- product adaptive must be untouched")
++	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported product claims, product CLI and adaptive policy untouched"
++
++
++@check("Phase 12A: no absolute filesystem paths anywhere in any "
++	"tiering-feasibility artifact file (JSON or JSONL)")
++def _c69():
++	hits = []
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	for path in sorted(V12A_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		text = path.read_text()
++		found = [m for m in pattern.findall(text) if not m.startswith(
++			("/proc", "/tmp", "/tools", "/results", "/third_party", "/src", "/include"))]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all tiering-feasibility artifact files"
++
++
++@check("Phase 12A: summary.json's decision_gate is one of the six "
++	"valid values and is consistent with architecture.json's own "
++	"whether_upstream_change_required-equivalent finding")
++def _c70():
++	s = _load_v12a("summary.json")
++	arch = _load_v12a("architecture.json")
++	valid = {
++		"TIERING_FEASIBLE",
++		"TIERING_COPY_ONLY_NO_VRAM_RELEASE",
++		"TIERING_TOO_SLOW_SYNCHRONOUSLY",
++		"TIERING_REQUIRES_UPSTREAM_CHANGE",
++		"TIERING_BACKEND_LIMITED",
++		"TIERING_INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the six valid values")
++	needs_patch = arch.get("critical_correction_weight_kv_coupling", {}) \
++		.get("smallest_change_that_would_fix_this") is not None
++	if needs_patch and gate != "TIERING_REQUIRES_UPSTREAM_CHANGE":
++		bad.append(f"architecture.json identifies a required llama.cpp change but decision_gate={gate!r}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} is valid and consistent with the architecture finding"
++
++
++@check("Phase 12A: roundtrip_correctness.json's overall_ok claim "
++	"requires ALL THREE of its own sub-checks (corruption_took_effect, "
++	"restore_matches_original, post_movement_generation_ok) to be true "
++	"-- never a partial pass reported as ok")
++def _c71():
++	rc = _load_v12a("roundtrip_correctness.json")
++	r = rc.get("results", {})
++	bad = []
++	all_three = r.get("corruption_took_effect") and r.get("restore_matches_original") \
++		and r.get("post_movement_generation_ok")
++	if bool(all_three) != bool(r.get("overall_ok")):
++		bad.append(f"overall_ok={r.get('overall_ok')} but the three sub-checks AND to {bool(all_three)}")
++	if not r.get("overall_ok"):
++		bad.append("overall_ok is not true -- the round-trip proof did not actually pass")
++	return len(bad) == 0, "; ".join(bad) if bad else "overall_ok correctly requires and reflects all three sub-checks, all true"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1338,6 +1515,7 @@ def main() -> int:
+ 			_c48, _c49, _c50, _c51,
+ 			_c52, _c53, _c54, _c55, _c56, _c57, _c58, _c59, _c60, _c61,
+ 			_c62, _c63,
++			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-tiering/CMakeLists.txt b/tools/membrane-kv-tiering/CMakeLists.txt
+new file mode 100644
+index 0000000..8dc52e8
+--- /dev/null
++++ b/tools/membrane-kv-tiering/CMakeLists.txt
+@@ -0,0 +1,27 @@
++# Phase 12A: RAM<->VRAM KV tiering feasibility research, RESEARCH ONLY
++# (experiment/kv-ram-vram-tiering branch). Public-ggml/llama-API-only --
++# no llama.cpp patch, no product CLI change.
++
++add_executable(membrane-kv-tiering-graph-node-probe graph_node_probe.cpp)
++set_target_properties(membrane-kv-tiering-graph-node-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-tiering-graph-node-probe PRIVATE llama)
++
++add_executable(membrane-kv-tiering-live-movement-probe live_movement_probe.cpp)
++set_target_properties(membrane-kv-tiering-live-movement-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-tiering-live-movement-probe PRIVATE llama)
++
++add_executable(membrane-kv-tiering-copy-microbench copy_microbench.cpp)
++set_target_properties(membrane-kv-tiering-copy-microbench PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-tiering-copy-microbench PRIVATE llama)
++
++add_executable(membrane-kv-tiering-decode-impact-probe decode_impact_probe.cpp)
++set_target_properties(membrane-kv-tiering-decode-impact-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-tiering-decode-impact-probe PRIVATE llama)
+diff --git a/tools/membrane-kv-tiering/copy_microbench.cpp b/tools/membrane-kv-tiering/copy_microbench.cpp
+new file mode 100644
+index 0000000..e589faa
+--- /dev/null
++++ b/tools/membrane-kv-tiering/copy_microbench.cpp
+@@ -0,0 +1,234 @@
++/*
++ * Phase 12A, Sections 3/13: copy-cost microbenchmark. Captures every
++ * layer's persistent cache_k_lN / cache_v_lN leaf tensor via cb_eval +
++ * ggml_tensor::view_src (same public-API mechanism proven in
++ * live_movement_probe.cpp), then times repeated GPU->host and
++ * host->GPU ggml_backend_tensor_get/set calls for three region sizes:
++ * one layer's K, a configurable number of layers' K+V, and all
++ * layers' K+V (the "larger cold region" case). No generation happens
++ * here after capture -- this is the pure, standalone-probe-style
++ * bandwidth measurement, isolated from decode cost (see Section 14
++ * for decode-time impact instead).
++ */
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <chrono>
++#include <vector>
++
++#include "llama.h"
++
++struct capture_ctx_t
++{
++	int32_t					n_layer;
++	std::vector<ggml_tensor *>	k_leaf;
++	std::vector<ggml_tensor *>	v_leaf;
++};
++
++static bool	layer_from_name(const char *name, const char *prefix,
++				int32_t *out_layer)
++{
++	size_t	plen = strlen(prefix);
++	char	*end;
++	long	v;
++
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out_layer = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer < c->n_layer
++			&& c->k_leaf[layer] == nullptr)
++		c->k_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer < c->n_layer
++			&& c->v_leaf[layer] == nullptr)
++		c->v_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++struct timing_stats_t
++{
++	double	mean_ms;
++	double	median_ms;
++	double	min_ms;
++	double	max_ms;
++	double	stddev_ms;
++};
++
++static timing_stats_t	stats_of(std::vector<double> &samples_ms)
++{
++	timing_stats_t	s{};
++	double			sum = 0.0;
++
++	std::sort(samples_ms.begin(), samples_ms.end());
++	for (double v : samples_ms)
++		sum += v;
++	s.mean_ms = sum / samples_ms.size();
++	s.median_ms = samples_ms[samples_ms.size() / 2];
++	s.min_ms = samples_ms.front();
++	s.max_ms = samples_ms.back();
++	double	var = 0.0;
++	for (double v : samples_ms)
++		var += (v - s.mean_ms) * (v - s.mean_ms);
++	s.stddev_ms = samples_ms.size() > 1
++		? sqrt(var / (samples_ms.size() - 1)) : 0.0;
++	return (s);
++}
++
++static void	bench_region(const char *label, std::vector<ggml_tensor *> &tensors,
++				std::vector<uint8_t> &host_buf, int n_reps)
++{
++	size_t				total_bytes = 0;
++	std::vector<double>	get_ms;
++	std::vector<double>	set_ms;
++
++	for (auto *t : tensors)
++		total_bytes += ggml_nbytes(t);
++	host_buf.resize(total_bytes);
++
++	for (int r = 0; r < n_reps; r++)
++	{
++		auto	t0 = std::chrono::steady_clock::now();
++		size_t	off = 0;
++		for (auto *t : tensors)
++		{
++			ggml_backend_tensor_get(t, host_buf.data() + off, 0, ggml_nbytes(t));
++			off += ggml_nbytes(t);
++		}
++		auto	t1 = std::chrono::steady_clock::now();
++		get_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
++	}
++	for (int r = 0; r < n_reps; r++)
++	{
++		auto	t0 = std::chrono::steady_clock::now();
++		size_t	off = 0;
++		for (auto *t : tensors)
++		{
++			ggml_backend_tensor_set(t, host_buf.data() + off, 0, ggml_nbytes(t));
++			off += ggml_nbytes(t);
++		}
++		auto	t1 = std::chrono::steady_clock::now();
++		set_ms.push_back(std::chrono::duration<double, std::milli>(t1 - t0).count());
++	}
++
++	timing_stats_t	gs = stats_of(get_ms);
++	timing_stats_t	ss = stats_of(set_ms);
++	double	get_gbps = (total_bytes / 1e9) / (gs.mean_ms / 1000.0);
++	double	set_gbps = (total_bytes / 1e9) / (ss.mean_ms / 1000.0);
++
++	printf("{\"schema_version\":1,\"region\":\"%s\",\"n_tensors\":%zu,"
++		"\"total_bytes\":%zu,\"n_reps\":%d,"
++		"\"gpu_to_host\":{\"mean_ms\":%.4f,\"median_ms\":%.4f,\"min_ms\":%.4f,"
++		"\"max_ms\":%.4f,\"stddev_ms\":%.4f,\"effective_gbps\":%.4f},"
++		"\"host_to_gpu\":{\"mean_ms\":%.4f,\"median_ms\":%.4f,\"min_ms\":%.4f,"
++		"\"max_ms\":%.4f,\"stddev_ms\":%.4f,\"effective_gbps\":%.4f}}\n",
++		label, tensors.size(), total_bytes, n_reps,
++		gs.mean_ms, gs.median_ms, gs.min_ms, gs.max_ms, gs.stddev_ms, get_gbps,
++		ss.mean_ms, ss.median_ms, ss.min_ms, ss.max_ms, ss.stddev_ms, set_gbps);
++}
++
++int	main(int argc, char **argv)
++{
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s MODEL.gguf [n_ctx] [n_reps]\n", argv[0]);
++		return (2);
++	}
++	int32_t	n_ctx = argc > 2 ? atoi(argv[2]) : 2048;
++	int		n_reps = argc > 3 ? atoi(argv[3]) : 10;
++
++	llama_backend_init();
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = -1;
++	llama_model	*model = llama_model_load_from_file(argv[1], mp);
++	if (model == nullptr)
++	{
++		fprintf(stderr, "model load failed\n");
++		return (3);
++	}
++	int32_t	n_layer = llama_model_n_layer(model);
++	const llama_vocab	*vocab = llama_model_get_vocab(model);
++
++	capture_ctx_t	cap;
++	cap.n_layer = n_layer;
++	cap.k_leaf.assign(n_layer, nullptr);
++	cap.v_leaf.assign(n_layer, nullptr);
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &cap;
++	llama_context	*ctx = llama_init_from_model(model, cp);
++	if (ctx == nullptr)
++	{
++		fprintf(stderr, "context creation failed\n");
++		return (4);
++	}
++
++	std::vector<llama_token>	tokens(16);
++	const char	*prompt = "The quick brown fox jumps over the lazy dog";
++	int	n = llama_tokenize(vocab, prompt, (int32_t)strlen(prompt), tokens.data(),
++			(int32_t)tokens.size(), true, false);
++	if (n < 0)
++	{
++		fprintf(stderr, "tokenize failed\n");
++		return (5);
++	}
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	if (llama_decode(ctx, batch) != 0)
++	{
++		fprintf(stderr, "decode failed\n");
++		return (6);
++	}
++
++	int	n_missing = 0;
++	for (int32_t i = 0; i < n_layer; i++)
++		if (cap.k_leaf[i] == nullptr || cap.v_leaf[i] == nullptr)
++			n_missing++;
++	if (n_missing > 0)
++	{
++		fprintf(stderr, "FAIL: %d/%d layers never captured\n", n_missing, n_layer);
++		return (7);
++	}
++
++	std::vector<uint8_t>	host_buf;
++
++	std::vector<ggml_tensor *>	one_layer = {cap.k_leaf[0]};
++	bench_region("one_layer_k", one_layer, host_buf, n_reps);
++
++	int	several = n_layer < 4 ? n_layer : 4;
++	std::vector<ggml_tensor *>	several_layers;
++	for (int i = 0; i < several; i++)
++	{
++		several_layers.push_back(cap.k_leaf[i]);
++		several_layers.push_back(cap.v_leaf[i]);
++	}
++	bench_region("several_layers_kv", several_layers, host_buf, n_reps);
++
++	std::vector<ggml_tensor *>	all_layers;
++	for (int32_t i = 0; i < n_layer; i++)
++	{
++		all_layers.push_back(cap.k_leaf[i]);
++		all_layers.push_back(cap.v_leaf[i]);
++	}
++	bench_region("all_layers_kv", all_layers, host_buf, n_reps);
++
++	llama_free(ctx);
++	llama_model_free(model);
++	llama_backend_free();
++	return (0);
++}
+diff --git a/tools/membrane-kv-tiering/decode_impact_probe.cpp b/tools/membrane-kv-tiering/decode_impact_probe.cpp
+new file mode 100644
+index 0000000..237ab06
+--- /dev/null
++++ b/tools/membrane-kv-tiering/decode_impact_probe.cpp
+@@ -0,0 +1,199 @@
++/*
++ * Phase 12A, Section 14: decode-time impact of live KV movement.
++ * Reuses the same cb_eval + view_src capture mechanism as
++ * live_movement_probe.cpp/copy_microbench.cpp (100% public API, no
++ * llama.cpp patch) to measure real generation throughput under four
++ * scenarios, all on the SAME live context / SAME prompt:
++ *
++ *   A. no transfers at all (pure baseline)
++ *   B. one single-layer round-trip transfer BEFORE generation starts
++ *   C. a single-layer round-trip transfer every N generated tokens
++ *   D. a worst-case synchronous ALL-layers round-trip every N tokens
++ *
++ * Each scenario re-loads the model into a fresh context (so scenario
++ * B/C/D's transfers never contaminate a later scenario's KV state) --
++ * more process overhead than reusing one context, but keeps each
++ * scenario's decode timing free of any prior scenario's side effects.
++ */
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <chrono>
++#include <vector>
++
++#include "llama.h"
++
++struct capture_ctx_t
++{
++	int32_t					n_layer;
++	std::vector<ggml_tensor *>	k_leaf;
++	std::vector<ggml_tensor *>	v_leaf;
++};
++
++static bool	layer_from_name(const char *name, const char *prefix, int32_t *out)
++{
++	size_t	plen = strlen(prefix);
++	char	*end;
++	long	v;
++
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer < c->n_layer
++			&& c->k_leaf[layer] == nullptr)
++		c->k_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer < c->n_layer
++			&& c->v_leaf[layer] == nullptr)
++		c->v_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++static void	roundtrip_one(ggml_tensor *t, std::vector<uint8_t> *buf)
++{
++	size_t	n = ggml_nbytes(t);
++
++	buf->resize(n);
++	ggml_backend_tensor_get(t, buf->data(), 0, n);
++	ggml_backend_tensor_set(t, buf->data(), 0, n);
++}
++
++static int	argmax(const float *v, int n)
++{
++	int	best = 0;
++
++	for (int i = 1; i < n; i++)
++		if (v[i] > v[best])
++			best = i;
++	return (best);
++}
++
++static double	run_scenario(const char *model_path, int32_t n_ctx,
++				const char *scenario, int n_gen, int transfer_every_n,
++				double *out_total_transfer_ms, int *out_n_transfers)
++{
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = -1;
++	llama_model	*model = llama_model_load_from_file(model_path, mp);
++	int32_t		n_layer = llama_model_n_layer(model);
++	const llama_vocab	*vocab = llama_model_get_vocab(model);
++
++	capture_ctx_t	cap;
++	cap.n_layer = n_layer;
++	cap.k_leaf.assign(n_layer, nullptr);
++	cap.v_leaf.assign(n_layer, nullptr);
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &cap;
++	llama_context	*ctx = llama_init_from_model(model, cp);
++
++	const char	*prompt = "The quick brown fox jumps over the lazy dog";
++	std::vector<llama_token>	tokens(strlen(prompt) + 8);
++	int	n = llama_tokenize(vocab, prompt, (int32_t)strlen(prompt),
++			tokens.data(), (int32_t)tokens.size(), true, false);
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	llama_decode(ctx, batch);
++
++	std::vector<uint8_t>	buf;
++	*out_total_transfer_ms = 0.0;
++	*out_n_transfers = 0;
++
++	if (strcmp(scenario, "B") == 0)
++	{
++		auto	t0 = std::chrono::steady_clock::now();
++		roundtrip_one(cap.k_leaf[0], &buf);
++		roundtrip_one(cap.v_leaf[0], &buf);
++		auto	t1 = std::chrono::steady_clock::now();
++		*out_total_transfer_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
++		(*out_n_transfers)++;
++	}
++
++	int32_t	n_vocab = llama_vocab_n_tokens(vocab);
++	auto	gen_t0 = std::chrono::steady_clock::now();
++	for (int i = 0; i < n_gen; i++)
++	{
++		const float	*logits = llama_get_logits_ith(ctx, -1);
++		llama_token	tok = argmax(logits, n_vocab);
++		llama_batch	b1 = llama_batch_get_one(&tok, 1);
++		llama_decode(ctx, b1);
++
++		bool	do_transfer = (strcmp(scenario, "C") == 0 || strcmp(scenario, "D") == 0)
++			&& transfer_every_n > 0 && ((i + 1) % transfer_every_n == 0);
++		if (do_transfer)
++		{
++			auto	tt0 = std::chrono::steady_clock::now();
++			if (strcmp(scenario, "C") == 0)
++			{
++				roundtrip_one(cap.k_leaf[0], &buf);
++				roundtrip_one(cap.v_leaf[0], &buf);
++			}
++			else /* D: worst case, ALL layers */
++			{
++				for (int32_t l = 0; l < n_layer; l++)
++				{
++					roundtrip_one(cap.k_leaf[l], &buf);
++					roundtrip_one(cap.v_leaf[l], &buf);
++				}
++			}
++			auto	tt1 = std::chrono::steady_clock::now();
++			*out_total_transfer_ms += std::chrono::duration<double, std::milli>(tt1 - tt0).count();
++			(*out_n_transfers)++;
++		}
++	}
++	auto	gen_t1 = std::chrono::steady_clock::now();
++	double	total_ms = std::chrono::duration<double, std::milli>(gen_t1 - gen_t0).count();
++
++	llama_free(ctx);
++	llama_model_free(model);
++	return (total_ms);
++}
++
++int	main(int argc, char **argv)
++{
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s MODEL.gguf [n_ctx] [n_gen] [transfer_every_n]\n", argv[0]);
++		return (2);
++	}
++	int32_t	n_ctx = argc > 2 ? atoi(argv[2]) : 2048;
++	int		n_gen = argc > 3 ? atoi(argv[3]) : 32;
++	int		every_n = argc > 4 ? atoi(argv[4]) : 8;
++
++	llama_backend_init();
++
++	const char	*scenarios[4] = {"A", "B", "C", "D"};
++	for (const char *sc : scenarios)
++	{
++		double	total_transfer_ms;
++		int		n_transfers;
++		double	total_ms = run_scenario(argv[1], n_ctx, sc, n_gen, every_n,
++				&total_transfer_ms, &n_transfers);
++		double	gen_tok_s = (n_gen / (total_ms / 1000.0));
++		printf("{\"schema_version\":1,\"scenario\":\"%s\",\"n_ctx\":%d,\"n_gen\":%d,"
++			"\"transfer_every_n\":%d,\"total_ms\":%.4f,\"total_transfer_ms\":%.4f,"
++			"\"n_transfers\":%d,\"generation_tok_per_s\":%.4f,"
++			"\"stall_fraction_of_total\":%.6f}\n",
++			sc, n_ctx, n_gen, every_n, total_ms, total_transfer_ms, n_transfers,
++			gen_tok_s, total_transfer_ms / total_ms);
++	}
++
++	llama_backend_free();
++	return (0);
++}
+diff --git a/tools/membrane-kv-tiering/graph_node_probe.cpp b/tools/membrane-kv-tiering/graph_node_probe.cpp
+new file mode 100644
+index 0000000..b0a67a0
+--- /dev/null
++++ b/tools/membrane-kv-tiering/graph_node_probe.cpp
+@@ -0,0 +1,89 @@
++/*
++ * Phase 12A, Section 1 (empirical follow-up): does the persistent KV
++ * cache leaf tensor ("cache_k_l%d"/"cache_v_l%d", per llama-kv-cache.cpp's
++ * own ggml_format_name calls) ever appear as a t->name seen by the
++ * public ggml_backend_sched_eval_callback (llama_context_params.cb_eval)?
++ * If yes, cb_eval is a safe, fully-public way to capture a live cache
++ * tensor's ggml_tensor* pointer for later, out-of-graph movement. If
++ * no, movement must go through the whole-sequence llama_state_seq_get_
++ * data/set_data API instead. Diagnostic only -- prints every distinct
++ * tensor name cb_eval is asked about during one decode step, then exits.
++ */
++#include <cstdio>
++#include <cstring>
++#include <set>
++#include <string>
++#include <vector>
++
++#include "llama.h"
++
++static std::set<std::string>	g_names;
++
++static bool	probe_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	(void)ud;
++	if (ask)
++		return (true);
++	g_names.insert(t->name);
++	return (true);
++}
++
++int	main(int argc, char **argv)
++{
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s MODEL.gguf\n", argv[0]);
++		return (2);
++	}
++	llama_backend_init();
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = -1;
++	llama_model	*model = llama_model_load_from_file(argv[1], mp);
++	if (model == NULL)
++	{
++		fprintf(stderr, "model load failed\n");
++		return (3);
++	}
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = 2048;
++	cp.cb_eval = probe_cb;
++	cp.cb_eval_user_data = NULL;
++	llama_context	*ctx = llama_init_from_model(model, cp);
++	if (ctx == NULL)
++	{
++		fprintf(stderr, "context creation failed\n");
++		return (4);
++	}
++	const llama_vocab	*vocab = llama_model_get_vocab(model);
++	std::vector<llama_token>	tokens(16);
++	int	n = llama_tokenize(vocab, "Hello there", 11, tokens.data(),
++			(int32_t)tokens.size(), true, false);
++	if (n < 0)
++	{
++		fprintf(stderr, "tokenize failed\n");
++		return (5);
++	}
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	if (llama_decode(ctx, batch) != 0)
++	{
++		fprintf(stderr, "decode failed\n");
++		return (6);
++	}
++	bool	found_cache_leaf = false;
++	for (const auto &name : g_names)
++	{
++		bool	is_cache = strncmp(name.c_str(), "cache_k_l", 9) == 0
++			|| strncmp(name.c_str(), "cache_v_l", 9) == 0;
++		if (is_cache)
++			found_cache_leaf = true;
++		printf("%s%s\n", is_cache ? "[CACHE] " : "        ", name.c_str());
++	}
++	printf("---\ntotal distinct names seen by cb_eval: %zu\n", g_names.size());
++	printf("cache_k_l*/cache_v_l* seen by cb_eval: %s\n",
++		found_cache_leaf ? "YES" : "NO");
++	llama_free(ctx);
++	llama_model_free(model);
++	llama_backend_free();
++	return (0);
++}
+diff --git a/tools/membrane-kv-tiering/live_movement_probe.cpp b/tools/membrane-kv-tiering/live_movement_probe.cpp
+new file mode 100644
+index 0000000..1da99e2
+--- /dev/null
++++ b/tools/membrane-kv-tiering/live_movement_probe.cpp
+@@ -0,0 +1,254 @@
++/*
++ * Phase 12A, Section 4: live-context KV movement probe.
++ *
++ * Proves, on a REAL live llama_context (SmolLM2-135M, Vulkan, ctx=2048
++ * by default): a single layer's persistent KV cache tensor (K and V)
++ * can be copied GPU->host, validated, the GPU-resident copy corrupted
++ * (zeroed) to prove we are touching the SAME backing memory (not a
++ * shadow), restored host->GPU, validated again, and generation can
++ * continue safely afterward -- all via public ggml/ggml-backend/llama
++ * API only:
++ *
++ *   - llama_context_params.cb_eval (ggml_backend_sched_eval_callback,
++ *     both public, documented, already used elsewhere in this repo by
++ *     tools/membrane-llama-runtime/llama_hook.cpp for a DIFFERENT
++ *     purpose -- observing Kcur/Vcur projection tensors, not the
++ *     persistent cache) is used here to observe a "cache_k_lN (view)"
++ *     / "cache_v_lN (view)" tensor during one decode call, then follow
++ *     its public ggml_tensor::view_src field (ggml.h) to the actual
++ *     persistent leaf tensor -- captured ONCE, used AFTER llama_decode
++ *     returns (never touched while a graph is mid-flight).
++ *   - ggml_backend_tensor_get / ggml_backend_tensor_set (ggml-backend.h)
++ *     do the actual GPU<->host byte copies.
++ *
++ * This does NOT free or shrink any GPU buffer (the shared per-buft
++ * buffer llama-kv-cache.cpp allocates stays exactly the same size
++ * throughout) -- it proves the COPY/round-trip mechanism is safe
++ * mid-live-context, not that VRAM is reduced. See architecture.json's
++ * shared_buffer_limitation for why, and Section 5's separate,
++ * --gpu-layers-N-based test for the real VRAM-reduction proof.
++ */
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#include "llama.h"
++
++struct capture_ctx_t
++{
++	int32_t			target_layer;
++	ggml_tensor		*k_leaf;
++	ggml_tensor		*v_leaf;
++};
++
++static bool	layer_from_name(const char *name, const char *prefix,
++				int32_t *out_layer)
++{
++	size_t	plen;
++	char	*end;
++	long	v;
++
++	plen = strlen(prefix);
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out_layer = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer == c->target_layer
++			&& c->k_leaf == nullptr)
++		c->k_leaf = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer == c->target_layer
++			&& c->v_leaf == nullptr)
++		c->v_leaf = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++static uint64_t	checksum(const uint8_t *buf, size_t n)
++{
++	uint64_t	h = 1469598103934665603ull;
++
++	for (size_t i = 0; i < n; i++)
++	{
++		h ^= buf[i];
++		h *= 1099511628211ull;
++	}
++	return (h);
++}
++
++static bool	decode_text(llama_context *ctx, const llama_vocab *vocab,
++				const char *text, std::vector<llama_token> *tokens_out)
++{
++	std::vector<llama_token>	tokens(strlen(text) + 8);
++	int							n;
++
++	n = llama_tokenize(vocab, text, (int32_t)strlen(text), tokens.data(),
++			(int32_t)tokens.size(), true, false);
++	if (n < 0)
++		return (false);
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	if (llama_decode(ctx, batch) != 0)
++		return (false);
++	*tokens_out = tokens;
++	return (true);
++}
++
++static int	argmax(const float *v, int n)
++{
++	int	best = 0;
++
++	for (int i = 1; i < n; i++)
++		if (v[i] > v[best])
++			best = i;
++	return (best);
++}
++
++static bool	gen_step(llama_context *ctx, const llama_vocab *vocab,
++				llama_token *out_tok)
++{
++	int32_t		n_vocab = llama_vocab_n_tokens(vocab);
++	const float	*logits = llama_get_logits_ith(ctx, -1);
++
++	if (logits == nullptr)
++		return (false);
++	*out_tok = argmax(logits, n_vocab);
++	llama_batch	batch = llama_batch_get_one(out_tok, 1);
++	return (llama_decode(ctx, batch) == 0);
++}
++
++int	main(int argc, char **argv)
++{
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s MODEL.gguf [target_layer] [n_ctx]\n", argv[0]);
++		return (2);
++	}
++	int32_t	target_layer = argc > 2 ? atoi(argv[2]) : 5;
++	int32_t	n_ctx = argc > 3 ? atoi(argv[3]) : 2048;
++
++	llama_backend_init();
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = -1;
++	llama_model	*model = llama_model_load_from_file(argv[1], mp);
++	if (model == nullptr)
++	{
++		fprintf(stderr, "model load failed\n");
++		return (3);
++	}
++	const llama_vocab	*vocab = llama_model_get_vocab(model);
++
++	capture_ctx_t	cap = {target_layer, nullptr, nullptr};
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &cap;
++	llama_context	*ctx = llama_init_from_model(model, cp);
++	if (ctx == nullptr)
++	{
++		fprintf(stderr, "context creation failed\n");
++		return (4);
++	}
++
++	std::vector<llama_token>	prompt_tokens;
++	if (!decode_text(ctx, vocab, "The quick brown fox jumps over", &prompt_tokens))
++	{
++		fprintf(stderr, "prompt decode failed\n");
++		return (5);
++	}
++	if (cap.k_leaf == nullptr || cap.v_leaf == nullptr)
++	{
++		fprintf(stderr, "FAIL: cb_eval never captured cache_k_l%d/cache_v_l%d "
++			"(view_src) -- live single-layer movement not provable this way\n",
++			target_layer, target_layer);
++		return (6);
++	}
++	printf("captured cache_k_l%d: %s, nbytes=%zu, buffer=%s\n",
++		target_layer, cap.k_leaf->name, ggml_nbytes(cap.k_leaf),
++		ggml_backend_buffer_name(cap.k_leaf->buffer));
++	printf("captured cache_v_l%d: %s, nbytes=%zu, buffer=%s\n",
++		target_layer, cap.v_leaf->name, ggml_nbytes(cap.v_leaf),
++		ggml_backend_buffer_name(cap.v_leaf->buffer));
++
++	/* generate a few tokens BEFORE any movement, as the reference tail */
++	llama_token	pre_tok[4];
++	for (int i = 0; i < 4; i++)
++		if (!gen_step(ctx, vocab, &pre_tok[i]))
++		{
++			fprintf(stderr, "pre-movement gen failed\n");
++			return (7);
++		}
++
++	/* --- movement round trip on cache_k_l{target_layer} --- */
++	size_t				k_bytes = ggml_nbytes(cap.k_leaf);
++	std::vector<uint8_t>	host_buf(k_bytes);
++	std::vector<uint8_t>	zero_buf(k_bytes, 0);
++	std::vector<uint8_t>	verify_buf(k_bytes);
++
++	ggml_backend_tensor_get(cap.k_leaf, host_buf.data(), 0, k_bytes);
++	uint64_t	original_checksum = checksum(host_buf.data(), k_bytes);
++
++	/* corrupt the GPU-resident tensor to PROVE we are looking at the
++	 * same backing memory, not a shadow copy that happens to agree */
++	ggml_backend_tensor_set(cap.k_leaf, zero_buf.data(), 0, k_bytes);
++	ggml_backend_tensor_get(cap.k_leaf, verify_buf.data(), 0, k_bytes);
++	bool	corruption_took_effect = (checksum(verify_buf.data(), k_bytes)
++		== checksum(zero_buf.data(), k_bytes));
++
++	/* restore */
++	ggml_backend_tensor_set(cap.k_leaf, host_buf.data(), 0, k_bytes);
++	ggml_backend_tensor_get(cap.k_leaf, verify_buf.data(), 0, k_bytes);
++	bool	restore_matches_original = (checksum(verify_buf.data(), k_bytes)
++		== original_checksum);
++
++	printf("k_bytes=%zu original_checksum=%llu corruption_took_effect=%s "
++		"restore_matches_original=%s\n", k_bytes,
++		(unsigned long long)original_checksum,
++		corruption_took_effect ? "true" : "false",
++		restore_matches_original ? "true" : "false");
++
++	/* continue generation AFTER the round trip */
++	llama_token	post_tok[4];
++	bool		post_gen_ok = true;
++	for (int i = 0; i < 4 && post_gen_ok; i++)
++		post_gen_ok = gen_step(ctx, vocab, &post_tok[i]);
++
++	printf("post_movement_generation_ok=%s\n", post_gen_ok ? "true" : "false");
++	printf("pre_movement_tokens=");
++	for (int i = 0; i < 4; i++)
++		printf("%d%s", pre_tok[i], i < 3 ? "," : "\n");
++	printf("post_movement_tokens=");
++	for (int i = 0; i < 4 && post_gen_ok; i++)
++		printf("%d%s", post_tok[i], i < 3 ? "," : "\n");
++	if (!post_gen_ok)
++		printf("\n");
++
++	bool	overall_ok = corruption_took_effect && restore_matches_original
++		&& post_gen_ok;
++	printf("{\"schema_version\":1,\"target_layer\":%d,\"n_ctx\":%d,"
++		"\"k_bytes\":%zu,\"corruption_took_effect\":%s,"
++		"\"restore_matches_original\":%s,\"post_movement_generation_ok\":%s,"
++		"\"overall_ok\":%s}\n",
++		target_layer, n_ctx, k_bytes,
++		corruption_took_effect ? "true" : "false",
++		restore_matches_original ? "true" : "false",
++		post_gen_ok ? "true" : "false",
++		overall_ok ? "true" : "false");
++
++	llama_free(ctx);
++	llama_model_free(model);
++	llama_backend_free();
++	return (overall_ok ? 0 : 1);
++}
+diff --git a/tools/membrane-kv-tiering/placement_policy.c b/tools/membrane-kv-tiering/placement_policy.c
+new file mode 100644
+index 0000000..aa1d165
+--- /dev/null
++++ b/tools/membrane-kv-tiering/placement_policy.c
+@@ -0,0 +1,113 @@
++#include <stddef.h>
++#include <stdlib.h>
++
++#include "placement_policy.h"
++
++int	membrane_tiering_validate_partition(const int32_t *gpu_layers,
++		int32_t n_gpu, const int32_t *ram_layers, int32_t n_ram,
++		int32_t n_layer)
++{
++	int8_t	*seen;
++	int32_t	i;
++	int32_t	idx;
++	int		ok;
++
++	if (n_layer <= 0 || n_gpu < 0 || n_ram < 0 || n_gpu + n_ram != n_layer)
++		return (0);
++	if ((n_gpu > 0 && gpu_layers == NULL) || (n_ram > 0 && ram_layers == NULL))
++		return (0);
++	seen = (int8_t *)calloc((size_t)n_layer, sizeof(int8_t));
++	if (seen == NULL)
++		return (0);
++	ok = 1;
++	for (i = 0; ok && i < n_gpu; i++)
++	{
++		idx = gpu_layers[i];
++		if (idx < 0 || idx >= n_layer || seen[idx])
++			ok = 0;
++		else
++			seen[idx] = 1;
++	}
++	for (i = 0; ok && i < n_ram; i++)
++	{
++		idx = ram_layers[i];
++		if (idx < 0 || idx >= n_layer || seen[idx])
++			ok = 0;
++		else
++			seen[idx] = 1;
++	}
++	if (ok)
++		for (i = 0; ok && i < n_layer; i++)
++			if (!seen[i])
++				ok = 0;
++	free(seen);
++	return (ok);
++}
++
++int	membrane_tiering_byte_accounting(const int32_t *gpu_layers,
++		int32_t n_gpu, const int32_t *ram_layers, int32_t n_ram,
++		int32_t n_layer, uint64_t bytes_per_layer,
++		uint64_t *out_gpu_bytes, uint64_t *out_ram_bytes)
++{
++	if (!membrane_tiering_validate_partition(gpu_layers, n_gpu, ram_layers,
++			n_ram, n_layer))
++		return (0);
++	if (out_gpu_bytes == NULL || out_ram_bytes == NULL)
++		return (0);
++	*out_gpu_bytes = (uint64_t)n_gpu * bytes_per_layer;
++	*out_ram_bytes = (uint64_t)n_ram * bytes_per_layer;
++	return (1);
++}
++
++int	membrane_tiering_within_budget(uint64_t gpu_bytes, uint64_t budget_bytes)
++{
++	return (gpu_bytes <= budget_bytes);
++}
++
++int	membrane_tiering_manual_split(int32_t n_layer, int32_t n_gpu_layers,
++		int32_t *out_gpu_layers, int32_t *out_n_gpu,
++		int32_t *out_ram_layers, int32_t *out_n_ram)
++{
++	int32_t	i_gpu_start;
++	int32_t	i;
++	int32_t	gc;
++	int32_t	rc;
++
++	if (n_layer <= 0 || out_gpu_layers == NULL || out_n_gpu == NULL
++			|| out_ram_layers == NULL || out_n_ram == NULL)
++		return (0);
++	if (n_gpu_layers < 0)
++		n_gpu_layers = 0;
++	if (n_gpu_layers > n_layer)
++		n_gpu_layers = n_layer;
++	i_gpu_start = n_layer - n_gpu_layers;
++	gc = 0;
++	rc = 0;
++	for (i = 0; i < n_layer; i++)
++	{
++		if (i >= i_gpu_start)
++			out_gpu_layers[gc++] = i;
++		else
++			out_ram_layers[rc++] = i;
++	}
++	*out_n_gpu = gc;
++	*out_n_ram = rc;
++	return (1);
++}
++
++int	membrane_tiering_valid_transition(int from_state, int to_state)
++{
++	if (from_state == MEMBRANE_TIERING_STATE_RESIDENT_RAM
++			&& to_state == MEMBRANE_TIERING_STATE_PROMOTING)
++		return (1);
++	if (from_state == MEMBRANE_TIERING_STATE_PROMOTING
++			&& to_state == MEMBRANE_TIERING_STATE_RESIDENT_GPU)
++		return (1);
++	if (from_state == MEMBRANE_TIERING_STATE_RESIDENT_GPU
++			&& to_state == MEMBRANE_TIERING_STATE_DEMOTING)
++		return (1);
++	if (from_state == MEMBRANE_TIERING_STATE_DEMOTING
++			&& to_state == MEMBRANE_TIERING_STATE_RESIDENT_RAM)
++		return (1);
++	return (0);
++}
+diff --git a/tools/membrane-kv-tiering/placement_policy.h b/tools/membrane-kv-tiering/placement_policy.h
+new file mode 100644
+index 0000000..c5da543
+--- /dev/null
++++ b/tools/membrane-kv-tiering/placement_policy.h
+@@ -0,0 +1,99 @@
++#ifndef MEMBRANE_KV_TIERING_PLACEMENT_POLICY_H
++# define MEMBRANE_KV_TIERING_PLACEMENT_POLICY_H
++
++# include <stddef.h>
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 12A, Section 19: llama-free (no ggml/llama header) pure
++ * arithmetic for the manual, static, per-layer GPU/RAM placement
++ * policy this phase actually proved (--gpu-layers N, see
++ * architecture.json) -- RESEARCH ONLY, experiment/kv-ram-vram-tiering
++ * branch only, never linked into membrane-run.
++ */
++
++# define MEMBRANE_TIERING_PLACE_GPU	0
++# define MEMBRANE_TIERING_PLACE_RAM	1
++
++/*
++ * Validates that gpu_layers (n_gpu entries) and ram_layers (n_ram
++ * entries) TOGETHER partition [0, n_layer) exactly: every layer index
++ * appears in exactly one of the two lists, no duplicates within or
++ * across lists, no out-of-range index, n_gpu + n_ram == n_layer.
++ * Returns 1 if a valid partition, 0 (fails closed) otherwise --
++ * catches double ownership (a layer in both lists), gaps (a layer in
++ * neither), and out-of-range/negative indices.
++ */
++int	membrane_tiering_validate_partition(const int32_t *gpu_layers,
++		int32_t n_gpu, const int32_t *ram_layers, int32_t n_ram,
++		int32_t n_layer);
++
++/*
++ * Exact GPU/RAM KV byte accounting for a validated partition.
++ * bytes_per_layer is the real, uniform per-layer KV byte count (K+V
++ * combined) for the model/context/precision in question -- caller
++ * supplies it, never re-derived here. Returns 1 and sets
++ * out_gpu_bytes/out_ram_bytes on success; returns 0 (fields
++ * untouched) if the partition itself is invalid (delegates to
++ * membrane_tiering_validate_partition first) -- fails closed rather
++ * than accounting for a partition that isn't actually valid.
++ */
++int	membrane_tiering_byte_accounting(const int32_t *gpu_layers,
++		int32_t n_gpu, const int32_t *ram_layers, int32_t n_ram,
++		int32_t n_layer, uint64_t bytes_per_layer,
++		uint64_t *out_gpu_bytes, uint64_t *out_ram_bytes);
++
++/*
++ * Returns 1 if gpu_bytes <= budget_bytes (a valid, in-budget
++ * placement), 0 otherwise. Pure comparison, no side effects -- kept
++ * as its own function so a caller's budget-limit check is never
++ * silently skipped or conflated with the accounting call above.
++ */
++int	membrane_tiering_within_budget(uint64_t gpu_bytes,
++		uint64_t budget_bytes);
++
++/*
++ * Deterministic manual split matching Section 7's example policy and
++ * the REAL llama.cpp layer-to-device convention this phase verified
++ * (llama-model.cpp: i_gpu_start = max(n_layer + 1 - n_gpu_layers, 0)
++ * -- the LAST n_gpu_layers layers go to GPU, not the first). Writes
++ * exactly n_gpu_layers indices (clamped to [0, n_layer]) into
++ * out_gpu_layers (trailing layers) and the rest into out_ram_layers
++ * (leading layers), both caller-allocated with >= n_layer capacity;
++ * out_n_gpu/out_n_ram report how many of each were written. Returns
++ * 1 on success, 0 only for n_layer <= 0 or a NULL output pointer.
++ */
++int	membrane_tiering_manual_split(int32_t n_layer, int32_t n_gpu_layers,
++		int32_t *out_gpu_layers, int32_t *out_n_gpu,
++		int32_t *out_ram_layers, int32_t *out_n_ram);
++
++/* Promotion/demotion state machine (Section 19) -- models the states
++ * a single layer's KV placement can be in and the only transitions
++ * this phase considers valid. No implementation of promotion/demotion
++ * itself exists this phase (Section 7: manual-only); this is pure
++ * state-machine bookkeeping for future use. */
++# define MEMBRANE_TIERING_STATE_RESIDENT_GPU	0
++# define MEMBRANE_TIERING_STATE_RESIDENT_RAM	1
++# define MEMBRANE_TIERING_STATE_PROMOTING	2
++# define MEMBRANE_TIERING_STATE_DEMOTING	3
++
++/*
++ * Returns 1 if transitioning a layer FROM from_state TO to_state is
++ * valid, 0 otherwise. Valid transitions:
++ *   RESIDENT_RAM -> PROMOTING -> RESIDENT_GPU
++ *   RESIDENT_GPU -> DEMOTING  -> RESIDENT_RAM
++ * Every other transition (including PROMOTING/DEMOTING directly to
++ * each other, a state to itself, or any unknown state value) is
++ * invalid -- fails closed, no silent no-op treated as success.
++ */
++int	membrane_tiering_valid_transition(int from_state, int to_state);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-tiering/test_placement_policy.c b/tools/membrane-kv-tiering/test_placement_policy.c
+new file mode 100644
+index 0000000..5416a39
+--- /dev/null
++++ b/tools/membrane-kv-tiering/test_placement_policy.c
+@@ -0,0 +1,225 @@
++#include <string.h>
++
++#include "placement_policy.h"
++#include "test_helpers.h"
++
++static void	test_valid_partition(void)
++{
++	int32_t	gpu[2] = {2, 3};
++	int32_t	ram[2] = {0, 1};
++
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, 2, ram, 2, 4) == 1,
++		"a clean 2/2 partition of [0,4) validates");
++}
++
++static void	test_duplicate_ownership_rejected(void)
++{
++	int32_t	gpu[2] = {1, 2};
++	int32_t	ram[2] = {1, 3};
++
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, 2, ram, 2, 4) == 0,
++		"layer 1 appears in BOTH lists -- duplicate ownership fails closed");
++}
++
++static void	test_gap_rejected(void)
++{
++	int32_t	gpu[1] = {3};
++	int32_t	ram[2] = {0, 1};
++
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, 1, ram, 2, 4) == 0,
++		"layer 2 appears in NEITHER list -- a gap fails closed, not "
++		"silently treated as one placement or the other");
++}
++
++static void	test_out_of_range_rejected(void)
++{
++	int32_t	gpu[2] = {2, 99};
++	int32_t	ram[2] = {0, 1};
++
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, 2, ram, 2, 4) == 0,
++		"out-of-range layer index (99, n_layer=4) fails closed");
++}
++
++static void	test_negative_index_rejected(void)
++{
++	int32_t	gpu[2] = {2, -1};
++	int32_t	ram[2] = {0, 1};
++
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, 2, ram, 2, 4) == 0,
++		"negative layer index fails closed");
++}
++
++static void	test_count_mismatch_rejected(void)
++{
++	int32_t	gpu[2] = {2, 3};
++	int32_t	ram[1] = {0};
++
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, 2, ram, 1, 4) == 0,
++		"n_gpu + n_ram != n_layer fails closed even before checking indices");
++}
++
++static void	test_byte_accounting_exact(void)
++{
++	int32_t		gpu[2] = {2, 3};
++	int32_t		ram[2] = {0, 1};
++	uint64_t	gpu_b;
++	uint64_t	ram_b;
++
++	TEST_ASSERT(membrane_tiering_byte_accounting(gpu, 2, ram, 2, 4, 1000,
++			&gpu_b, &ram_b) == 1, "accounting resolves for a valid partition");
++	TEST_ASSERT(gpu_b == 2000, "gpu_bytes == n_gpu * bytes_per_layer exactly");
++	TEST_ASSERT(ram_b == 2000, "ram_bytes == n_ram * bytes_per_layer exactly");
++	TEST_ASSERT(gpu_b + ram_b == 4 * 1000,
++		"gpu_bytes + ram_bytes == n_layer * bytes_per_layer exactly, no "
++		"drift, no unaccounted byte");
++}
++
++static void	test_byte_accounting_rejects_invalid_partition(void)
++{
++	int32_t		gpu[2] = {1, 2};
++	int32_t		ram[2] = {1, 3};
++	uint64_t	gpu_b = 12345;
++	uint64_t	ram_b = 67890;
++
++	TEST_ASSERT(membrane_tiering_byte_accounting(gpu, 2, ram, 2, 4, 1000,
++			&gpu_b, &ram_b) == 0,
++		"accounting refuses to run on a partition with duplicate ownership");
++	TEST_ASSERT(gpu_b == 12345 && ram_b == 67890,
++		"output fields left untouched on failure, not zeroed or partially "
++		"written");
++}
++
++static void	test_within_budget(void)
++{
++	TEST_ASSERT(membrane_tiering_within_budget(1000, 1000) == 1,
++		"exactly at budget is within budget");
++	TEST_ASSERT(membrane_tiering_within_budget(1001, 1000) == 0,
++		"one byte over budget is rejected");
++	TEST_ASSERT(membrane_tiering_within_budget(0, 0) == 1,
++		"zero/zero is within budget");
++}
++
++static void	test_manual_split_matches_llama_cpp_convention(void)
++{
++	int32_t	gpu[8];
++	int32_t	ram[8];
++	int32_t	n_gpu;
++	int32_t	n_ram;
++
++	TEST_ASSERT(membrane_tiering_manual_split(8, 3, gpu, &n_gpu, ram, &n_ram)
++		== 1, "manual split resolves");
++	TEST_ASSERT(n_gpu == 3 && n_ram == 5, "3 GPU layers, 5 RAM layers");
++	TEST_ASSERT(gpu[0] == 5 && gpu[1] == 6 && gpu[2] == 7,
++		"the LAST 3 layers (5,6,7) go to GPU -- matches the real "
++		"llama-model.cpp i_gpu_start convention this phase verified "
++		"(trailing layers offloaded, not leading)");
++	TEST_ASSERT(ram[0] == 0 && ram[4] == 4,
++		"the FIRST 5 layers (0..4) stay on RAM");
++}
++
++static void	test_manual_split_clamps(void)
++{
++	int32_t	gpu[4];
++	int32_t	ram[4];
++	int32_t	n_gpu;
++	int32_t	n_ram;
++
++	TEST_ASSERT(membrane_tiering_manual_split(4, 99, gpu, &n_gpu, ram, &n_ram)
++		== 1, "over-large n_gpu_layers still resolves (clamped)");
++	TEST_ASSERT(n_gpu == 4 && n_ram == 0, "clamped to all-GPU, not an error");
++
++	TEST_ASSERT(membrane_tiering_manual_split(4, -5, gpu, &n_gpu, ram, &n_ram)
++		== 1, "negative n_gpu_layers still resolves (clamped)");
++	TEST_ASSERT(n_gpu == 0 && n_ram == 4, "clamped to all-RAM, not an error");
++}
++
++static void	test_manual_split_deterministic(void)
++{
++	int32_t	gpu1[8];
++	int32_t	ram1[8];
++	int32_t	gpu2[8];
++	int32_t	ram2[8];
++	int32_t	n_gpu1;
++	int32_t	n_ram1;
++	int32_t	n_gpu2;
++	int32_t	n_ram2;
++
++	membrane_tiering_manual_split(8, 3, gpu1, &n_gpu1, ram1, &n_ram1);
++	membrane_tiering_manual_split(8, 3, gpu2, &n_gpu2, ram2, &n_ram2);
++	TEST_ASSERT(n_gpu1 == n_gpu2 && n_ram1 == n_ram2
++			&& memcmp(gpu1, gpu2, sizeof(int32_t) * (size_t)n_gpu1) == 0
++			&& memcmp(ram1, ram2, sizeof(int32_t) * (size_t)n_ram1) == 0,
++		"identical inputs produce a byte-identical split across calls");
++}
++
++static void	test_manual_split_produces_valid_partition(void)
++{
++	int32_t	gpu[10];
++	int32_t	ram[10];
++	int32_t	n_gpu;
++	int32_t	n_ram;
++
++	membrane_tiering_manual_split(10, 4, gpu, &n_gpu, ram, &n_ram);
++	TEST_ASSERT(membrane_tiering_validate_partition(gpu, n_gpu, ram, n_ram,
++			10) == 1,
++		"manual_split's own output always validates as a clean partition "
++		"-- the two functions agree with each other");
++}
++
++static void	test_state_machine_valid_transitions(void)
++{
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_RESIDENT_RAM,
++			MEMBRANE_TIERING_STATE_PROMOTING) == 1, "RAM -> PROMOTING ok");
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_PROMOTING,
++			MEMBRANE_TIERING_STATE_RESIDENT_GPU) == 1,
++		"PROMOTING -> GPU ok");
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_RESIDENT_GPU,
++			MEMBRANE_TIERING_STATE_DEMOTING) == 1, "GPU -> DEMOTING ok");
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_DEMOTING,
++			MEMBRANE_TIERING_STATE_RESIDENT_RAM) == 1,
++		"DEMOTING -> RAM ok");
++}
++
++static void	test_state_machine_invalid_transitions_rejected(void)
++{
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_PROMOTING,
++			MEMBRANE_TIERING_STATE_DEMOTING) == 0,
++		"PROMOTING -> DEMOTING directly is invalid (must land on a "
++		"resident state first)");
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_RESIDENT_GPU,
++			MEMBRANE_TIERING_STATE_RESIDENT_GPU) == 0,
++		"a state to itself is not a valid transition (no silent no-op)");
++	TEST_ASSERT(membrane_tiering_valid_transition(
++			MEMBRANE_TIERING_STATE_RESIDENT_RAM,
++			MEMBRANE_TIERING_STATE_RESIDENT_GPU) == 0,
++		"RAM -> GPU directly (skipping PROMOTING) is invalid");
++	TEST_ASSERT(membrane_tiering_valid_transition(99, 0) == 0,
++		"an unknown from_state is invalid, not silently accepted");
++}
++
++int	main(void)
++{
++	test_valid_partition();
++	test_duplicate_ownership_rejected();
++	test_gap_rejected();
++	test_out_of_range_rejected();
++	test_negative_index_rejected();
++	test_count_mismatch_rejected();
++	test_byte_accounting_exact();
++	test_byte_accounting_rejects_invalid_partition();
++	test_within_budget();
++	test_manual_split_matches_llama_cpp_convention();
++	test_manual_split_clamps();
++	test_manual_split_deterministic();
++	test_manual_split_produces_valid_partition();
++	test_state_machine_valid_transitions();
++	test_state_machine_invalid_transitions_rejected();
++	printf("test_placement_policy: all tests passed\n");
++	return (0);
++}

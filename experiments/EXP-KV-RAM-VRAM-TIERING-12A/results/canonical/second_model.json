@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 10: SmolLM2-360M (32 layers), ctx=2048, real GTX 1650 Vulkan. Representative tiered configuration: --gpu-layers 16 (half). Raw data: raw_second_model.jsonl.",
+  "results": {
+    "full_gpu_q8_mib": 770, "full_gpu_q5_mib": 757,
+    "tiered_q8_half_mib": 448, "tiered_q5_half_mib": 442,
+    "gpu_layers_selected": {"full": 32, "tiered": 16},
+    "no_fallback_any_config": true
+  },
+  "tiering_alone_saving_mib": 322,
+  "finding": "the effect confirmed on 135M reproduces on the second model: tiering saves substantially more VRAM (322 MiB) than the Q8->Q5 precision step alone (13 MiB) at this context, model-independent so far, both models tested clean (no fallback, correct exit codes, gpu_layers_selected matches request exactly). As with the 135M results, roughly half of this saving is weight VRAM, not KV VRAM specifically -- see memory_accounting.json / architecture.json's weight-KV coupling finding."
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 8: full memory accounting for the --gpu-layers N mechanism used in Sections 9-11, making explicit the weight-vs-KV split that architecture.json's critical_correction_weight_kv_coupling flags -- this mechanism moves BOTH weights and KV per layer, not KV alone. All numbers real, from membrane-run --json's own gpu_policy/storage fields plus external nvidia-smi (same runs as vram_reduction.json).",
+  "example_smollm2_135m_ctx16384_q8": {
+    "full_gpu_30_of_30_layers": {
+      "estimated_model_bytes_weights": 212474880,
+      "kv_allocated_bytes_total": 200540160,
+      "gpu_kv_bytes": 200540160,
+      "ram_kv_bytes": 0,
+      "external_vram_delta_mib": 491
+    },
+    "tiered_15_of_30_layers": {
+      "estimated_model_bytes_weights": 106237440,
+      "kv_allocated_bytes_total": 200540160,
+      "gpu_kv_bytes": 100270080,
+      "ram_kv_bytes": 100270080,
+      "external_vram_delta_mib": 292
+    },
+    "gpu_kv_plus_ram_kv_equals_expected_total": {
+      "check": "100270080 + 100270080 == 200540160",
+      "holds": true
+    },
+    "decomposition_of_the_measured_vram_saving": {
+      "total_measured_saving_mib": 199,
+      "weight_saving_mib": 101.3,
+      "weight_saving_bytes": 106237440,
+      "kv_saving_mib": 95.6,
+      "kv_saving_bytes": 100270080,
+      "sum_of_the_two_mib": 196.9,
+      "measured_vs_predicted_gap_mib": 2.1,
+      "note": "the arithmetic sum of independently-computed weight and KV savings (196.9 MiB) matches the directly measured external VRAM delta (199 MiB) to within ~2 MiB (~1%), which is within the noise band this phase has seen elsewhere (e.g. Phase 11E's overhead_calibration.json) -- the saving is FULLY explained by these two additive components, no unaccounted memory."
+    }
+  },
+  "honest_takeaway": "roughly HALF of the VRAM savings this phase measured and reported in vram_reduction.json/second_model.json/pressure_test.json comes from moving LAYER WEIGHTS off GPU (a well-understood, pre-existing llama.cpp capability, not novel to this phase), not from KV cache placement specifically. The KV-specific portion is real and substantial on its own (95.6 MiB out of 199 MiB at this scale), but reporting the COMBINED number as if it were a pure KV-tiering win would overstate what this phase's own mechanism actually isolates. See architecture.json for why decoupling the two (moving ONLY KV, keeping weights GPU-resident for fast compute) requires a llama.cpp patch this phase does not write."
+}

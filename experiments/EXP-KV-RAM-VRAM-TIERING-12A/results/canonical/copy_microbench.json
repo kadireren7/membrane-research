@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 13: copy-cost microbenchmark, SmolLM2-135M, real GTX 1650 Vulkan, ctx=2048, 10 repetitions per region/direction (membrane-kv-tiering-copy-microbench). Uses plain (non-pinned) host malloc/vector buffers -- see prefetch_feasibility.json for why this matters.",
+  "regions": {
+    "one_layer_k": {"n_tensors": 1, "total_bytes": 786432,
+      "gpu_to_host": {"mean_ms": 0.7016, "median_ms": 0.6889, "min_ms": 0.6072, "max_ms": 0.9695, "stddev_ms": 0.1054, "effective_gbps": 1.1209},
+      "host_to_gpu": {"mean_ms": 0.5468, "median_ms": 0.5474, "min_ms": 0.5441, "max_ms": 0.5492, "stddev_ms": 0.0018, "effective_gbps": 1.4382}},
+    "several_layers_kv": {"n_tensors": 8, "total_bytes": 6291456,
+      "gpu_to_host": {"mean_ms": 8.7048, "median_ms": 8.6827, "min_ms": 5.9619, "max_ms": 17.7303, "stddev_ms": 3.4433, "effective_gbps": 0.7228},
+      "host_to_gpu": {"mean_ms": 4.5678, "median_ms": 4.3869, "min_ms": 4.3650, "max_ms": 5.2314, "stddev_ms": 0.3020, "effective_gbps": 1.3774}},
+    "all_layers_kv": {"n_tensors": 60, "total_bytes": 47185920,
+      "gpu_to_host": {"mean_ms": 75.4109, "median_ms": 75.6857, "min_ms": 60.2644, "max_ms": 95.2478, "stddev_ms": 9.9184, "effective_gbps": 0.6257},
+      "host_to_gpu": {"mean_ms": 34.2823, "median_ms": 33.9903, "min_ms": 32.8644, "max_ms": 37.6821, "stddev_ms": 1.6202, "effective_gbps": 1.3764}}
+  },
+  "findings": {
+    "get_slower_and_noisier_than_set": "GPU->host (get) is consistently slower than host->GPU (set) at every region size, and has 5-10x higher relative stddev -- e.g. all_layers_kv: get stddev=9.92ms (13% of mean) vs set stddev=1.62ms (4.7% of mean). Read-back appears to carry a real synchronization/stall cost beyond raw transfer time that write does not.",
+    "effective_bandwidth_far_below_pcie_theoretical": "0.6-1.4 GB/s effective, well under typical PCIe x4/x8 theoretical bandwidth (multiple GB/s) -- consistent with architecture.json's async-transfer finding: plain malloc'd (non-pinned) host memory forces ggml_backend_tensor_get/set onto Vulkan's staging/synchronous path rather than a fast pinned-memory DMA path.",
+    "cost_scales_with_n_tensors_not_just_bytes": "several_layers_kv (8 tensors, 6.29 MB) takes proportionally MORE time per byte than all_layers_kv (60 tensors, 47.19 MB) would if cost were purely bandwidth-bound (8.70ms for 6.29MB vs 75.41ms for 47.19MB implies the smaller region is markedly less bandwidth-efficient) -- per-call/per-tensor overhead (one ggml_backend_tensor_get/set call per tensor, not one batched call for the whole region) is a real, disclosed cost driver, not just raw bytes moved."
+  }
+}

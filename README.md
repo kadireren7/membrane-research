@@ -98,6 +98,14 @@ not promoted) and
 (Q5_1 clears the quality bar Q4 missed — `Q5_PRODUCT_CANDIDATE`,
 shipped as `--kv q5` via [kadireren7/membrane#19](https://github.com/kadireren7/membrane/pull/19)).
 
+A third,
+[`EXP-KV-RAM-VRAM-TIERING-12A`](experiments/EXP-KV-RAM-VRAM-TIERING-12A/README.md),
+preserves Phase 12A: a real, working GPU↔host KV copy mechanism was
+proven, but true KV-only placement (independent of weight placement)
+was proven *not* achievable with the public API available at the time
+(`TIERING_REQUIRES_UPSTREAM_CHANGE`) — this finding directly motivated
+the later Phase 12B device-override patch (not yet migrated here).
+
 ## How canonical results work
 
 A result is "canonical" only once it lives in an experiment's own

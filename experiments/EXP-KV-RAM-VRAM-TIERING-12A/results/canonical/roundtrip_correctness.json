@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Sections 3/4/12: minimal standalone-style and live-context KV movement round-trip proofs. SmolLM2-135M, real GTX 1650 Vulkan, ctx=2048 (Section 3's specified target). Tool: membrane-kv-tiering-live-movement-probe (100% public ggml/ggml-backend/llama API, no llama.cpp patch -- see architecture.json for the cb_eval + ggml_tensor::view_src mechanism this relies on).",
+  "method": "real live llama_context; cb_eval captures cache_k_l5/cache_v_l5's actual persistent leaf tensor (via view_src) during real prompt decode; 4 tokens generated (pre-movement reference tail); K tensor copied GPU->host (ggml_backend_tensor_get); GPU tensor then deliberately zeroed (ggml_backend_tensor_set) to prove the SAME backing memory is being touched, not a shadow; host copy restored (ggml_backend_tensor_set); GPU tensor re-read and compared byte-for-byte (FNV-1a 64-bit checksum) against the pre-movement original; generation continues for 4 more tokens.",
+  "target_layer": 5,
+  "captured_tensor": {"name": "cache_k_l5 / cache_v_l5", "nbytes": 786432, "buffer": "Vulkan1",
+    "note": "786432 bytes matches the exact expected K-tensor size for this model/context (n_embd_k_gqa=192, kv_size=2048, F16, K only): 192*2048*2 bytes"},
+  "results": {
+    "corruption_took_effect": true,
+    "corruption_took_effect_meaning": "after zeroing the GPU tensor and reading it back, the read-back bytes matched all-zero, not the original data -- proves the get/set calls operate on the real, live, GPU-resident backing memory (a shadow-copy implementation could not fail this check)",
+    "restore_matches_original": true,
+    "restore_matches_original_meaning": "after restoring from the host-side copy, the GPU tensor's bytes exactly matched (FNV-1a checksum equality over all 786432 bytes) the pre-corruption original -- lossless round trip, no bit corruption",
+    "post_movement_generation_ok": true,
+    "post_movement_generation_ok_meaning": "llama_decode succeeded for all 4 post-movement tokens, no crash, no stale-pointer fault, no corruption symptom",
+    "overall_ok": true
+  },
+  "pre_movement_tokens": [260, 23790, 2767, 198],
+  "post_movement_tokens": [198, 788, 451, 14874],
+  "correctness_argument": "because restore_matches_original is an exact byte-level equality check (not merely 'generation didn't crash'), the KV state after the round trip is PROVABLY bit-identical to what it would have been with no movement at all -- by construction, this means post-movement generation is mathematically guaranteed to match a no-movement reference run token-for-token (the model's forward pass is a deterministic function of that exact KV state plus the input token), so a separate no-movement reference run was not needed to establish token-identity here; it would only add confirmation, not additional proof.",
+  "does_this_free_vram": false,
+  "does_this_free_vram_explanation": "this round trip overwrites data IN PLACE within the SAME already-allocated GPU buffer -- it never shrinks or frees any backend buffer (see architecture.json's shared_buffer_limitation). It proves the COPY mechanism is safe mid-live-context, which is a precondition for any future dynamic movement scheme, but the actual VRAM reduction demonstrated in this phase (vram_reduction.json, second_model.json, pressure_test.json) comes from a SEPARATE, static mechanism (--gpu-layers N chosen at context-creation time), not from this round trip."
+}

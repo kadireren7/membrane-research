@@ -1,0 +1,178 @@
+{
+  "experiment_id": "EXP-KV-RAM-VRAM-TIERING-12A",
+  "phase": "12A",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/kv-ram-vram-tiering",
+  "source_head_sha": "c0029afad68c2aed7b7232ae8cd2e727cde6585c",
+  "base_sha": "d6e6189d0417858bfcf3d51c766eaa4be5fe46e1",
+  "base_sha_note": "Independent branch -- NOT an ancestor of, or a descendant of, the Phase 12B-12G chain (experiment/kv-device-override onward). Precedes and motivated that chain but shares no commit history with it.",
+  "date": "2026-08-15",
+  "purpose": "Determine whether MEMBRANE can independently place/move llama.cpp's KV cache between host RAM and GPU VRAM, separately from model weight placement, using only the public API and mechanisms available at this point (no llama.cpp source changes attempted).",
+  "literal_verdict": "TIERING_REQUIRES_UPSTREAM_CHANGE",
+  "verdict_summary": "A real, live, public-API-only single-tensor GPU<->host copy mechanism was proven safe and correct (new capability). Independent KV-only placement (decoupled from weight placement) was proven NOT achievable with existing public API -- llama-kv-cache.cpp's per-layer KV device resolution uses the exact same model.dev_layer(il) lookup llama-model.cpp uses for weight offload, so the only existing placement control (--gpu-layers N) moves weights and KV together, not independently. This is a real architectural finding, source-verified against the pinned llama.cpp commit, not inferred. The existing combined mechanism still produced a real, measured VRAM win and a real ~10-13% usable-context extension on constrained hardware, disclosed as a coarser, different capability than the phase's actual target.",
+  "verdict_source": "results/phase12/tiering-feasibility/summary.json:decision_gate / decision_gate_rationale (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM) for VRAM-reduction and pressure-test results; copy-microbenchmark and decode-impact results also GPU-measured on the same hardware",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "llama_cpp_pin": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "follow_up": "This phase's own next_step_recommendation (results/canonical/summary.json) directly named the fix later built in Phase 12B (experiment/kv-device-override, source HEAD a1ebd9e285bd763cfb448c8d8202536802783bb9, NOT YET MIGRATED into this repository as of this manifest): a minimal kv_dev_override callback patch to llama-kv-cache.cpp, mirroring the already-accepted kv_type_override patch's shape, decoupling KV buffer-type resolution from weight buffer-type resolution. Phase 12B and the Phase 12B-12G chain it started ultimately informed the static KV residency product feature (kadireren7/membrane PR #21) -- a distant downstream research-lineage consequence, not this phase's own productization.",
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/architecture.json",
+      "source_path": "results/phase12/tiering-feasibility/architecture.json",
+      "source_sha256": "66efce3f268770b284f9ec51d4793f77c5ffd2a0fd6c6fc1b6d55e36a9f264e6",
+      "migrated_sha256": "66efce3f268770b284f9ec51d4793f77c5ffd2a0fd6c6fc1b6d55e36a9f264e6",
+      "size_bytes": 14326,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/copy_microbench.json",
+      "source_path": "results/phase12/tiering-feasibility/copy_microbench.json",
+      "source_sha256": "c0b7234d80155ec6643b6364330d4b962bc93d8d8a1d42d1113a19512d0ebf3a",
+      "migrated_sha256": "c0b7234d80155ec6643b6364330d4b962bc93d8d8a1d42d1113a19512d0ebf3a",
+      "size_bytes": 2674,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/decode_impact.json",
+      "source_path": "results/phase12/tiering-feasibility/decode_impact.json",
+      "source_sha256": "b19fa19fd3d7ac3189a0303d72048a5d95c43409584f94aa15e6cd8bd0cfad12",
+      "migrated_sha256": "b19fa19fd3d7ac3189a0303d72048a5d95c43409584f94aa15e6cd8bd0cfad12",
+      "size_bytes": 3190,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/failures.json",
+      "source_path": "results/phase12/tiering-feasibility/failures.json",
+      "source_sha256": "1e2fc5a9d710e6a9cace587497f847c599763ee47f7b1c7d1d1ee87d99a99f90",
+      "migrated_sha256": "1e2fc5a9d710e6a9cace587497f847c599763ee47f7b1c7d1d1ee87d99a99f90",
+      "size_bytes": 3001,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/manifest.json",
+      "source_path": "results/phase12/tiering-feasibility/manifest.json",
+      "source_sha256": "527dae804af4fe76b101c87b0128520ecf0da317b1e64c07ceb61eacd2dfeb2a",
+      "migrated_sha256": "527dae804af4fe76b101c87b0128520ecf0da317b1e64c07ceb61eacd2dfeb2a",
+      "size_bytes": 1950,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/memory_accounting.json",
+      "source_path": "results/phase12/tiering-feasibility/memory_accounting.json",
+      "source_sha256": "0bea8edd0df8b8b296439db9adc125fe60b38b0f74209906abd1fce0a24cfdc5",
+      "migrated_sha256": "0bea8edd0df8b8b296439db9adc125fe60b38b0f74209906abd1fce0a24cfdc5",
+      "size_bytes": 2511,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/placement_maps.json",
+      "source_path": "results/phase12/tiering-feasibility/placement_maps.json",
+      "source_sha256": "06d4c52971d4bcc2479087673e78839119cb6cfdb7e1066b56373818077d82b2",
+      "migrated_sha256": "06d4c52971d4bcc2479087673e78839119cb6cfdb7e1066b56373818077d82b2",
+      "size_bytes": 3692,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/prefetch_feasibility.json",
+      "source_path": "results/phase12/tiering-feasibility/prefetch_feasibility.json",
+      "source_sha256": "a37e99a1d3c7c32d9d0a08db20b584e34115e10d8eec11c40ab849cd92f6d732",
+      "migrated_sha256": "a37e99a1d3c7c32d9d0a08db20b584e34115e10d8eec11c40ab849cd92f6d732",
+      "size_bytes": 3606,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/pressure_test.json",
+      "source_path": "results/phase12/tiering-feasibility/pressure_test.json",
+      "source_sha256": "7969e2961d65dcebcab7720f1b1228b5596f31676cef3560932ec18c5a38666e",
+      "migrated_sha256": "7969e2961d65dcebcab7720f1b1228b5596f31676cef3560932ec18c5a38666e",
+      "size_bytes": 3551,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/raw_decode_impact_135m.jsonl",
+      "source_path": "results/phase12/tiering-feasibility/raw_decode_impact_135m.jsonl",
+      "source_sha256": "5f3b0a8b7a97b50870a91df56e16107b5365d2f315e6932af2fdc9d63823679a",
+      "migrated_sha256": "5f3b0a8b7a97b50870a91df56e16107b5365d2f315e6932af2fdc9d63823679a",
+      "size_bytes": 845,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/raw_decode_impact_135m_ctx16384.jsonl",
+      "source_path": "results/phase12/tiering-feasibility/raw_decode_impact_135m_ctx16384.jsonl",
+      "source_sha256": "b43ba7a5bf0c03c28a9db56d1e6e7169a248709304139e58a5efaf9b0cefc7ad",
+      "migrated_sha256": "b43ba7a5bf0c03c28a9db56d1e6e7169a248709304139e58a5efaf9b0cefc7ad",
+      "size_bytes": 852,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/raw_pressure_test.jsonl",
+      "source_path": "results/phase12/tiering-feasibility/raw_pressure_test.jsonl",
+      "source_sha256": "a0bffff9be51120eaccb6bab938c20d9b6aa3d1c48f2f453358808dcd3d593b7",
+      "migrated_sha256": "a0bffff9be51120eaccb6bab938c20d9b6aa3d1c48f2f453358808dcd3d593b7",
+      "size_bytes": 3540,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/raw_second_model.jsonl",
+      "source_path": "results/phase12/tiering-feasibility/raw_second_model.jsonl",
+      "source_sha256": "58a059fd3fe590338952e22aa6d15136ba237f42518e3ec00280bef6bfcc683f",
+      "migrated_sha256": "58a059fd3fe590338952e22aa6d15136ba237f42518e3ec00280bef6bfcc683f",
+      "size_bytes": 4048,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/raw_vram_reduction.jsonl",
+      "source_path": "results/phase12/tiering-feasibility/raw_vram_reduction.jsonl",
+      "source_sha256": "209d8809ff753665f9f84ae983ce2fbe3fe3c5f47780c0e329d5814cc26a0dd4",
+      "migrated_sha256": "209d8809ff753665f9f84ae983ce2fbe3fe3c5f47780c0e329d5814cc26a0dd4",
+      "size_bytes": 12371,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/roundtrip_correctness.json",
+      "source_path": "results/phase12/tiering-feasibility/roundtrip_correctness.json",
+      "source_sha256": "5cdd19fc9f9f5100b2447d5dc3405057bf73f87042e43576ee9d1feafd1f1a0d",
+      "migrated_sha256": "5cdd19fc9f9f5100b2447d5dc3405057bf73f87042e43576ee9d1feafd1f1a0d",
+      "size_bytes": 3463,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/second_model.json",
+      "source_path": "results/phase12/tiering-feasibility/second_model.json",
+      "source_sha256": "912c928c086a43b75934aaf9ff75c9e1a5e8864ec54184fbf07aaffe460321c7",
+      "migrated_sha256": "912c928c086a43b75934aaf9ff75c9e1a5e8864ec54184fbf07aaffe460321c7",
+      "size_bytes": 971,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/summary.json",
+      "source_path": "results/phase12/tiering-feasibility/summary.json",
+      "source_sha256": "f4d53a1ec2cff3b21ea082d1e9d62ce0906a1a9e7d471159d398eb5e66d8bf94",
+      "migrated_sha256": "f4d53a1ec2cff3b21ea082d1e9d62ce0906a1a9e7d471159d398eb5e66d8bf94",
+      "size_bytes": 12967,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/results/canonical/vram_reduction.json",
+      "source_path": "results/phase12/tiering-feasibility/vram_reduction.json",
+      "source_sha256": "dacc1ffafd643eb59a2b13837dedb0877514ee5738233b56c517dad69d4f863b",
+      "migrated_sha256": "dacc1ffafd643eb59a2b13837dedb0877514ee5738233b56c517dad69d4f863b",
+      "size_bytes": 2515,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RAM-VRAM-TIERING-12A/patches/phase12a-kv-ram-vram-tiering-prototype.patch",
+      "source_path": "(derived) git diff d6e6189d0417858bfcf3d51c766eaa4be5fe46e1..experiment/kv-ram-vram-tiering -- CMakeLists.txt tools/membrane-kv-tiering/ scripts/verify-results.py",
+      "source_sha256": "938276ddbfa2a09638b02689b32e3e15a44ab94ba207f12c185dac4a45ef9302",
+      "migrated_sha256": "938276ddbfa2a09638b02689b32e3e15a44ab94ba207f12c185dac4a45ef9302",
+      "size_bytes": 53556,
+      "category": "B_experiment_implementation"
+    }
+  ]
+}

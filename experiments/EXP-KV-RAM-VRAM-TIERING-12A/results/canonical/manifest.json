@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "title": "RAM<->VRAM KV Tiering Feasibility",
+  "files": {
+    "manifest.json": "this file",
+    "architecture.json": "Sections 1/2: llama.cpp/ggml backend architecture study, classification, and the critical weight/KV-placement-coupling correction",
+    "roundtrip_correctness.json": "Sections 3/4/12: standalone + live-context single-tensor copy round-trip proof",
+    "copy_microbench.json": "Section 13: copy-cost microbenchmark across region sizes, 10 repetitions",
+    "placement_maps.json": "Sections 6/7: tiering-unit choice and the manual, static, deterministic placement policy",
+    "memory_accounting.json": "Section 8: exact GPU/RAM KV byte accounting, and the weight-vs-KV savings decomposition",
+    "vram_reduction.json": "Section 9: SmolLM2-135M VRAM reduction test across ctx 2048/8192/16384",
+    "second_model.json": "Section 10: SmolLM2-360M representative tiered configuration",
+    "pressure_test.json": "Section 11: GTX 1650 constrained-region test, tiered vs whole-cache adaptive/Q5",
+    "decode_impact.json": "Section 14: generation-throughput impact of live KV movement, four scenarios",
+    "prefetch_feasibility.json": "Section 15: async copy/prefetch API investigation",
+    "failures.json": "Section 18: failure-mode testing (live-tested and reasoned-about)",
+    "raw_vram_reduction.jsonl": "raw per-run data backing vram_reduction.json",
+    "raw_second_model.jsonl": "raw per-run data backing second_model.json",
+    "raw_pressure_test.jsonl": "raw per-run data backing pressure_test.json",
+    "raw_decode_impact_135m.jsonl": "raw per-scenario data backing decode_impact.json (ctx=2048)",
+    "raw_decode_impact_135m_ctx16384.jsonl": "raw per-scenario data backing decode_impact.json (ctx=16384)",
+    "summary.json": "Sections 16/17/21/23/24: hot/cold signal list, sliding-window attention note, final narrative summary, decision gate, next-step recommendation"
+  }
+}

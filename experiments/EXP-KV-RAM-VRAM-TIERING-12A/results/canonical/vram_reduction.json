@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 9: SmolLM2-135M, real GTX 1650 Vulkan, contexts 2048/8192/16384. Tiered configs use the NATIVE, unmodified --gpu-layers 15 (half of 30 layers) product flag -- no new code, no llama.cpp patch. External VRAM measured via nvidia-smi polling (same method as Phase 11E), idle baseline subtracted. Raw data: raw_vram_reduction.jsonl.",
+  "method": "membrane-run --model SmolLM2-135M --prompt \"Hello there\" --gen-tokens 16 --json --quiet, real product CLI, unmodified.",
+  "results_by_ctx": {
+    "2048": {"full_gpu_q8_mib": 330, "full_gpu_q5_mib": 323, "tiered_q8_mib": 216, "tiered_q5_mib": 213,
+      "tiering_alone_saving_mib": 114, "precision_alone_saving_mib": 7, "combined_saving_mib": 117},
+    "8192": {"full_gpu_q8_mib": 399, "full_gpu_q5_mib": 372, "tiered_q8_mib": 250, "tiered_q5_mib": 237,
+      "tiering_alone_saving_mib": 149, "precision_alone_saving_mib": 27, "combined_saving_mib": 162},
+    "16384": {"full_gpu_q8_mib": 491, "full_gpu_q5_mib": 437, "tiered_q8_mib": 292, "tiered_q5_mib": 266,
+      "tiering_alone_saving_mib": 199, "precision_alone_saving_mib": 54, "combined_saving_mib": 225}
+  },
+  "no_fallback_any_config": true,
+  "gpu_layers_selected_matches_requested": "confirmed in raw data: full configs report gpu_layers_selected=30, tiered configs report gpu_layers_selected=15, exactly as requested, no silent partial-offload fallback",
+  "answer_to_section9_question": {
+    "question": "Does tiering produce real external VRAM reduction beyond precision compression alone?",
+    "answer": true,
+    "evidence": "at every tested context, tiering-alone saves 2.2x-3.7x more VRAM than precision compression alone (e.g. at ctx=16384: 199 MiB from tiering vs 54 MiB from Q8->Q5 precision), and the two effects combine additively (combined saving = 225 MiB at ctx=16384, close to the sum of the two individual effects). Tiering's saving also grows with context length (114 -> 149 -> 199 MiB as ctx grows 2048 -> 8192 -> 16384), consistent with it scaling the KV portion of memory, not the fixed weight/compute-buffer portion.",
+    "IMPORTANT_CAVEAT": "'tiering' here is --gpu-layers N, which moves a layer's WEIGHTS off GPU together with its KV, not KV alone -- roughly HALF of the 'tiering-alone saving' numbers above is weight VRAM, not KV VRAM. See memory_accounting.json for the exact decomposition and architecture.json's critical_correction_weight_kv_coupling for why a KV-only mechanism was not achieved this phase."
+  }
+}

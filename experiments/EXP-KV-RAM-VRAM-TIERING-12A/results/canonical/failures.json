@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 18: failure-mode testing. This phase built research probes, not a productized promotion/demotion runtime, so failure modes are split between REAL, LIVE-TESTED cases (the probes themselves) and REASONED-ABOUT-BUT-UNTESTED cases (would need a real promotion/demotion implementation, out of scope this phase).",
+  "live_tested": {
+    "invalid_layer_selection_out_of_range": {
+      "test": "membrane-kv-tiering-live-movement-probe on SmolLM2-135M (30 layers) with target_layer=999",
+      "result": "exit_code=6, clean 'cb_eval never captured cache_k_l999/cache_v_l999' error, no crash, no partial state change -- fails closed"
+    },
+    "invalid_layer_selection_negative": {
+      "test": "same tool, target_layer=-1",
+      "result": "exit_code=6, same clean failure -- fails closed"
+    },
+    "missing_model_file": {
+      "test": "same tool, a nonexistent .gguf path",
+      "result": "exit_code=3, clean llama.cpp load error propagated, no crash"
+    }
+  },
+  "reasoned_not_live_tested": {
+    "insufficient_ram_for_demoted_kv": "not tested -- this phase's --gpu-layers N mechanism relies on llama.cpp's own model-loading-time allocation, which already fails closed with a clear error if host RAM is insufficient for the CPU-resident portion (same code path as any CPU-only llama.cpp load); not specific to this phase's tiering work, not re-verified here.",
+    "insufficient_vram_on_promotion": "not tested -- no promotion (RAM->GPU on demand) mechanism was built this phase (Section 7 explicitly scoped to manual, static placement only); this failure mode only becomes real once a promotion path exists.",
+    "copy_failure_mid_transfer": "not tested -- ggml_backend_tensor_get/set are void-returning in the public API (no per-call error code), so a copy failure would currently only be observable via a Vulkan validation layer message or an eventual llama_decode failure on the next graph build referencing corrupted state; this is a genuine gap a future promotion/demotion implementation would need to address explicitly (e.g. via ggml_backend_synchronize + a completion check), not something this phase's read-only probes needed to handle.",
+    "promotion_needed_but_unavailable": "not applicable -- no dynamic promotion policy exists this phase (Section 7's manual-only scope).",
+    "backend_mismatch": "not directly tested -- the live_movement_probe/copy_microbench tools assume a Vulkan-capable build; running them on a CPU-only build would simply place all captured tensors on the CPU buffer type, and the get/set round trip would still succeed trivially (CPU->CPU copy), not exercise a genuine cross-backend mismatch failure -- not a meaningful test to fabricate."
+  },
+  "no_silent_data_loss_observed": true,
+  "no_silent_data_loss_evidence": "every real failure case above (invalid layer, missing model) produced an explicit, non-zero exit code and a printed error -- none silently proceeded with wrong/partial data."
+}

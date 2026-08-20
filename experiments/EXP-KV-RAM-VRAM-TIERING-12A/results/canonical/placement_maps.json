@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Sections 6/7: tiering unit and first (manual-only) placement policy.",
+  "granularity_options_considered": {
+    "whole_kv_cache": "coarsest; only unit the public llama_state_seq_get_data/set_data API supports for a REAL live-context serialize/restore -- proven safe (Section 4 discussion) but does not, by itself, reduce VRAM (buffer never shrinks).",
+    "per_layer": "the unit the NATIVE --gpu-layers N mechanism already operates at (model.dev_layer(il), llama-kv-cache.cpp:214-225) -- proven, real, existing, zero new code, real VRAM reduction (vram_reduction.json). Chosen as this phase's primary unit.",
+    "per_k_or_v_tensor": "finer than per-layer; proven reachable for live COPY (cb_eval + view_src, roundtrip_correctness.json) but NOT for independent VRAM release (shared-buffer limitation, architecture.json) -- useful for future live-movement work, not for this phase's VRAM-reduction proof.",
+    "token_chunk_window": "not investigated this phase -- would need either a custom KV layout (out of scope) or SWA-aware chunking (see architecture.json's sliding-window note); explicitly deferred, not jumped to per Section 6's own instruction.",
+    "page_block": "no existing MEMBRANE or llama.cpp infrastructure supports this granularity for the KV cache; not pursued, per Section 6's 'do not jump to block-level implementation.'"
+  },
+  "granularity_chosen": "per_layer",
+  "granularity_chosen_rationale": "smallest granularity that is BOTH cleanly supported by an existing, unmodified public mechanism AND produces a real, measured VRAM reduction (per-tensor copy is finer but does not release memory; whole-cache is coarser and also does not release memory without a full context teardown). Matches Section 6's explicit preference for the simpler unit that existing APIs cleanly support.",
+  "manual_policy_section7": {
+    "description": "deterministic, explicit, manual layer split -- no adaptive/hotness logic, exactly as Section 7 requires for this phase.",
+    "example_360m_model": "32 layers total; --gpu-layers 16 keeps roughly the LAST 16 layers (closer to output) resident on GPU VRAM, the FIRST ~16 layers (closer to the embedding) resident on host RAM -- confirmed from llama-model.cpp's own layer-to-device assignment: i_gpu_start = max(n_layer_all + 1 - n_gpu_layers, 0), and layers with il < i_gpu_start are forced CPU (llama-model.cpp:1307,1311). The '+1' term (accounting for the model's output layer being counted in n_layer_all) means the exact split is off-by-one from a naive floor(n_layer/2) split -- not independently re-verified per-layer via debug logs in this phase, only the AGGREGATE effect (real VRAM reduction, gpu_layers_selected matching the request) was measured directly.",
+    "example_135m_model": "30 layers total; --gpu-layers 15 keeps roughly the last 15 layers on GPU, the rest on RAM (same formula, same caveat as above).",
+    "is_this_hot_recent_or_cold_old": "NEITHER, by design -- this is a fixed, load-time, layer-index-based split, not a token-recency-based split. It answers 'can placement be split across GPU/RAM at all, with a real memory win' (yes), not 'can placement track which KV is actually hot/cold' (deferred, Section 16, research-only listing, not implemented this phase).",
+    "how_to_choose_the_split_point": "not automated this phase -- a fixed N was chosen (roughly half the model) purely to demonstrate the mechanism at a representative point; Section 24's recommended next step is where an actual selection policy (e.g. reusing the Phase 11D sensitivity profile to decide WHICH layers matter most, keeping those layers' KV on GPU) would be designed."
+  }
+}

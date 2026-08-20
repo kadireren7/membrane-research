@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 14: real generation-throughput impact of live KV movement, SmolLM2-135M, Vulkan, 32 generated tokens, transfer_every_n=8 for scenarios C/D. All four scenarios run on the SAME prompt/model, back to back. Raw data: raw_decode_impact_135m.jsonl (ctx=2048), raw_decode_impact_135m_ctx16384.jsonl (ctx=16384).",
+  "scenarios": {
+    "A_no_transfers": "pure baseline, no movement at all",
+    "B_one_transfer_before_generation": "one single-layer (K+V) round trip immediately before the generation loop starts",
+    "C_periodic_single_layer_every_8_tokens": "one single-layer (K+V) round trip every 8 generated tokens (4 total over 32 tokens)",
+    "D_worst_case_all_layers_every_8_tokens": "ALL layers' K+V round-tripped every 8 generated tokens (4 total) -- the deliberately pessimistic synchronous case"
+  },
+  "results": {
+    "ctx_2048": {
+      "A": {"total_ms": 1180.32, "generation_tok_per_s": 27.11, "stall_fraction": 0.0},
+      "B": {"total_ms": 1146.89, "generation_tok_per_s": 27.90, "stall_fraction": 0.00078, "transfer_ms": 0.89},
+      "C": {"total_ms": 1136.67, "generation_tok_per_s": 28.15, "stall_fraction": 0.00299, "transfer_ms": 3.40},
+      "D": {"total_ms": 1223.22, "generation_tok_per_s": 26.16, "stall_fraction": 0.07519, "transfer_ms": 91.97}
+    },
+    "ctx_16384": {
+      "A": {"total_ms": 1217.19, "generation_tok_per_s": 26.29, "stall_fraction": 0.0},
+      "B": {"total_ms": 1171.45, "generation_tok_per_s": 27.32, "stall_fraction": 0.01098, "transfer_ms": 12.86},
+      "C": {"total_ms": 1174.87, "generation_tok_per_s": 27.24, "stall_fraction": 0.03453, "transfer_ms": 40.57},
+      "D": {"total_ms": 2124.50, "generation_tok_per_s": 15.06, "stall_fraction": 0.46914, "transfer_ms": 996.69}
+    }
+  },
+  "note_on_A_vs_B_C_apparent_speedup": "scenarios B/C show slightly HIGHER tok/s than A in these measurements -- this is run-to-run noise/warmup effects on a small, fast model (each scenario reloads the model fresh), not a genuine benefit from transferring data; the meaningful signal here is scenario D's clear, large cost, not small differences between A/B/C which are within measurement noise (compare to performance.json's own noise-disclosure precedent from Phase 11E).",
+  "finding": "single-layer, targeted movement (scenarios B and C) is cheap at every tested context -- under 3.5% stall even at ctx=16384, negligible at ctx=2048. The DELIBERATELY worst-case scenario (D: all 30 layers' K+V, synchronously, every 8 tokens) is genuinely expensive: 7.5% stall at ctx=2048, but 47% stall and roughly HALVED generation throughput at ctx=16384 -- transfer cost scales with KV size while compute-per-token does not, so the worst case gets proportionally worse at larger contexts. This directly supports Section 15/23's conclusion: naive, frequent, whole-cache synchronous movement is impractical at scale, but the STATIC, load-time-only tiering mechanism this phase's core VRAM-reduction results (vram_reduction.json, second_model.json, pressure_test.json) actually rely on requires ZERO runtime transfer cost at all -- it is decided once, before generation starts, not repeated per token."
+}

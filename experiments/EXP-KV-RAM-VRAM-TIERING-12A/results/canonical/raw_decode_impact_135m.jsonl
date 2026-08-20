@@ -1,0 +1,4 @@
+{"schema_version":1,"scenario":"A","n_ctx":2048,"n_gen":32,"transfer_every_n":8,"total_ms":1180.3158,"total_transfer_ms":0.0000,"n_transfers":0,"generation_tok_per_s":27.1114,"stall_fraction_of_total":0.000000}
+{"schema_version":1,"scenario":"B","n_ctx":2048,"n_gen":32,"transfer_every_n":8,"total_ms":1146.8891,"total_transfer_ms":0.8948,"n_transfers":1,"generation_tok_per_s":27.9016,"stall_fraction_of_total":0.000780}
+{"schema_version":1,"scenario":"C","n_ctx":2048,"n_gen":32,"transfer_every_n":8,"total_ms":1136.6716,"total_transfer_ms":3.3956,"n_transfers":4,"generation_tok_per_s":28.1524,"stall_fraction_of_total":0.002987}
+{"schema_version":1,"scenario":"D","n_ctx":2048,"n_gen":32,"transfer_every_n":8,"total_ms":1223.2219,"total_transfer_ms":91.9687,"n_transfers":4,"generation_tok_per_s":26.1604,"stall_fraction_of_total":0.075186}

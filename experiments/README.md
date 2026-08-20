@@ -6,6 +6,7 @@
 | EXP-FPGA-DIV-002 | Can the same idea (exact radix-4 division) work for Q8_0's *dual*-divider case, and can the resulting scheduler's collateral cost be bounded? | Complete (5 phases) | `RESEARCH_COMPLETE_NO_PROMOTION` | No — experimental only, nothing merged | [README.md](EXP-FPGA-DIV-002/README.md) |
 | EXP-KV-Q4-STORAGE-10A | Does experimental Q4_0 KV cache storage clear a quality bar sufficient for product use? | Complete (1 phase) | `Q4_MEMORY_WIN_QUALITY_TOO_HIGH_COST` | No — real quality cost too high; superseded by EXP-KV-Q5-EVALUATION-10B | [README.md](EXP-KV-Q4-STORAGE-10A/README.md) |
 | EXP-KV-Q5-EVALUATION-10B | Do Q5_0/Q5_1 KV storage close the quality gap Q4_0 left open, while still saving meaningful memory over Q8? | Complete (1 phase) | `Q5_PRODUCT_CANDIDATE` (Q5_1 preferred) | **Yes** — [kadireren7/membrane#19](https://github.com/kadireren7/membrane/pull/19) (`--kv q5`) | [README.md](EXP-KV-Q5-EVALUATION-10B/README.md) |
+| EXP-KV-RAM-VRAM-TIERING-12A | Can KV cache be placed/moved between RAM and VRAM independently of model weight placement, using only pre-existing public mechanisms? | Complete (1 phase) | `TIERING_REQUIRES_UPSTREAM_CHANGE` | No — motivated the later Phase 12B device-override patch (not yet migrated) | [README.md](EXP-KV-RAM-VRAM-TIERING-12A/README.md) |
 
 See `ROADMAP.md` at this repository's root for what happens next
 (including why `EXP-FPGA-DIV-002` is closed rather than continued as a

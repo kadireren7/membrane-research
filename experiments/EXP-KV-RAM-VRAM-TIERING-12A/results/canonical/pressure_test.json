@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "phase": "12A",
+  "note": "Section 11: SmolLM2-360M, real GTX 1650 Vulkan. The known constrained region from Phase 11E (whole-cache adaptive/Q5 boundary around ctx=180000-186000) used as the starting point. Raw data: raw_pressure_test.jsonl.",
+  "method": "membrane-run --model SmolLM2-360M --kv {adaptive,q5} --gpu-layers {all,16,8} --ctx N --json --quiet, real product CLI, unmodified.",
+  "whole_cache_boundary_confirmed": {
+    "ctx_186000_adaptive": {"exit_code": 5, "reason": "NO_COMPRESSED_MODE_FITS", "matches_phase11e": true},
+    "ctx_186000_explicit_q5": {"exit_code": 5, "reason": "insufficient estimated device memory", "matches_phase11e": true}
+  },
+  "tiered_q5_16_of_32_layers_boundary_scan": {
+    "ctx_186000": {"exit_code": 0, "gpu_layers_selected": 16, "note": "SUCCEEDS where BOTH whole-cache adaptive and whole-cache explicit Q5 fail at the identical context"},
+    "ctx_200000": {"exit_code": 0, "gpu_layers_selected": 16},
+    "ctx_205000": {"exit_code": 0, "gpu_layers_selected": 16},
+    "ctx_210000": {"exit_code": 5, "reason": "insufficient estimated device memory (16 layers need ~314695680 bytes, only 239891265 available)"},
+    "ctx_215000": {"exit_code": 5},
+    "ctx_220000": {"exit_code": 5},
+    "last_succeeding_ctx": 205000,
+    "first_failing_ctx": 210000
+  },
+  "tiered_q5_8_of_32_layers_at_ctx_220000": {"exit_code": 5, "note": "fewer GPU layers alone did not rescue the extreme ctx=220000 point -- see accounting_caveat below for why"},
+  "accounting_caveat": {
+    "finding": "the product's own gpu_policy estimator does not yet distinguish GPU-resident from CPU-resident KV bytes when tiering is in effect -- the rejection messages at ctx=210000+ still cite the FULL 32-layer KV total (e.g. 'KV (3225600000)') against the GPU budget, even though only 16 (or 8) layers' KV is actually GPU-resident (confirmed real in vram_reduction.json/second_model.json). This means the measured tiered boundary (ctx=205000) is a LOWER BOUND on tiering's true ceiling -- a memory estimator that correctly charged only GPU-resident-layer KV bytes would likely permit higher contexts still. Not fixed in this phase (would touch tools/membrane-run/gpu_policy.c, a product file, and this phase's scope is research/feasibility, not policy changes)."
+  },
+  "answer_to_section11_question": {
+    "question": "Can tiering make a configuration runnable that precision-only adaptive cannot handle well?",
+    "answer": true,
+    "evidence": "at ctx=186000 through ctx=205000, tiered Q5 (16/32 GPU layers) succeeds with clean exit and correct gpu_layers_selected, while BOTH whole-cache adaptive and whole-cache explicit Q5 fail at ctx=186000 already (confirmed matching Phase 11E's own established boundary). This is a genuine ~10-13% usable-context extension on identical KV precision (Q5), from a purely static, already-existing product mechanism (--gpu-layers N), and the true ceiling is understated by the current (not-yet-tiering-aware) memory estimator.",
+    "caveat": "as elsewhere in this phase, --gpu-layers N here moves layer WEIGHTS off GPU together with KV (see memory_accounting.json) -- 16 of 32 layers run their matmuls on CPU in this configuration, which is why this extends usable CONTEXT (memory-bound) but would also reduce decode THROUGHPUT relative to a hypothetical KV-only-tiered config with all weights still GPU-resident (not measured separately in this phase; the runs above used --gen-tokens 4, too short for a meaningful throughput comparison at this extreme context)."
+  }
+}
