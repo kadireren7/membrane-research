@@ -1,0 +1,9 @@
+{
+  "note": "Phase 10A Section 14: 7 fresh-process repetitions, SmolLM2-135M, ctx=2048, Vulkan (gpu-layers=all), generation tok/s.",
+  "q8": { "n": 7, "values": [262.229649,267.388473,266.215037,268.694017,257.447474,267.95455,260.766081],
+    "min": 257.45, "max": 268.69, "mean": 264.39, "median": 266.22, "stddev": 4.27 },
+  "q4": { "n": 7, "values": [267.846926,259.15536,262.08249,263.814117,258.377267,261.184001,258.103651],
+    "min": 258.10, "max": 267.85, "mean": 261.51, "median": 261.18, "stddev": 3.48 },
+  "q4_vs_q8_mean_delta_pct": -1.09,
+  "conclusion": "No meaningful performance difference between q4 and q8 on this GPU/backend/model -- the -1.09% delta is well within both modes' own run-to-run stddev (~3.5-4.3 tok/s on a ~260 tok/s mean), i.e. noise, not a real regression. Q4's memory/VRAM advantages (Sections 6-8, 13) come with no measurable generation-throughput cost here."
+}

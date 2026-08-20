@@ -1,0 +1,55 @@
+{
+  "note": "Phase 10A Section 9-11 quality ladder. Produced by an uncommitted research probe (not shipped CLI) that reuses MEMBRANE's real run_kv_store_pass()/record_kv_store_behavior()/membrane_runtime_detect_divergence() -- the exact same machinery tools/membrane-run/main.cpp's --compare-kv uses for native-vs-q8, applied to native-vs-q4 as well. ctx=2048, 256 greedy-generated tokens, prompt 'Once upon a time, in a small village,'.",
+  "runs": [
+    {
+      "model": "SmolLM2-135M-Instruct-f16.gguf",
+      "candidate": "q8",
+      "token_identical": false,
+      "first_divergence_step": 40,
+      "top1_preservation": 0.988281,
+      "logit_rel_l2": 0.008181,
+      "delta_nll": 0.000717
+    },
+    {
+      "model": "SmolLM2-135M-Instruct-f16.gguf",
+      "candidate": "q4",
+      "token_identical": false,
+      "first_divergence_step": 32,
+      "top1_preservation": 0.886719,
+      "logit_rel_l2": 0.109847,
+      "delta_nll": 0.035592
+    },
+    {
+      "model": "SmolLM2-360M-Instruct-f16.gguf",
+      "candidate": "q8",
+      "token_identical": false,
+      "first_divergence_step": 87,
+      "top1_preservation": 0.988281,
+      "logit_rel_l2": 0.007549,
+      "delta_nll": 0.000649
+    },
+    {
+      "model": "SmolLM2-360M-Instruct-f16.gguf",
+      "candidate": "q4",
+      "token_identical": false,
+      "first_divergence_step": 28,
+      "top1_preservation": 0.925781,
+      "logit_rel_l2": 0.096646,
+      "delta_nll": 0.038062
+    }
+  ],
+  "section_11_failure_bar_assessment": {
+    "bar": "Using measured q8 results as the internal reference (Section 11 of the Phase 10A brief): flag q4 as problematic if logit rel-L2 increases by an order of magnitude vs q8, delta NLL becomes materially worse, or top1 preservation drops dramatically relative to q8.",
+    "135m": {
+      "logit_rel_l2_ratio_q4_over_q8": 13.43,
+      "delta_nll_ratio_q4_over_q8": 49.6,
+      "top1_drop_pp": 10.2
+    },
+    "360m": {
+      "logit_rel_l2_ratio_q4_over_q8": 12.80,
+      "delta_nll_ratio_q4_over_q8": 58.6,
+      "top1_drop_pp": 6.3
+    },
+    "verdict": "FLAGGED. On both tested models, q4's logit rel-L2 and delta NLL are more than an order of magnitude worse than q8's (12.8x-13.4x and 49.6x-58.6x respectively), and top1 preservation drops materially (88.7%-92.6% vs 98.8% for q8). q4 also diverges from the native reference earlier than q8 in both runs (step 28-32 vs 40-87). This is a real, reproducible quality cost, not memory-savings-obscured noise."
+  }
+}

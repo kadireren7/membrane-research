@@ -1,0 +1,21 @@
+{
+  "note": "Phase 10B Section 11: SmolLM2-135M, ctx=2048, 512 requested generation tokens, q8/q5_0/q5_1/q4 vs native. Telemetry from long_generation5_135m.jsonl, quality from a dedicated native-anchored teacher-forced pass at gen_tokens=512.",
+  "telemetry": {
+    "q8":   { "gen_tokens": 512, "exit_code": 0, "rss_final_kb": 301344, "peak_rss_kb": 314788, "generation_tok_per_s": 63.52 },
+    "q5_0": { "gen_tokens": 512, "exit_code": 0, "rss_final_kb": 305996, "peak_rss_kb": 306020, "generation_tok_per_s": 61.53 },
+    "q5_1": { "gen_tokens": 512, "exit_code": 0, "rss_final_kb": 307472, "peak_rss_kb": 307472, "generation_tok_per_s": 61.77 },
+    "q4":   { "gen_tokens": 512, "exit_code": 0, "rss_final_kb": 303176, "peak_rss_kb": 303176, "generation_tok_per_s": 65.74 }
+  },
+  "quality_vs_native_at_512_tokens": {
+    "q8":   { "first_divergence": 40, "top1_preservation": 0.994141, "logit_rel_l2": 0.009941, "delta_nll": 0.000150 },
+    "q5_0": { "first_divergence": 13, "top1_preservation": 0.972656, "logit_rel_l2": 0.065828, "delta_nll": 0.013649 },
+    "q5_1": { "first_divergence": 81, "top1_preservation": 0.982422, "logit_rel_l2": 0.060368, "delta_nll": 0.006143 },
+    "q4":   { "first_divergence": 32, "top1_preservation": 0.933594, "logit_rel_l2": 0.146776, "delta_nll": 0.032400 }
+  },
+  "text_stability_observation": {
+    "q5_0": "Falls into a TIGHT exact-verbatim repetition loop (same paragraph repeated 3+ times near-identically) starting partway through the 512 tokens -- more degenerate at this length than q4 was in Phase 10A's equivalent test, and more degenerate than native's own Phase 10A loop.",
+    "q5_1": "Stays more varied and coherent overall; some repeated phrasing appears near the end ('fraught with danger and uncertainty', 'eyes widened') but never locks into an exact loop the way q5_0 does.",
+    "interpretation": "This does not straightforwardly track the quantitative quality metrics (q5_0 and q5_1 have similar rel-L2/top1 to each other, both clearly better than q4's) -- greedy decoding on a 135M model is chaotically sensitive to small perturbations, so which specific repetitive attractor a run falls into is not a reliable ranking signal on its own. Reported as an honest qualitative observation, not folded into the quantitative verdict. All three quantized modes and native itself are susceptible to repetition loops at this length on this small a model; this is a known small-model-plus-greedy-decoding property, not evidence that quantized KV specifically causes it."
+  },
+  "memory_stability": "All four modes: RSS flat across the full 512-token run (peak == final for q5_0/q5_1/q4; q8's small peak/final gap is from context-creation transient, not a leak). No crash, no error, in any mode."
+}

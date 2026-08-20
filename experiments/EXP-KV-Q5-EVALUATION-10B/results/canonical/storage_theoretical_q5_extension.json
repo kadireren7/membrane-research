@@ -1,0 +1,36 @@
+{
+  "note": "Phase 10B Section 5: storage theory extended to Q5_0/Q5_1, from ggml's real block formats (ggml-common.h, pinned llama.cpp commit c0bc8591). Q4_0/Q8_0/F16 repeated from Phase 10A for one complete table.",
+  "block_formats": {
+    "F16 (native)": { "bytes_per_element": 2.0, "bits_per_element": 16.0 },
+    "Q8_0": {
+      "block_size_elements": 32, "struct_bytes": 34,
+      "struct_layout": "ggml_half d (2 bytes scale) + int8_t qs[32]",
+      "bytes_per_element": 1.0625, "bits_per_element": 8.5
+    },
+    "Q5_1": {
+      "block_size_elements": 32, "struct_bytes": 24,
+      "struct_layout": "ggml_half d + ggml_half m (4 bytes scale+min) + uint8_t qh[4] (5th quant bit) + uint8_t qs[16] (4 low bits)",
+      "bytes_per_element": 0.75, "bits_per_element": 6.0
+    },
+    "Q5_0": {
+      "block_size_elements": 32, "struct_bytes": 22,
+      "struct_layout": "ggml_half d (2 bytes scale, no min) + uint8_t qh[4] (5th quant bit) + uint8_t qs[16] (4 low bits)",
+      "bytes_per_element": 0.6875, "bits_per_element": 5.5
+    },
+    "Q4_0": {
+      "block_size_elements": 32, "struct_bytes": 18,
+      "struct_layout": "ggml_half d (2 bytes scale, no min) + uint8_t qs[16] (packed nibbles)",
+      "bytes_per_element": 0.5625, "bits_per_element": 4.5
+    }
+  },
+  "pct_of_f16": { "Q8_0": 53.125, "Q5_1": 37.5, "Q5_0": 34.375, "Q4_0": 28.125 },
+  "pct_of_q8_0": { "Q5_1": 70.588, "Q5_0": 64.706, "Q4_0": 52.941 },
+  "monotonic_ordering_bytes": "Q4_0 < Q5_0 < Q5_1 < Q8_0 < F16 -- confirmed by both struct math and every observed allocation in this phase.",
+  "observed_vs_expected_at_ctx512_135m": {
+    "native_bytes": 11796480, "q8_bytes": 6266880, "q5_0_bytes": 4055040,
+    "q5_1_bytes": 4423680, "q4_bytes": 3317760,
+    "q5_0_over_native_observed_pct": 34.375, "q5_1_over_native_observed_pct": 37.5,
+    "consistency": "EXACT MATCH to expected ratios (34.375%/37.5%) -- no discrepancy."
+  },
+  "explicit_caveat": "Q5_0 (5.5 bits/element) is 22 bytes/block, not simply '5 bits = 5/16'; the extra 0.5 bits/element comes from the qh[] 5th-bit-per-quant group, same overhead-beyond-nominal-bit-width pattern as Q4_0's 4.5 vs nominal 4. Q5_1 additionally carries a per-block min (like Q4_1 vs Q4_0), costing one more ggml_half (2 bytes/32 elements = 0.5 bits/element) than Q5_0."
+}

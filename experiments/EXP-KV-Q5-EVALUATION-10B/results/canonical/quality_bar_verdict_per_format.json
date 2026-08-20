@@ -1,0 +1,27 @@
+{
+  "note": "Phase 10B Section 12: quality bar applied per format, using Q8 as reference and Q4 as the known bad-quality extreme (Phase 10A). Source: multi_prompt_aggregate.json (5 prompts x 2 models, the more robust signal) plus the single-prompt/long-generation ladders for corroboration.",
+  "bar": "A Q5 candidate is promising only if: clearly better than Q4 on top1, clearly better than Q4 on rel-L2, clearly better than Q4 on NLL, memory meaningfully lower than Q8, no severe instability across prompts.",
+  "q5_0": {
+    "vs_q4_top1": "135M: marginal (93.1% vs 92.5% mean) -- NOT clearly better on this model. 360M: clearly better (98.6% vs 96.5% mean).",
+    "vs_q4_rel_l2": "Clearly better on both models (135M: 0.065 vs 0.113, ~42% lower; 360M: 0.056 vs 0.116, ~52% lower).",
+    "vs_q4_nll": "Clearly better on both models (135M: 0.0003 vs 0.0249; 360M: 0.0076 vs 0.0151) -- though delta_nll's sign flips per-prompt at n=5, so this signal is noisier than top1/rel_l2.",
+    "memory_vs_q8": "34.375% of native vs Q8's 53.125% -- 64.7% of Q8's footprint, a real ~35% additional reduction vs Q8.",
+    "stability": "Worst-case prompt on 135M (simple_reasoning, top1=78.6%) is WORSE than Q4's own worst case (87.5%) on the same model -- a real, not-hidden caveat. 360M worst case (96.1%) is comfortably clear of Q4's (94.5%).",
+    "verdict": "Promising on the larger model, but the smallest-model worst-case top1 result does not clear the bar cleanly -- mixed."
+  },
+  "q5_1": {
+    "vs_q4_top1": "Clearly better on both models (135M: 94.5% vs 92.5%; 360M: 98.65% vs 96.5%).",
+    "vs_q4_rel_l2": "Clearly better on both models (135M: 0.052 vs 0.113, ~54% lower; 360M: 0.049 vs 0.116, ~58% lower) -- the best rel-L2 of any Q5 variant, on both models.",
+    "vs_q4_nll": "Clearly better on both models by mean, and the more consistent of the two Q5 variants (same noisy-sign caveat as q5_0 applies).",
+    "memory_vs_q8": "37.5% of native vs Q8's 53.125% -- 70.6% of Q8's footprint, a real ~29% additional reduction vs Q8 (costs ~9% more bytes than q5_0 for the quality gain below).",
+    "stability": "Worst-case prompt on 135M (simple_reasoning, top1=85.7%) is close to but still slightly below Q4's own worst case (87.5%) -- the same caveat as q5_0, milder. 360M worst case (96.9%) is comfortably clear of Q4's.",
+    "verdict": "Consistently the stronger of the two Q5 variants across every prompt-level metric (top1, rel-L2, worst-case) on both models, at a modest memory cost over q5_0."
+  },
+  "cross_format_comparison": {
+    "top1_preservation": "q5_1 > q5_0 on both models (135M: 94.5% vs 93.1%; 360M: 98.65% vs 98.59%)",
+    "logit_rel_l2": "q5_1 < q5_0 (better) on both models (135M: 0.052 vs 0.065; 360M: 0.049 vs 0.056)",
+    "worst_case_top1": "q5_1 > q5_0 on both models (135M: 85.7% vs 78.6%; 360M: 96.9% vs 96.1%)",
+    "memory": "q5_0 < q5_1 (smaller) -- 34.375% vs 37.5% of native, q5_0 costs about 9% fewer bytes than q5_1",
+    "conclusion": "q5_1 wins on every quality axis measured, consistently, on both models -- q5_0's only advantage is a modest (~9%) additional memory saving. Given the phase's mandate to find a format 'whose quality stays much closer to Q8 than Q4', quality is weighted over the marginal extra memory saving here."
+  }
+}

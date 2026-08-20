@@ -1,0 +1,2051 @@
+{
+  "schema_version": 1,
+  "phase": "10B-authoritative-q5-kv-evaluation",
+  "decision_gate": {
+    "verdict": "Q5_PRODUCT_CANDIDATE",
+    "preferred_format": "Q5_1",
+    "reasoning": "Both Q5_0 and Q5_1 pass the core bar: real memory win over Q8 (Q5_0=64.7% of Q8's bytes, Q5_1=70.6%), no meaningful performance cost on either backend (-3.6% to +2.0% vs Q8, within noise), stable end-to-end behavior on CPU and Vulkan across every context/model tested (0 crashes, 0 unexpected exits across 90+ runs), and a real memory-pressure advantage over Q8 (both keep the model fully GPU-resident at contexts where Q8 fails completely). On quality, Q5_1 is the clear winner between the two Q5 formats: it beats Q5_0 on mean top1 preservation, mean logit rel-L2, AND worst-case top1 preservation, on both tested models, consistently -- for a modest ~9% additional memory cost. Comparing to the Q8/Q4 reference points, Q5_1's multi-prompt quality sits much closer to Q8 (135M mean top1 94.5% vs Q8's 99.5%; 360M mean top1 98.6% vs Q8's 99.7%) than to Q4 (135M 92.5%, 360M 96.5%) -- and the same pattern holds for mean logit rel-L2. The one honest caveat: on the smallest model (135M), Q5_1's single worst-case prompt (simple_reasoning, top1=85.7%) does not clearly beat Q4's own worst case (87.5%) -- this is disclosed, not smoothed over, and is the main thing a productization effort should investigate further before shipping.",
+    "not_a_full_clearance": "This verdict is about Q5_1 being a promising, worth-pursuing candidate relative to Q4/Q8 -- it is NOT a claim that Q5_1's quality is fully solved or that the 135M worst-case gap is understood. See quality_bar_verdict_per_format.json for the full per-format breakdown."
+  },
+  "membrane_commit": "a6d5377c852cc1eeb88d224b25726f74c515a405",
+  "membrane_base_commit": "a6d5377c852cc1eeb88d224b25726f74c515a405",
+  "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "ggml_version": "0.17.0",
+  "phase_10a_baseline_preserved_at": "experiment/q4-kv-storage commit 4aa6757 (results/phase10/q4-kv-validation.json)",
+  "host": {
+    "os": "Pop!_OS 24.04 LTS",
+    "ram_gib": 5.6,
+    "gpu_model": "NVIDIA GeForce GTX 1650",
+    "gpu_vram_mib_total": 4096
+  },
+  "type_investigation": {
+    "types": [
+      "GGML_TYPE_Q5_0",
+      "GGML_TYPE_Q5_1"
+    ],
+    "public_api_path": "llama_context_params.type_k/type_v -- no llama.cpp source modification needed or made, same as Q4/Q8.",
+    "required_constraint": "flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED + head_dim %% 32 == 0 (both Q5_0/Q5_1 block size 32 in this ggml commit) -- same rule as Q4/Q8.",
+    "backend_support_outcome": "A -- both Q5_0 and Q5_1 work end-to-end via the pure public API, on both CPU and Vulkan, no llama.cpp modification needed. Both accept K and V identically.",
+    "not_identical_note": "Section 1 explicitly warns not to assume Q5_0/Q5_1 are identical -- confirmed correct: Q5_1 (has a per-block min, 24 bytes/block) consistently outperforms Q5_0 (no min, 22 bytes/block) on every quality metric measured, at a ~9% memory cost."
+  },
+  "storage_theory": {
+    "note": "Phase 10B Section 5: storage theory extended to Q5_0/Q5_1, from ggml's real block formats (ggml-common.h, pinned llama.cpp commit c0bc8591). Q4_0/Q8_0/F16 repeated from Phase 10A for one complete table.",
+    "block_formats": {
+      "F16 (native)": {
+        "bytes_per_element": 2.0,
+        "bits_per_element": 16.0
+      },
+      "Q8_0": {
+        "block_size_elements": 32,
+        "struct_bytes": 34,
+        "struct_layout": "ggml_half d (2 bytes scale) + int8_t qs[32]",
+        "bytes_per_element": 1.0625,
+        "bits_per_element": 8.5
+      },
+      "Q5_1": {
+        "block_size_elements": 32,
+        "struct_bytes": 24,
+        "struct_layout": "ggml_half d + ggml_half m (4 bytes scale+min) + uint8_t qh[4] (5th quant bit) + uint8_t qs[16] (4 low bits)",
+        "bytes_per_element": 0.75,
+        "bits_per_element": 6.0
+      },
+      "Q5_0": {
+        "block_size_elements": 32,
+        "struct_bytes": 22,
+        "struct_layout": "ggml_half d (2 bytes scale, no min) + uint8_t qh[4] (5th quant bit) + uint8_t qs[16] (4 low bits)",
+        "bytes_per_element": 0.6875,
+        "bits_per_element": 5.5
+      },
+      "Q4_0": {
+        "block_size_elements": 32,
+        "struct_bytes": 18,
+        "struct_layout": "ggml_half d (2 bytes scale, no min) + uint8_t qs[16] (packed nibbles)",
+        "bytes_per_element": 0.5625,
+        "bits_per_element": 4.5
+      }
+    },
+    "pct_of_f16": {
+      "Q8_0": 53.125,
+      "Q5_1": 37.5,
+      "Q5_0": 34.375,
+      "Q4_0": 28.125
+    },
+    "pct_of_q8_0": {
+      "Q5_1": 70.588,
+      "Q5_0": 64.706,
+      "Q4_0": 52.941
+    },
+    "monotonic_ordering_bytes": "Q4_0 < Q5_0 < Q5_1 < Q8_0 < F16 -- confirmed by both struct math and every observed allocation in this phase.",
+    "observed_vs_expected_at_ctx512_135m": {
+      "native_bytes": 11796480,
+      "q8_bytes": 6266880,
+      "q5_0_bytes": 4055040,
+      "q5_1_bytes": 4423680,
+      "q4_bytes": 3317760,
+      "q5_0_over_native_observed_pct": 34.375,
+      "q5_1_over_native_observed_pct": 37.5,
+      "consistency": "EXACT MATCH to expected ratios (34.375%/37.5%) -- no discrepancy."
+    },
+    "explicit_caveat": "Q5_0 (5.5 bits/element) is 22 bytes/block, not simply '5 bits = 5/16'; the extra 0.5 bits/element comes from the qh[] 5th-bit-per-quant group, same overhead-beyond-nominal-bit-width pattern as Q4_0's 4.5 vs nominal 4. Q5_1 additionally carries a per-block min (like Q4_1 vs Q4_0), costing one more ggml_half (2 bytes/32 elements = 0.5 bits/element) than Q5_0."
+  },
+  "cpu_validation_135m": {
+    "model": "SmolLM2-135M-Instruct-f16.gguf",
+    "context_matrix": [
+      {
+        "ctx": 512,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 11796480,
+          "rss_after_context_kb": 301192,
+          "peak_rss_kb": 302216,
+          "generation_tok_per_s": 69.724428,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 6266880,
+          "rss_after_context_kb": 295968,
+          "peak_rss_kb": 297084,
+          "generation_tok_per_s": 68.307878,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 4055040,
+          "rss_after_context_kb": 293760,
+          "peak_rss_kb": 294904,
+          "generation_tok_per_s": 57.900319,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 4423680,
+          "rss_after_context_kb": 294216,
+          "peak_rss_kb": 295364,
+          "generation_tok_per_s": 60.06734,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 3317760,
+          "rss_after_context_kb": 293148,
+          "peak_rss_kb": 294288,
+          "generation_tok_per_s": 60.557505,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q5_0_over_native_pct": 34.375,
+        "q5_1_over_native_pct": 37.5,
+        "q4_over_native_pct": 28.125
+      },
+      {
+        "ctx": 1024,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 23592960,
+          "rss_after_context_kb": 312688,
+          "peak_rss_kb": 313748,
+          "generation_tok_per_s": 64.247304,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 12533760,
+          "rss_after_context_kb": 302132,
+          "peak_rss_kb": 303224,
+          "generation_tok_per_s": 64.105438,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 8110080,
+          "rss_after_context_kb": 297772,
+          "peak_rss_kb": 298876,
+          "generation_tok_per_s": 64.299089,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 8847360,
+          "rss_after_context_kb": 298536,
+          "peak_rss_kb": 299672,
+          "generation_tok_per_s": 57.764984,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 6635520,
+          "rss_after_context_kb": 296300,
+          "peak_rss_kb": 297408,
+          "generation_tok_per_s": 56.085101,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q5_0_over_native_pct": 34.375,
+        "q5_1_over_native_pct": 37.5,
+        "q4_over_native_pct": 28.125
+      },
+      {
+        "ctx": 2048,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 47185920,
+          "rss_after_context_kb": 335676,
+          "peak_rss_kb": 336648,
+          "generation_tok_per_s": 58.802434,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 25067520,
+          "rss_after_context_kb": 314404,
+          "peak_rss_kb": 315540,
+          "generation_tok_per_s": 64.249563,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 16220160,
+          "rss_after_context_kb": 305664,
+          "peak_rss_kb": 306820,
+          "generation_tok_per_s": 58.752753,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 17694720,
+          "rss_after_context_kb": 307180,
+          "peak_rss_kb": 308340,
+          "generation_tok_per_s": 54.370277,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 13271040,
+          "rss_after_context_kb": 302852,
+          "peak_rss_kb": 304016,
+          "generation_tok_per_s": 63.889799,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q5_0_over_native_pct": 34.375,
+        "q5_1_over_native_pct": 37.5,
+        "q4_over_native_pct": 28.125
+      },
+      {
+        "ctx": 4096,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 94371840,
+          "rss_after_context_kb": 381820,
+          "peak_rss_kb": 382944,
+          "generation_tok_per_s": 49.126889,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 50135040,
+          "rss_after_context_kb": 338820,
+          "peak_rss_kb": 339976,
+          "generation_tok_per_s": 50.423021,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 32440320,
+          "rss_after_context_kb": 321596,
+          "peak_rss_kb": 322760,
+          "generation_tok_per_s": 56.809422,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 35389440,
+          "rss_after_context_kb": 324432,
+          "peak_rss_kb": 325596,
+          "generation_tok_per_s": 54.864473,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 26542080,
+          "rss_after_context_kb": 315844,
+          "peak_rss_kb": 317008,
+          "generation_tok_per_s": 51.520907,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q5_0_over_native_pct": 34.375,
+        "q5_1_over_native_pct": 37.5,
+        "q4_over_native_pct": 28.125
+      },
+      {
+        "ctx": 8192,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 188743680,
+          "rss_after_context_kb": 474288,
+          "peak_rss_kb": 475364,
+          "generation_tok_per_s": 48.955794,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 100270080,
+          "rss_after_context_kb": 388004,
+          "peak_rss_kb": 389144,
+          "generation_tok_per_s": 53.578727,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 64880640,
+          "rss_after_context_kb": 353472,
+          "peak_rss_kb": 354640,
+          "generation_tok_per_s": 43.629508,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 70778880,
+          "rss_after_context_kb": 359136,
+          "peak_rss_kb": 360328,
+          "generation_tok_per_s": 52.435252,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 53084160,
+          "rss_after_context_kb": 341944,
+          "peak_rss_kb": 343140,
+          "generation_tok_per_s": 59.329491,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q5_0_over_native_pct": 34.375,
+        "q5_1_over_native_pct": 37.5,
+        "q4_over_native_pct": 28.125
+      },
+      {
+        "ctx": 16384,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 377487360,
+          "rss_after_context_kb": 659308,
+          "peak_rss_kb": 660356,
+          "generation_tok_per_s": 45.104768,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 200540160,
+          "rss_after_context_kb": 486712,
+          "peak_rss_kb": 487852,
+          "generation_tok_per_s": 59.264735,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 129761280,
+          "rss_after_context_kb": 417632,
+          "peak_rss_kb": 418780,
+          "generation_tok_per_s": 45.054364,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 141557760,
+          "rss_after_context_kb": 429096,
+          "peak_rss_kb": 430304,
+          "generation_tok_per_s": 43.991185,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 106168320,
+          "rss_after_context_kb": 394472,
+          "peak_rss_kb": 395632,
+          "generation_tok_per_s": 46.79957,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q5_0_over_native_pct": 34.375,
+        "q5_1_over_native_pct": 37.5,
+        "q4_over_native_pct": 28.125
+      }
+    ]
+  },
+  "vulkan_validation_135m": {
+    "model": "SmolLM2-135M-Instruct-f16.gguf",
+    "gpu_layers": "auto",
+    "context_matrix": [
+      {
+        "ctx": 512,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 11796480,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 314,
+          "generation_tok_per_s": 247.46266,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 6266880,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 309,
+          "generation_tok_per_s": 253.489092,
+          "exit_code": 0
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 4055040,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 307,
+          "generation_tok_per_s": 245.870279,
+          "exit_code": 0
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 4423680,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 307,
+          "generation_tok_per_s": 251.661281,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 3317760,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 306,
+          "generation_tok_per_s": 244.802276,
+          "exit_code": 0
+        }
+      },
+      {
+        "ctx": 2048,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 47185920,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 347,
+          "generation_tok_per_s": 281.910473,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 25067520,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 326,
+          "generation_tok_per_s": 251.743093,
+          "exit_code": 0
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 16220160,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 318,
+          "generation_tok_per_s": 232.551356,
+          "exit_code": 0
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 17694720,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 320,
+          "generation_tok_per_s": 237.267458,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 13271040,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 316,
+          "generation_tok_per_s": 211.675444,
+          "exit_code": 0
+        }
+      },
+      {
+        "ctx": 8192,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 188743680,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 477,
+          "generation_tok_per_s": 253.460759,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 100270080,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 396,
+          "generation_tok_per_s": 239.63393,
+          "exit_code": 0
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 64880640,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 363,
+          "generation_tok_per_s": 228.256634,
+          "exit_code": 0
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 70778880,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 369,
+          "generation_tok_per_s": 223.253841,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 53084160,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 352,
+          "generation_tok_per_s": 208.765601,
+          "exit_code": 0
+        }
+      },
+      {
+        "ctx": 16384,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 377487360,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 651,
+          "generation_tok_per_s": 253.229471,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 200540160,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 488,
+          "generation_tok_per_s": 252.670574,
+          "exit_code": 0
+        },
+        "q5_0": {
+          "kv_type": "Q5_0",
+          "kv_allocated_bytes": 129761280,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 423,
+          "generation_tok_per_s": 251.649171,
+          "exit_code": 0
+        },
+        "q5_1": {
+          "kv_type": "Q5_1",
+          "kv_allocated_bytes": 141557760,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 434,
+          "generation_tok_per_s": 250.333813,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 106168320,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 401,
+          "generation_tok_per_s": 253.915971,
+          "exit_code": 0
+        }
+      }
+    ]
+  },
+  "second_model_360m_ctx2048": {
+    "cpu": {
+      "native": {
+        "kv_type": "F16",
+        "kv_allocated_bytes": 83886080,
+        "external_peak_vram_mib": null,
+        "generation_tok_per_s": 20.404272,
+        "exit_code": 0
+      },
+      "q8": {
+        "kv_type": "Q8_0",
+        "kv_allocated_bytes": 44564480,
+        "external_peak_vram_mib": null,
+        "generation_tok_per_s": 20.925971,
+        "exit_code": 0
+      },
+      "q5_0": {
+        "kv_type": "Q5_0",
+        "kv_allocated_bytes": 28835840,
+        "external_peak_vram_mib": null,
+        "generation_tok_per_s": 19.736246,
+        "exit_code": 0
+      },
+      "q5_1": {
+        "kv_type": "Q5_1",
+        "kv_allocated_bytes": 31457280,
+        "external_peak_vram_mib": null,
+        "generation_tok_per_s": 22.794352,
+        "exit_code": 0
+      },
+      "q4": {
+        "kv_type": "Q4_0",
+        "kv_allocated_bytes": 23592960,
+        "external_peak_vram_mib": null,
+        "generation_tok_per_s": 22.733132,
+        "exit_code": 0
+      }
+    },
+    "vulkan": {
+      "native": {
+        "kv_type": "F16",
+        "kv_allocated_bytes": 83886080,
+        "external_peak_vram_mib": 804,
+        "generation_tok_per_s": 134.991641,
+        "exit_code": 0
+      },
+      "q8": {
+        "kv_type": "Q8_0",
+        "kv_allocated_bytes": 44564480,
+        "external_peak_vram_mib": 767,
+        "generation_tok_per_s": 133.047478,
+        "exit_code": 0
+      },
+      "q5_0": {
+        "kv_type": "Q5_0",
+        "kv_allocated_bytes": 28835840,
+        "external_peak_vram_mib": 752,
+        "generation_tok_per_s": 126.292193,
+        "exit_code": 0
+      },
+      "q5_1": {
+        "kv_type": "Q5_1",
+        "kv_allocated_bytes": 31457280,
+        "external_peak_vram_mib": 754,
+        "generation_tok_per_s": 126.966799,
+        "exit_code": 0
+      },
+      "q4": {
+        "kv_type": "Q4_0",
+        "kv_allocated_bytes": 23592960,
+        "external_peak_vram_mib": 747,
+        "generation_tok_per_s": 127.550991,
+        "exit_code": 0
+      }
+    }
+  },
+  "quality_single_prompt": [
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q8",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 40,
+      "quality_available": true,
+      "top1_preservation": 0.988281,
+      "logit_rel_l2": 0.008181,
+      "delta_nll": 0.000717
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q5_0",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 13,
+      "quality_available": true,
+      "top1_preservation": 0.949219,
+      "logit_rel_l2": 0.051478,
+      "delta_nll": 0.02262
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q5_1",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 81,
+      "quality_available": true,
+      "top1_preservation": 0.96875,
+      "logit_rel_l2": 0.047962,
+      "delta_nll": 0.009186
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q4",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 32,
+      "quality_available": true,
+      "top1_preservation": 0.886719,
+      "logit_rel_l2": 0.109847,
+      "delta_nll": 0.035592
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q8",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 87,
+      "quality_available": true,
+      "top1_preservation": 0.988281,
+      "logit_rel_l2": 0.007549,
+      "delta_nll": 0.000649
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q5_0",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 28,
+      "quality_available": true,
+      "top1_preservation": 0.972656,
+      "logit_rel_l2": 0.052207,
+      "delta_nll": 0.004198
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q5_1",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 28,
+      "quality_available": true,
+      "top1_preservation": 0.96875,
+      "logit_rel_l2": 0.040117,
+      "delta_nll": 0.000925
+    },
+    {
+      "prompt_label": "prose_continuation",
+      "mode": "q4",
+      "ctx": 2048,
+      "gen_tokens_requested": 256,
+      "native_gen": 256,
+      "cand_gen": 256,
+      "token_identical": false,
+      "first_divergence": 28,
+      "quality_available": true,
+      "top1_preservation": 0.925781,
+      "logit_rel_l2": 0.096646,
+      "delta_nll": 0.038062
+    }
+  ],
+  "quality_multi_prompt_aggregate": {
+    "135M": {
+      "q8": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.995313,
+        "median_top1_preservation": 0.992188,
+        "mean_logit_rel_l2": 0.009389,
+        "mean_delta_nll": -0.000378,
+        "worst_case_prompt": "factual_short_answer",
+        "worst_case_top1_preservation": 0.992188,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.010452,
+            "delta_nll": -0.00039,
+            "first_divergence": 84
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.007642,
+            "delta_nll": -0.000229,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.010657,
+            "delta_nll": -0.002547,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.010695,
+            "delta_nll": 7.1e-05,
+            "first_divergence": 25
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.0075,
+            "delta_nll": 0.001206,
+            "first_divergence": 40
+          }
+        ]
+      },
+      "q5_0": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.93058,
+        "median_top1_preservation": 0.960938,
+        "mean_logit_rel_l2": 0.065389,
+        "mean_delta_nll": 0.000346,
+        "worst_case_prompt": "simple_reasoning",
+        "worst_case_top1_preservation": 0.785714,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 0.960938,
+            "logit_rel_l2": 0.06304,
+            "delta_nll": -0.002218,
+            "first_divergence": 11
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.051461,
+            "delta_nll": -0.000783,
+            "first_divergence": 26
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 0.785714,
+            "logit_rel_l2": 0.104743,
+            "delta_nll": -0.025876,
+            "first_divergence": 2
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.976562,
+            "logit_rel_l2": 0.061881,
+            "delta_nll": 0.005486,
+            "first_divergence": 31
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.9375,
+            "logit_rel_l2": 0.045821,
+            "delta_nll": 0.025123,
+            "first_divergence": 13
+          }
+        ]
+      },
+      "q5_1": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.944866,
+        "median_top1_preservation": 0.953125,
+        "mean_logit_rel_l2": 0.051576,
+        "mean_delta_nll": 0.013386,
+        "worst_case_prompt": "simple_reasoning",
+        "worst_case_top1_preservation": 0.857143,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 0.9375,
+            "logit_rel_l2": 0.059513,
+            "delta_nll": 0.01402,
+            "first_divergence": 10
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.044326,
+            "delta_nll": 0.011156,
+            "first_divergence": 94
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 0.857143,
+            "logit_rel_l2": 0.049114,
+            "delta_nll": 0.002778,
+            "first_divergence": 1
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.953125,
+            "logit_rel_l2": 0.056693,
+            "delta_nll": 0.026594,
+            "first_divergence": 3
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.984375,
+            "logit_rel_l2": 0.048232,
+            "delta_nll": 0.012383,
+            "first_divergence": 81
+          }
+        ]
+      },
+      "q4": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.924777,
+        "median_top1_preservation": 0.921875,
+        "mean_logit_rel_l2": 0.113427,
+        "mean_delta_nll": 0.024889,
+        "worst_case_prompt": "longer_prose_continuation",
+        "worst_case_top1_preservation": 0.875,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 0.921875,
+            "logit_rel_l2": 0.113117,
+            "delta_nll": 0.033341,
+            "first_divergence": 2
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 0.976562,
+            "logit_rel_l2": 0.096532,
+            "delta_nll": 0.042775,
+            "first_divergence": 26
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 0.928571,
+            "logit_rel_l2": 0.117589,
+            "delta_nll": -0.031212,
+            "first_divergence": 7
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.921875,
+            "logit_rel_l2": 0.134834,
+            "delta_nll": 0.033587,
+            "first_divergence": 12
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.875,
+            "logit_rel_l2": 0.105064,
+            "delta_nll": 0.045953,
+            "first_divergence": 32
+          }
+        ]
+      }
+    },
+    "360M": {
+      "q8": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.996875,
+        "median_top1_preservation": 1.0,
+        "mean_logit_rel_l2": 0.009105,
+        "mean_delta_nll": -0.0001,
+        "worst_case_prompt": "code_like_text",
+        "worst_case_top1_preservation": 0.992188,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.010791,
+            "delta_nll": -0.000101,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.008999,
+            "delta_nll": -0.000846,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.010154,
+            "delta_nll": -0.001034,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.008426,
+            "delta_nll": 0.000238,
+            "first_divergence": 72
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.007156,
+            "delta_nll": 0.001245,
+            "first_divergence": 87
+          }
+        ]
+      },
+      "q5_0": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.985938,
+        "median_top1_preservation": 0.984375,
+        "mean_logit_rel_l2": 0.055769,
+        "mean_delta_nll": 0.007576,
+        "worst_case_prompt": "longer_prose_continuation",
+        "worst_case_top1_preservation": 0.960938,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.053594,
+            "delta_nll": 0.002137,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.057836,
+            "delta_nll": 0.020491,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 0.984375,
+            "logit_rel_l2": 0.063235,
+            "delta_nll": 0.000912,
+            "first_divergence": 33
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.984375,
+            "logit_rel_l2": 0.052781,
+            "delta_nll": -0.001593,
+            "first_divergence": 72
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.960938,
+            "logit_rel_l2": 0.051401,
+            "delta_nll": 0.015935,
+            "first_divergence": 28
+          }
+        ]
+      },
+      "q5_1": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.986498,
+        "median_top1_preservation": 0.987179,
+        "mean_logit_rel_l2": 0.049422,
+        "mean_delta_nll": 0.002061,
+        "worst_case_prompt": "code_like_text",
+        "worst_case_top1_preservation": 0.96875,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.052021,
+            "delta_nll": -0.003987,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 0.987179,
+            "logit_rel_l2": 0.044348,
+            "delta_nll": -1.9e-05,
+            "first_divergence": 7
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 0.992188,
+            "logit_rel_l2": 0.059221,
+            "delta_nll": 0.00821,
+            "first_divergence": 82
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.96875,
+            "logit_rel_l2": 0.052463,
+            "delta_nll": 0.004784,
+            "first_divergence": 72
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.984375,
+            "logit_rel_l2": 0.039058,
+            "delta_nll": 0.001318,
+            "first_divergence": 28
+          }
+        ]
+      },
+      "q4": {
+        "n_prompts": 5,
+        "mean_top1_preservation": 0.964743,
+        "median_top1_preservation": 0.948718,
+        "mean_logit_rel_l2": 0.115756,
+        "mean_delta_nll": 0.015119,
+        "worst_case_prompt": "simple_reasoning",
+        "worst_case_top1_preservation": 0.945312,
+        "per_prompt": [
+          {
+            "prompt_label": "factual_short_answer",
+            "top1_preservation": 1.0,
+            "logit_rel_l2": 0.128229,
+            "delta_nll": -0.008834,
+            "first_divergence": -1
+          },
+          {
+            "prompt_label": "instruction_following",
+            "top1_preservation": 0.948718,
+            "logit_rel_l2": 0.111536,
+            "delta_nll": 0.005606,
+            "first_divergence": 3
+          },
+          {
+            "prompt_label": "simple_reasoning",
+            "top1_preservation": 0.945312,
+            "logit_rel_l2": 0.133129,
+            "delta_nll": 0.033684,
+            "first_divergence": 3
+          },
+          {
+            "prompt_label": "code_like_text",
+            "top1_preservation": 0.984375,
+            "logit_rel_l2": 0.112318,
+            "delta_nll": 0.010333,
+            "first_divergence": 76
+          },
+          {
+            "prompt_label": "longer_prose_continuation",
+            "top1_preservation": 0.945312,
+            "logit_rel_l2": 0.093566,
+            "delta_nll": 0.034805,
+            "first_divergence": 28
+          }
+        ]
+      }
+    }
+  },
+  "quality_bar_verdict_per_format": {
+    "note": "Phase 10B Section 12: quality bar applied per format, using Q8 as reference and Q4 as the known bad-quality extreme (Phase 10A). Source: multi_prompt_aggregate.json (5 prompts x 2 models, the more robust signal) plus the single-prompt/long-generation ladders for corroboration.",
+    "bar": "A Q5 candidate is promising only if: clearly better than Q4 on top1, clearly better than Q4 on rel-L2, clearly better than Q4 on NLL, memory meaningfully lower than Q8, no severe instability across prompts.",
+    "q5_0": {
+      "vs_q4_top1": "135M: marginal (93.1% vs 92.5% mean) -- NOT clearly better on this model. 360M: clearly better (98.6% vs 96.5% mean).",
+      "vs_q4_rel_l2": "Clearly better on both models (135M: 0.065 vs 0.113, ~42% lower; 360M: 0.056 vs 0.116, ~52% lower).",
+      "vs_q4_nll": "Clearly better on both models (135M: 0.0003 vs 0.0249; 360M: 0.0076 vs 0.0151) -- though delta_nll's sign flips per-prompt at n=5, so this signal is noisier than top1/rel_l2.",
+      "memory_vs_q8": "34.375% of native vs Q8's 53.125% -- 64.7% of Q8's footprint, a real ~35% additional reduction vs Q8.",
+      "stability": "Worst-case prompt on 135M (simple_reasoning, top1=78.6%) is WORSE than Q4's own worst case (87.5%) on the same model -- a real, not-hidden caveat. 360M worst case (96.1%) is comfortably clear of Q4's (94.5%).",
+      "verdict": "Promising on the larger model, but the smallest-model worst-case top1 result does not clear the bar cleanly -- mixed."
+    },
+    "q5_1": {
+      "vs_q4_top1": "Clearly better on both models (135M: 94.5% vs 92.5%; 360M: 98.65% vs 96.5%).",
+      "vs_q4_rel_l2": "Clearly better on both models (135M: 0.052 vs 0.113, ~54% lower; 360M: 0.049 vs 0.116, ~58% lower) -- the best rel-L2 of any Q5 variant, on both models.",
+      "vs_q4_nll": "Clearly better on both models by mean, and the more consistent of the two Q5 variants (same noisy-sign caveat as q5_0 applies).",
+      "memory_vs_q8": "37.5% of native vs Q8's 53.125% -- 70.6% of Q8's footprint, a real ~29% additional reduction vs Q8 (costs ~9% more bytes than q5_0 for the quality gain below).",
+      "stability": "Worst-case prompt on 135M (simple_reasoning, top1=85.7%) is close to but still slightly below Q4's own worst case (87.5%) -- the same caveat as q5_0, milder. 360M worst case (96.9%) is comfortably clear of Q4's.",
+      "verdict": "Consistently the stronger of the two Q5 variants across every prompt-level metric (top1, rel-L2, worst-case) on both models, at a modest memory cost over q5_0."
+    },
+    "cross_format_comparison": {
+      "top1_preservation": "q5_1 > q5_0 on both models (135M: 94.5% vs 93.1%; 360M: 98.65% vs 98.59%)",
+      "logit_rel_l2": "q5_1 < q5_0 (better) on both models (135M: 0.052 vs 0.065; 360M: 0.049 vs 0.056)",
+      "worst_case_top1": "q5_1 > q5_0 on both models (135M: 85.7% vs 78.6%; 360M: 96.9% vs 96.1%)",
+      "memory": "q5_0 < q5_1 (smaller) -- 34.375% vs 37.5% of native, q5_0 costs about 9% fewer bytes than q5_1",
+      "conclusion": "q5_1 wins on every quality axis measured, consistently, on both models -- q5_0's only advantage is a modest (~9%) additional memory saving. Given the phase's mandate to find a format 'whose quality stays much closer to Q8 than Q4', quality is weighted over the marginal extra memory saving here."
+    }
+  },
+  "long_generation_135m": {
+    "telemetry_rows": [
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-135M-Instruct-f16.gguf",
+        "kv_store": "q8",
+        "kv_type": "Q8_0",
+        "ctx_size": 2048,
+        "generated_tokens": 512,
+        "storage": {
+          "kv_allocated_bytes": 25067520
+        },
+        "gpu": {
+          "requested": false,
+          "backend_gpu_capable": false,
+          "gpu_layers_requested": 0,
+          "gpu_layers_selected": 0,
+          "backend": "CPU",
+          "device_requested": "",
+          "device_selected": ""
+        },
+        "memory": {
+          "rss_after_model_load_kb": 286848,
+          "rss_after_context_kb": 313404,
+          "rss_after_prompt_kb": 314788,
+          "rss_final_kb": 301344,
+          "peak_rss_kb": 314788
+        },
+        "performance": {
+          "prompt_tok_per_s": 517.83177,
+          "generation_tok_per_s": 63.522703
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-135M-Instruct-f16.gguf",
+        "kv_store": "q5_0",
+        "kv_type": "Q5_0",
+        "ctx_size": 2048,
+        "generated_tokens": 512,
+        "storage": {
+          "kv_allocated_bytes": 16220160
+        },
+        "gpu": {
+          "requested": false,
+          "backend_gpu_capable": false,
+          "gpu_layers_requested": 0,
+          "gpu_layers_selected": 0,
+          "backend": "CPU",
+          "device_requested": "",
+          "device_selected": ""
+        },
+        "memory": {
+          "rss_after_model_load_kb": 287372,
+          "rss_after_context_kb": 305284,
+          "rss_after_prompt_kb": 306020,
+          "rss_final_kb": 305996,
+          "peak_rss_kb": 306020
+        },
+        "performance": {
+          "prompt_tok_per_s": 510.82823,
+          "generation_tok_per_s": 61.52852
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-135M-Instruct-f16.gguf",
+        "kv_store": "q5_1",
+        "kv_type": "Q5_1",
+        "ctx_size": 2048,
+        "generated_tokens": 512,
+        "storage": {
+          "kv_allocated_bytes": 17694720
+        },
+        "gpu": {
+          "requested": false,
+          "backend_gpu_capable": false,
+          "gpu_layers_requested": 0,
+          "gpu_layers_selected": 0,
+          "backend": "CPU",
+          "device_requested": "",
+          "device_selected": ""
+        },
+        "memory": {
+          "rss_after_model_load_kb": 287352,
+          "rss_after_context_kb": 306704,
+          "rss_after_prompt_kb": 307440,
+          "rss_final_kb": 307472,
+          "peak_rss_kb": 307472
+        },
+        "performance": {
+          "prompt_tok_per_s": 518.770814,
+          "generation_tok_per_s": 61.769622
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-135M-Instruct-f16.gguf",
+        "kv_store": "q4",
+        "kv_type": "Q4_0",
+        "ctx_size": 2048,
+        "generated_tokens": 512,
+        "storage": {
+          "kv_allocated_bytes": 13271040
+        },
+        "gpu": {
+          "requested": false,
+          "backend_gpu_capable": false,
+          "gpu_layers_requested": 0,
+          "gpu_layers_selected": 0,
+          "backend": "CPU",
+          "device_requested": "",
+          "device_selected": ""
+        },
+        "memory": {
+          "rss_after_model_load_kb": 287396,
+          "rss_after_context_kb": 302412,
+          "rss_after_prompt_kb": 303140,
+          "rss_final_kb": 303176,
+          "peak_rss_kb": 303176
+        },
+        "performance": {
+          "prompt_tok_per_s": 531.498431,
+          "generation_tok_per_s": 65.739352
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      }
+    ],
+    "quality_and_text_stability": {
+      "note": "Phase 10B Section 11: SmolLM2-135M, ctx=2048, 512 requested generation tokens, q8/q5_0/q5_1/q4 vs native. Telemetry from long_generation5_135m.jsonl, quality from a dedicated native-anchored teacher-forced pass at gen_tokens=512.",
+      "telemetry": {
+        "q8": {
+          "gen_tokens": 512,
+          "exit_code": 0,
+          "rss_final_kb": 301344,
+          "peak_rss_kb": 314788,
+          "generation_tok_per_s": 63.52
+        },
+        "q5_0": {
+          "gen_tokens": 512,
+          "exit_code": 0,
+          "rss_final_kb": 305996,
+          "peak_rss_kb": 306020,
+          "generation_tok_per_s": 61.53
+        },
+        "q5_1": {
+          "gen_tokens": 512,
+          "exit_code": 0,
+          "rss_final_kb": 307472,
+          "peak_rss_kb": 307472,
+          "generation_tok_per_s": 61.77
+        },
+        "q4": {
+          "gen_tokens": 512,
+          "exit_code": 0,
+          "rss_final_kb": 303176,
+          "peak_rss_kb": 303176,
+          "generation_tok_per_s": 65.74
+        }
+      },
+      "quality_vs_native_at_512_tokens": {
+        "q8": {
+          "first_divergence": 40,
+          "top1_preservation": 0.994141,
+          "logit_rel_l2": 0.009941,
+          "delta_nll": 0.00015
+        },
+        "q5_0": {
+          "first_divergence": 13,
+          "top1_preservation": 0.972656,
+          "logit_rel_l2": 0.065828,
+          "delta_nll": 0.013649
+        },
+        "q5_1": {
+          "first_divergence": 81,
+          "top1_preservation": 0.982422,
+          "logit_rel_l2": 0.060368,
+          "delta_nll": 0.006143
+        },
+        "q4": {
+          "first_divergence": 32,
+          "top1_preservation": 0.933594,
+          "logit_rel_l2": 0.146776,
+          "delta_nll": 0.0324
+        }
+      },
+      "text_stability_observation": {
+        "q5_0": "Falls into a TIGHT exact-verbatim repetition loop (same paragraph repeated 3+ times near-identically) starting partway through the 512 tokens -- more degenerate at this length than q4 was in Phase 10A's equivalent test, and more degenerate than native's own Phase 10A loop.",
+        "q5_1": "Stays more varied and coherent overall; some repeated phrasing appears near the end ('fraught with danger and uncertainty', 'eyes widened') but never locks into an exact loop the way q5_0 does.",
+        "interpretation": "This does not straightforwardly track the quantitative quality metrics (q5_0 and q5_1 have similar rel-L2/top1 to each other, both clearly better than q4's) -- greedy decoding on a 135M model is chaotically sensitive to small perturbations, so which specific repetitive attractor a run falls into is not a reliable ranking signal on its own. Reported as an honest qualitative observation, not folded into the quantitative verdict. All three quantized modes and native itself are susceptible to repetition loops at this length on this small a model; this is a known small-model-plus-greedy-decoding property, not evidence that quantized KV specifically causes it."
+      },
+      "memory_stability": "All four modes: RSS flat across the full 512-token run (peak == final for q5_0/q5_1/q4; q8's small peak/final gap is from context-creation transient, not a leak). No crash, no error, in any mode."
+    }
+  },
+  "gpu_memory_pressure_360m": {
+    "summary": {
+      "note": "Phase 10B Section 13: memory-capacity ladder, SmolLM2-360M, Vulkan, --gpu-layers auto. Raw per-row data in gpu_memory_pressure5_360m.jsonl.",
+      "device": "NVIDIA GeForce GTX 1650, 4096 MiB total VRAM",
+      "model_layers": 32,
+      "ladder": [
+        {
+          "ctx": 131072,
+          "native": "FAIL (0 layers)",
+          "q8": "31/32 (partial)",
+          "q5_0": "32/32 (full)",
+          "q5_1": "32/32 (full)",
+          "q4": "32/32 (full)"
+        },
+        {
+          "ctx": 180000,
+          "native": "FAIL",
+          "q8": "FAIL",
+          "q5_0": "32/32 (full)",
+          "q5_1": "32/32 (full)",
+          "q4": "32/32 (full)"
+        },
+        {
+          "ctx": 220000,
+          "native": "FAIL",
+          "q8": "FAIL",
+          "q5_0": "18/32 (partial)",
+          "q5_1": "4/32 (partial)",
+          "q4": "32/32 (full)"
+        },
+        {
+          "ctx": 260000,
+          "native": "FAIL",
+          "q8": "FAIL",
+          "q5_0": "FAIL",
+          "q5_1": "FAIL",
+          "q4": "23/32 (partial)"
+        }
+      ],
+      "max_full_offload_context_found": {
+        "native": "< 131072 (already failing there)",
+        "q8": "< 131072 (already failing there)",
+        "q5_0": "between 180000 and 220000",
+        "q5_1": "between 180000 and 220000 (degrades to a much smaller partial count than q5_0 at 220000 -- 4 vs 18 layers -- consistent with q5_1 costing more bytes/layer)",
+        "q4": "between 220000 and 260000"
+      },
+      "findings": [
+        "Ordering at every ctx matches the byte-cost ordering exactly: q4 < q5_0 < q5_1 < q8 < native in failure order (native/q8 fail first, q4 fails last).",
+        "Both Q5 variants meaningfully extend the usable-context range vs Q8: at ctx=131072-180000, Q8 either partially or completely fails while both Q5 formats keep the model fully GPU-resident.",
+        "Q5_1's partial-offload degradation at ctx=220000 (4/32 layers) is much steeper than Q5_0's (18/32) at the same context -- the two formats' failure curves are not identical even though their byte budgets are close (37.5% vs 34.375% of native).",
+        "Q4 remains the only format with any GPU residency left at ctx=260000 (23/32 layers) -- consistent with Phase 10A's finding that Q4 has the largest memory-pressure advantage, now shown to be larger than either Q5 variant's."
+      ],
+      "conclusion": "Q5 (either variant) is a real, meaningful improvement over Q8 for memory-constrained/high-context GPU scenarios, but does not close the gap to Q4's memory-pressure advantage -- Q4 still wins on raw context-capacity extension. The trade-off is therefore genuinely three-way: Q4 for maximum context capacity, Q5 for a middle ground, Q8/native for best quality."
+    },
+    "raw_rows": [
+      {
+        "ctx": 131072,
+        "kv_mode": "native",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q8",
+        "kv_type": "Q8_0",
+        "ctx_size": 131072,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2852126720
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 31,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148625408,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 609722880,
+          "estimated_kv_bytes": 2852126720
+        },
+        "memory": {
+          "rss_after_model_load_kb": 341008,
+          "rss_after_context_kb": 587980,
+          "rss_after_prompt_kb": 597904,
+          "rss_final_kb": 598052,
+          "peak_rss_kb": 948388
+        },
+        "performance": {
+          "prompt_tok_per_s": 24.175475,
+          "generation_tok_per_s": 107.792986
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q5_0",
+        "kv_type": "Q5_0",
+        "ctx_size": 131072,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 1845493760
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148625408,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 1845493760
+        },
+        "memory": {
+          "rss_after_model_load_kb": 360084,
+          "rss_after_context_kb": 473212,
+          "rss_after_prompt_kb": 480880,
+          "rss_final_kb": 480724,
+          "peak_rss_kb": 956936
+        },
+        "performance": {
+          "prompt_tok_per_s": 49.209322,
+          "generation_tok_per_s": 122.668546
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q5_1",
+        "kv_type": "Q5_1",
+        "ctx_size": 131072,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2013265920
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148625408,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 2013265920
+        },
+        "memory": {
+          "rss_after_model_load_kb": 356300,
+          "rss_after_context_kb": 492072,
+          "rss_after_prompt_kb": 501192,
+          "rss_final_kb": 501092,
+          "peak_rss_kb": 956580
+        },
+        "performance": {
+          "prompt_tok_per_s": 81.145831,
+          "generation_tok_per_s": 133.682963
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q4",
+        "kv_type": "Q4_0",
+        "ctx_size": 131072,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 1509949440
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148625408,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 1509949440
+        },
+        "memory": {
+          "rss_after_model_load_kb": 360132,
+          "rss_after_context_kb": 480508,
+          "rss_after_prompt_kb": 489640,
+          "rss_final_kb": 489504,
+          "peak_rss_kb": 957072
+        },
+        "performance": {
+          "prompt_tok_per_s": 72.258502,
+          "generation_tok_per_s": 138.87746
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "ctx": 180000,
+        "kv_mode": "native",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "ctx": 180000,
+        "kv_mode": "q8",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q5_0",
+        "kv_type": "Q5_0",
+        "ctx_size": 180000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2534400000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148625408,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 2534400000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 360004,
+          "rss_after_context_kb": 538688,
+          "rss_after_prompt_kb": 547792,
+          "rss_final_kb": 547656,
+          "peak_rss_kb": 956468
+        },
+        "performance": {
+          "prompt_tok_per_s": 83.242779,
+          "generation_tok_per_s": 132.77397
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q5_1",
+        "kv_type": "Q5_1",
+        "ctx_size": 180000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2764800000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148625408,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 2764800000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 359992,
+          "rss_after_context_kb": 545732,
+          "rss_after_prompt_kb": 554816,
+          "rss_final_kb": 554716,
+          "peak_rss_kb": 956472
+        },
+        "performance": {
+          "prompt_tok_per_s": 85.1986,
+          "generation_tok_per_s": 127.535973
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q4",
+        "kv_type": "Q4_0",
+        "ctx_size": 180000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2073600000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148559872,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 2073600000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 360080,
+          "rss_after_context_kb": 524676,
+          "rss_after_prompt_kb": 533768,
+          "rss_final_kb": 533636,
+          "peak_rss_kb": 956472
+        },
+        "performance": {
+          "prompt_tok_per_s": 87.173941,
+          "generation_tok_per_s": 135.692713
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "ctx": 220000,
+        "kv_mode": "native",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "ctx": 220000,
+        "kv_mode": "q8",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q5_0",
+        "kv_type": "Q5_0",
+        "ctx_size": 220000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 3097600000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 18,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148559872,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 354032640,
+          "estimated_kv_bytes": 3097600000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 955296,
+          "rss_after_context_kb": 2099244,
+          "rss_after_prompt_kb": 2070136,
+          "rss_final_kb": 2033368,
+          "peak_rss_kb": 2139464
+        },
+        "performance": {
+          "prompt_tok_per_s": 14.593198,
+          "generation_tok_per_s": 38.192441
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q5_1",
+        "kv_type": "Q5_1",
+        "ctx_size": 220000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 3379200000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 4,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148559872,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 78673920,
+          "estimated_kv_bytes": 3379200000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 861936,
+          "rss_after_context_kb": 2520916,
+          "rss_after_prompt_kb": 2470124,
+          "rss_final_kb": 2384896,
+          "peak_rss_kb": 2580336
+        },
+        "performance": {
+          "prompt_tok_per_s": 10.306886,
+          "generation_tok_per_s": 19.640577
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q4",
+        "kv_type": "Q4_0",
+        "ctx_size": 220000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2534400000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 32,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148559872,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 629391360,
+          "estimated_kv_bytes": 2534400000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 359860,
+          "rss_after_context_kb": 560364,
+          "rss_after_prompt_kb": 569364,
+          "rss_final_kb": 569228,
+          "peak_rss_kb": 956424
+        },
+        "performance": {
+          "prompt_tok_per_s": 78.166459,
+          "generation_tok_per_s": 132.591458
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      },
+      {
+        "ctx": 260000,
+        "kv_mode": "native",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "ctx": 260000,
+        "kv_mode": "q8",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "ctx": 260000,
+        "kv_mode": "q5_0",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "ctx": 260000,
+        "kv_mode": "q5_1",
+        "exit_code": 5,
+        "ok": false
+      },
+      {
+        "schema_version": 1,
+        "membrane_version": "0.3.0-rc1",
+        "mode": "run",
+        "model_label": "SmolLM2-360M-Instruct-f16.gguf",
+        "kv_store": "q4",
+        "kv_type": "Q4_0",
+        "ctx_size": 260000,
+        "generated_tokens": 4,
+        "storage": {
+          "kv_allocated_bytes": 2995200000
+        },
+        "gpu": {
+          "requested": true,
+          "backend_gpu_capable": true,
+          "gpu_layers_requested": -2,
+          "gpu_layers_selected": 23,
+          "backend": "Vulkan",
+          "device_requested": "",
+          "device_selected": "Vulkan0"
+        },
+        "gpu_policy": {
+          "device_total_bytes": 4552916992,
+          "device_free_bytes": 4148559872,
+          "safety_reserve_bytes": 682937535,
+          "estimated_model_bytes": 452375040,
+          "estimated_kv_bytes": 2995200000
+        },
+        "memory": {
+          "rss_after_model_load_kb": 955576,
+          "rss_after_context_kb": 2015028,
+          "rss_after_prompt_kb": 2023772,
+          "rss_final_kb": 2023868,
+          "peak_rss_kb": 2023868
+        },
+        "performance": {
+          "prompt_tok_per_s": 49.419152,
+          "generation_tok_per_s": 65.303407
+        },
+        "no_fallback_occurred": true,
+        "exit_code": 0
+      }
+    ]
+  },
+  "performance_repetitions": {
+    "note": "Phase 10B Sections 14-15: fresh-process repetitions, SmolLM2-135M, ctx=2048, generation tok/s. Vulkan: 7 reps/mode, gen-tokens=128, gpu-layers=all. CPU: 5 reps/mode, gen-tokens=128.",
+    "vulkan": {
+      "q8": {
+        "n": 7,
+        "min": 262.35,
+        "max": 272.86,
+        "mean": 269.86,
+        "median": 271.41,
+        "stddev": 3.7,
+        "delta_vs_q8_pct": 0.0
+      },
+      "q5_0": {
+        "n": 7,
+        "min": 259.04,
+        "max": 261.45,
+        "mean": 260.11,
+        "median": 259.89,
+        "stddev": 0.84,
+        "delta_vs_q8_pct": -3.61
+      },
+      "q5_1": {
+        "n": 7,
+        "min": 262.21,
+        "max": 266.34,
+        "mean": 264.65,
+        "median": 264.45,
+        "stddev": 1.45,
+        "delta_vs_q8_pct": -1.93
+      },
+      "q4": {
+        "n": 7,
+        "min": 265.02,
+        "max": 269.85,
+        "mean": 267.67,
+        "median": 268.37,
+        "stddev": 2.02,
+        "delta_vs_q8_pct": -0.81
+      }
+    },
+    "cpu": {
+      "q8": {
+        "n": 5,
+        "min": 64.89,
+        "max": 69.16,
+        "mean": 67.93,
+        "median": 68.36,
+        "stddev": 1.74,
+        "delta_vs_q8_pct": 0.0
+      },
+      "q5_0": {
+        "n": 5,
+        "min": 66.2,
+        "max": 67.8,
+        "mean": 67.13,
+        "median": 67.11,
+        "stddev": 0.68,
+        "delta_vs_q8_pct": -1.19
+      },
+      "q5_1": {
+        "n": 5,
+        "min": 64.55,
+        "max": 68.41,
+        "mean": 66.27,
+        "median": 66.23,
+        "stddev": 1.39,
+        "delta_vs_q8_pct": -2.45
+      },
+      "q4": {
+        "n": 5,
+        "min": 68.81,
+        "max": 69.7,
+        "mean": 69.26,
+        "median": 69.31,
+        "stddev": 0.36,
+        "delta_vs_q8_pct": 1.96
+      }
+    },
+    "conclusion": "No meaningful performance cost for either Q5 variant on either backend -- every delta vs Q8 (-3.6% to +2.0%) is within or close to the modes' own run-to-run stddev. Performance is not a differentiator among q8/q5_0/q5_1/q4 at this model/context size; the trade-off is entirely memory-vs-quality."
+  },
+  "compatibility": {
+    "verified_architecture": "LLM_ARCH_LLAMA only (SmolLM2 135M/360M) -- same scope as existing --kv q8/q4",
+    "compat_precheck": "membrane_check_kv_compat() extended with independent MEMBRANE_Q5_0_BLOCK_SIZE/MEMBRANE_Q5_1_BLOCK_SIZE constants (not reused from Q4/Q8's), verified via unit tests that no two types' rejection reasons alias each other.",
+    "cli_flag": "--kv native|q8|q5_0|q5_1|q4 (was native|q8|q4). Case-sensitive, no partial-name match (\"q5\" alone or \"Q5_0\" rejected), fails closed, JSON reports exact kv_store mode name and kv_type. --compare-kv/--gpu-bench remain hardcoded native-vs-q8, unaffected by --kv q5_0/q5_1/q4 (verified)."
+  },
+  "limitations": [
+    "Only 2 models tested (SmolLM2 135M, 360M), both small (<400M params) and both LLM_ARCH_LLAMA.",
+    "Multi-prompt quality used 5 prompts x 128 tokens each -- broader than Phase 10A's single prompt, still not a large-scale eval suite.",
+    "On the smallest model (135M), Q5's worst-case-prompt top1 preservation (78.6% for Q5_0, 85.7% for Q5_1, both on the 'simple_reasoning' prompt) does NOT clearly beat Q4's own worst case (87.5%) -- reported honestly, not smoothed over by the mean-based headline numbers.",
+    "GPU memory-pressure test used only SmolLM2-360M on a single GPU (GTX 1650, 4GB).",
+    "No adaptive/mixed Q4+Q5+Q8 policy was implemented or evaluated -- explicitly out of scope for Phase 10B."
+  ]
+}

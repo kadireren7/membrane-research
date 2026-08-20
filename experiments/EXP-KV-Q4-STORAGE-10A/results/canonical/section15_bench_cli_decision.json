@@ -1,0 +1,10 @@
+{
+  "note": "Phase 10A Section 15: decision on whether to extend --compare-kv/--gpu-bench (or add a new --kv-bench) to a three-way native/q8/q4 comparison.",
+  "decision": "NOT implemented in Phase 10A.",
+  "reasoning": [
+    "All quality/performance/memory data required for this phase's own Sections 9-11, 13-14 was already obtained via a standalone, uncommitted research probe that reuses the exact same run_kv_store_pass()/record_kv_store_behavior()/membrane_runtime_detect_divergence() functions run_native_q8_comparison() already uses for --compare-kv -- zero duplicated decode logic, and no new CLI surface was needed to get real results.",
+    "Section 11's quality-ladder result flagged q4 as having a real, order-of-magnitude-worse logit rel-L2 and delta NLL than q8 on both tested models -- shipping a polished three-way comparison CLI for a mode not yet classified as viable (Section 20 decision gate has not run yet at this point in the phase) would be premature productization, which Phase 10A's own charter (Section 21) explicitly forbids ('Do NOT productize yet... Do NOT document it as stable').",
+    "A three-way --compare-kv would also need real design thought (output format changes, human-readable table layout, JSON schema versioning for existing consumers) that deserves a decision made WITH the Section 20 verdict in hand, not before it -- exactly the 'avoid confusing CLI design' caution Section 15 itself calls out."
+  ],
+  "recommendation_for_a_future_phase": "If a later phase decides q4 (or an adaptive q4/q8 policy) is worth productizing, extend the existing run_native_q8_comparison()-style 3-pass helper to accept a list of candidate modes rather than hardcoding Q8, and reuse it under both --compare-kv (now natively 2+ candidates) and --gpu-bench. Do not write a second decode/comparison implementation."
+}

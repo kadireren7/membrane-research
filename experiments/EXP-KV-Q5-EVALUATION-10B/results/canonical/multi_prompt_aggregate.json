@@ -1,0 +1,374 @@
+{
+  "135M": {
+    "q8": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.995313,
+      "median_top1_preservation": 0.992188,
+      "mean_logit_rel_l2": 0.009389,
+      "mean_delta_nll": -0.000378,
+      "worst_case_prompt": "factual_short_answer",
+      "worst_case_top1_preservation": 0.992188,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.010452,
+          "delta_nll": -0.00039,
+          "first_divergence": 84
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.007642,
+          "delta_nll": -0.000229,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.010657,
+          "delta_nll": -0.002547,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.010695,
+          "delta_nll": 7.1e-05,
+          "first_divergence": 25
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.0075,
+          "delta_nll": 0.001206,
+          "first_divergence": 40
+        }
+      ]
+    },
+    "q5_0": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.93058,
+      "median_top1_preservation": 0.960938,
+      "mean_logit_rel_l2": 0.065389,
+      "mean_delta_nll": 0.000346,
+      "worst_case_prompt": "simple_reasoning",
+      "worst_case_top1_preservation": 0.785714,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 0.960938,
+          "logit_rel_l2": 0.06304,
+          "delta_nll": -0.002218,
+          "first_divergence": 11
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.051461,
+          "delta_nll": -0.000783,
+          "first_divergence": 26
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 0.785714,
+          "logit_rel_l2": 0.104743,
+          "delta_nll": -0.025876,
+          "first_divergence": 2
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.976562,
+          "logit_rel_l2": 0.061881,
+          "delta_nll": 0.005486,
+          "first_divergence": 31
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.9375,
+          "logit_rel_l2": 0.045821,
+          "delta_nll": 0.025123,
+          "first_divergence": 13
+        }
+      ]
+    },
+    "q5_1": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.944866,
+      "median_top1_preservation": 0.953125,
+      "mean_logit_rel_l2": 0.051576,
+      "mean_delta_nll": 0.013386,
+      "worst_case_prompt": "simple_reasoning",
+      "worst_case_top1_preservation": 0.857143,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 0.9375,
+          "logit_rel_l2": 0.059513,
+          "delta_nll": 0.01402,
+          "first_divergence": 10
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.044326,
+          "delta_nll": 0.011156,
+          "first_divergence": 94
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 0.857143,
+          "logit_rel_l2": 0.049114,
+          "delta_nll": 0.002778,
+          "first_divergence": 1
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.953125,
+          "logit_rel_l2": 0.056693,
+          "delta_nll": 0.026594,
+          "first_divergence": 3
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.984375,
+          "logit_rel_l2": 0.048232,
+          "delta_nll": 0.012383,
+          "first_divergence": 81
+        }
+      ]
+    },
+    "q4": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.924777,
+      "median_top1_preservation": 0.921875,
+      "mean_logit_rel_l2": 0.113427,
+      "mean_delta_nll": 0.024889,
+      "worst_case_prompt": "longer_prose_continuation",
+      "worst_case_top1_preservation": 0.875,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 0.921875,
+          "logit_rel_l2": 0.113117,
+          "delta_nll": 0.033341,
+          "first_divergence": 2
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 0.976562,
+          "logit_rel_l2": 0.096532,
+          "delta_nll": 0.042775,
+          "first_divergence": 26
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 0.928571,
+          "logit_rel_l2": 0.117589,
+          "delta_nll": -0.031212,
+          "first_divergence": 7
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.921875,
+          "logit_rel_l2": 0.134834,
+          "delta_nll": 0.033587,
+          "first_divergence": 12
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.875,
+          "logit_rel_l2": 0.105064,
+          "delta_nll": 0.045953,
+          "first_divergence": 32
+        }
+      ]
+    }
+  },
+  "360M": {
+    "q8": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.996875,
+      "median_top1_preservation": 1.0,
+      "mean_logit_rel_l2": 0.009105,
+      "mean_delta_nll": -0.0001,
+      "worst_case_prompt": "code_like_text",
+      "worst_case_top1_preservation": 0.992188,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.010791,
+          "delta_nll": -0.000101,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.008999,
+          "delta_nll": -0.000846,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.010154,
+          "delta_nll": -0.001034,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.008426,
+          "delta_nll": 0.000238,
+          "first_divergence": 72
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.007156,
+          "delta_nll": 0.001245,
+          "first_divergence": 87
+        }
+      ]
+    },
+    "q5_0": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.985938,
+      "median_top1_preservation": 0.984375,
+      "mean_logit_rel_l2": 0.055769,
+      "mean_delta_nll": 0.007576,
+      "worst_case_prompt": "longer_prose_continuation",
+      "worst_case_top1_preservation": 0.960938,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.053594,
+          "delta_nll": 0.002137,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.057836,
+          "delta_nll": 0.020491,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 0.984375,
+          "logit_rel_l2": 0.063235,
+          "delta_nll": 0.000912,
+          "first_divergence": 33
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.984375,
+          "logit_rel_l2": 0.052781,
+          "delta_nll": -0.001593,
+          "first_divergence": 72
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.960938,
+          "logit_rel_l2": 0.051401,
+          "delta_nll": 0.015935,
+          "first_divergence": 28
+        }
+      ]
+    },
+    "q5_1": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.986498,
+      "median_top1_preservation": 0.987179,
+      "mean_logit_rel_l2": 0.049422,
+      "mean_delta_nll": 0.002061,
+      "worst_case_prompt": "code_like_text",
+      "worst_case_top1_preservation": 0.96875,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.052021,
+          "delta_nll": -0.003987,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 0.987179,
+          "logit_rel_l2": 0.044348,
+          "delta_nll": -1.9e-05,
+          "first_divergence": 7
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 0.992188,
+          "logit_rel_l2": 0.059221,
+          "delta_nll": 0.00821,
+          "first_divergence": 82
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.96875,
+          "logit_rel_l2": 0.052463,
+          "delta_nll": 0.004784,
+          "first_divergence": 72
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.984375,
+          "logit_rel_l2": 0.039058,
+          "delta_nll": 0.001318,
+          "first_divergence": 28
+        }
+      ]
+    },
+    "q4": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.964743,
+      "median_top1_preservation": 0.948718,
+      "mean_logit_rel_l2": 0.115756,
+      "mean_delta_nll": 0.015119,
+      "worst_case_prompt": "simple_reasoning",
+      "worst_case_top1_preservation": 0.945312,
+      "per_prompt": [
+        {
+          "prompt_label": "factual_short_answer",
+          "top1_preservation": 1.0,
+          "logit_rel_l2": 0.128229,
+          "delta_nll": -0.008834,
+          "first_divergence": -1
+        },
+        {
+          "prompt_label": "instruction_following",
+          "top1_preservation": 0.948718,
+          "logit_rel_l2": 0.111536,
+          "delta_nll": 0.005606,
+          "first_divergence": 3
+        },
+        {
+          "prompt_label": "simple_reasoning",
+          "top1_preservation": 0.945312,
+          "logit_rel_l2": 0.133129,
+          "delta_nll": 0.033684,
+          "first_divergence": 3
+        },
+        {
+          "prompt_label": "code_like_text",
+          "top1_preservation": 0.984375,
+          "logit_rel_l2": 0.112318,
+          "delta_nll": 0.010333,
+          "first_divergence": 76
+        },
+        {
+          "prompt_label": "longer_prose_continuation",
+          "top1_preservation": 0.945312,
+          "logit_rel_l2": 0.093566,
+          "delta_nll": 0.034805,
+          "first_divergence": 28
+        }
+      ]
+    }
+  }
+}

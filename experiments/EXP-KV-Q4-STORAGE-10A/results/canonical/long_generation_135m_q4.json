@@ -1,0 +1,43 @@
+{
+  "note": "Phase 10A Section 10: SmolLM2-135M, ctx=2048, --kv q4, 512 requested generation tokens.",
+  "model": "SmolLM2-135M-Instruct-f16.gguf",
+  "ctx": 2048,
+  "kv_mode": "q4",
+  "kv_type": "Q4_0",
+  "requested_gen_tokens": 512,
+  "actual_gen_tokens": 512,
+  "hit_eos_early": false,
+  "kv_allocated_bytes": 13271040,
+  "rss_after_context_kb": 302964,
+  "rss_final_kb": 303880,
+  "peak_rss_kb": 303932,
+  "prompt_tok_per_s": 507.206028,
+  "generation_tok_per_s": 61.564764,
+  "exit_code": 0,
+  "no_fallback_occurred": true,
+  "crash_or_error": false,
+  "quality_vs_native_at_512_tokens": {
+    "q8_reference": {
+      "first_divergence_step": 40,
+      "top1_preservation": 0.994141,
+      "logit_rel_l2": 0.009941,
+      "delta_nll": 0.000150
+    },
+    "q4": {
+      "first_divergence_step": 32,
+      "top1_preservation": 0.933594,
+      "logit_rel_l2": 0.146776,
+      "delta_nll": 0.032400
+    },
+    "q4_vs_q8_ratio": {
+      "logit_rel_l2": 14.77,
+      "delta_nll": 216.0
+    },
+    "note": "Quality gap widens with longer generation (256-token ladder in quality_ladder.json showed 13.4x/49.6x on this same model; at 512 tokens it is 14.8x/216x) -- consistent with autoregressive error accumulation under a fixed compressed KV precision, not new instability."
+  },
+  "text_stability_observation": {
+    "q4_text": "Coherent, grammatical, on-topic prose for all 512 tokens. Mild near-verbatim paragraph repetition appears once, roughly two-thirds through the generation.",
+    "native_text_for_comparison": "MORE repetitive than q4 at the same length -- native falls into a tight exact-loop (alternating 'the path of the future'/'the path of the past' paragraphs) that repeats several times by token 512.",
+    "conclusion": "The repetition/degeneration observed is a generic small-model-plus-greedy-decoding-plus-long-generation failure mode, reproduced (more severely) in native as well. Not attributable to q4 specifically -- q4's own text is not visibly less stable than native's at this length."
+  }
+}

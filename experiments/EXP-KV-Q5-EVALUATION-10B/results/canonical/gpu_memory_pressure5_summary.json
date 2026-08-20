@@ -1,0 +1,25 @@
+{
+  "note": "Phase 10B Section 13: memory-capacity ladder, SmolLM2-360M, Vulkan, --gpu-layers auto. Raw per-row data in gpu_memory_pressure5_360m.jsonl.",
+  "device": "NVIDIA GeForce GTX 1650, 4096 MiB total VRAM",
+  "model_layers": 32,
+  "ladder": [
+    { "ctx": 131072, "native": "FAIL (0 layers)", "q8": "31/32 (partial)", "q5_0": "32/32 (full)", "q5_1": "32/32 (full)", "q4": "32/32 (full)" },
+    { "ctx": 180000, "native": "FAIL", "q8": "FAIL", "q5_0": "32/32 (full)", "q5_1": "32/32 (full)", "q4": "32/32 (full)" },
+    { "ctx": 220000, "native": "FAIL", "q8": "FAIL", "q5_0": "18/32 (partial)", "q5_1": "4/32 (partial)", "q4": "32/32 (full)" },
+    { "ctx": 260000, "native": "FAIL", "q8": "FAIL", "q5_0": "FAIL", "q5_1": "FAIL", "q4": "23/32 (partial)" }
+  ],
+  "max_full_offload_context_found": {
+    "native": "< 131072 (already failing there)",
+    "q8": "< 131072 (already failing there)",
+    "q5_0": "between 180000 and 220000",
+    "q5_1": "between 180000 and 220000 (degrades to a much smaller partial count than q5_0 at 220000 -- 4 vs 18 layers -- consistent with q5_1 costing more bytes/layer)",
+    "q4": "between 220000 and 260000"
+  },
+  "findings": [
+    "Ordering at every ctx matches the byte-cost ordering exactly: q4 < q5_0 < q5_1 < q8 < native in failure order (native/q8 fail first, q4 fails last).",
+    "Both Q5 variants meaningfully extend the usable-context range vs Q8: at ctx=131072-180000, Q8 either partially or completely fails while both Q5 formats keep the model fully GPU-resident.",
+    "Q5_1's partial-offload degradation at ctx=220000 (4/32 layers) is much steeper than Q5_0's (18/32) at the same context -- the two formats' failure curves are not identical even though their byte budgets are close (37.5% vs 34.375% of native).",
+    "Q4 remains the only format with any GPU residency left at ctx=260000 (23/32 layers) -- consistent with Phase 10A's finding that Q4 has the largest memory-pressure advantage, now shown to be larger than either Q5 variant's."
+  ],
+  "conclusion": "Q5 (either variant) is a real, meaningful improvement over Q8 for memory-constrained/high-context GPU scenarios, but does not close the gap to Q4's memory-pressure advantage -- Q4 still wins on raw context-capacity extension. The trade-off is therefore genuinely three-way: Q4 for maximum context capacity, Q5 for a middle ground, Q8/native for best quality."
+}

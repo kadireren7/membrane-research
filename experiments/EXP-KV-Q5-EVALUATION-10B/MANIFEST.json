@@ -1,0 +1,122 @@
+{
+  "experiment_id": "EXP-KV-Q5-EVALUATION-10B",
+  "phase": "10B",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/q5-kv-evaluation",
+  "source_head_sha": "abfe448105ed3a6101496263beba9d9707d39258",
+  "base_sha": "4aa6757fc8a0e68d338b9815684277b68a423a50",
+  "base_sha_note": "This is experiment/q4-kv-storage's own HEAD -- q5-kv-evaluation is a direct linear descendant, not an independent branch.",
+  "date": "2026-08-14",
+  "purpose": "Extend EXP-KV-Q4-STORAGE-10A's methodology to Q5_0/Q5_1, searching for a KV storage format whose quality stays much closer to Q8 than Q4 while still saving meaningful memory over Q8.",
+  "verdict": "Q5_PRODUCT_CANDIDATE",
+  "verdict_detail": "preferred_format=Q5_1",
+  "verdict_source": "results/q5-kv-evaluation.json:decision_gate.verdict / decision_gate.preferred_format (literal source fields, not synthesized)",
+  "productized": true,
+  "product_pr": 19,
+  "product_commit": "d101fc80d535b09adecd90345312d50774bd821c",
+  "product_commit_note": "Merge commit for kadireren7/membrane PR #19 (\"feat: add Q5 KV runtime mode\"), merged 2026-08-14T14:33:03Z. Verified via `gh pr view 19` immediately before writing this manifest. The product PR is a clean re-implementation, not a cherry-pick of this branch's prototype commit -- this is a research-finding-to-product link, not a code-identity claim.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM) for Vulkan results; CPU results are host-portable",
+  "artifacts": [
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/patches/phase10b-q5-kv-evaluation-prototype.patch",
+      "source_repo_path": "(derived) git diff experiment/q4-kv-storage..experiment/q5-kv-evaluation -- tools/ scripts/",
+      "size_bytes": 33071,
+      "sha256": "5122e9f31364e41e72014145e6f726d477664fcb34baec32c0517a595e411d52"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/cpu_matrix5_135m.jsonl",
+      "source_repo_path": "results/phase10/cpu_matrix5_135m.jsonl",
+      "size_bytes": 21608,
+      "sha256": "d7eb928985f828d55476eea856fc73164a2d1aa613c08575c8262fd818e16eaf"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/gpu_memory_pressure5_360m.jsonl",
+      "source_repo_path": "results/phase10/gpu_memory_pressure5_360m.jsonl",
+      "size_bytes": 10518,
+      "sha256": "1e73a47211082972e08fcdc1ffe2bb0416dfdd64725a730622bdea28bf6695fc"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/gpu_memory_pressure5_summary.json",
+      "source_repo_path": "results/phase10/gpu_memory_pressure5_summary.json",
+      "size_bytes": 2388,
+      "sha256": "bb8f7b8702ce9897c33be36f67ff9927928f797287fa3a09ccea930b497a8728"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/long_generation5_135m.jsonl",
+      "source_repo_path": "results/phase10/long_generation5_135m.jsonl",
+      "size_bytes": 2833,
+      "sha256": "598faa9e8e7606ca0f2a96bab207142668f18370f340fd995655778bcbdb5ebc"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/long_generation5_quality_and_text.json",
+      "source_repo_path": "results/phase10/long_generation5_quality_and_text.json",
+      "size_bytes": 2751,
+      "sha256": "27c4bd14db3ed1c2dd92b4afad47cb4489f0578863fad420760553280998d259"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/multi_prompt_135m.jsonl",
+      "source_repo_path": "results/phase10/multi_prompt_135m.jsonl",
+      "size_bytes": 5337,
+      "sha256": "9460f82e963e2cca878623456f1f52ed332f179fff78b3252ae51e77d7fd3142"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/multi_prompt_360m.jsonl",
+      "source_repo_path": "results/phase10/multi_prompt_360m.jsonl",
+      "size_bytes": 5333,
+      "sha256": "4507ea3858cd8130f66096707151055398a70d859228b0b0aa1ed4e6479ac700"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/multi_prompt_aggregate.json",
+      "source_repo_path": "results/phase10/multi_prompt_aggregate.json",
+      "size_bytes": 11100,
+      "sha256": "d47ef03711df8cc7e915e95cb3b1883fc323e3cb596fbef7a4968da6db7372c4"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/performance_repetitions5.json",
+      "source_repo_path": "results/phase10/performance_repetitions5.json",
+      "size_bytes": 1565,
+      "sha256": "c604f5eddd01788aa5373481d10826233cb9ae8f1769212016d605f721f36146"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/q5-kv-evaluation.json",
+      "source_repo_path": "results/phase10/q5-kv-evaluation.json",
+      "size_bytes": 70010,
+      "sha256": "c71b2da6458a859069e8b98dc37b632fb121608c0b5c3e068e4f8982bf6f5e8e"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/quality_bar_verdict_per_format.json",
+      "source_repo_path": "results/phase10/quality_bar_verdict_per_format.json",
+      "size_bytes": 3275,
+      "sha256": "c604d3a78a7b10fcabc77ffb143ef4facd8dc0aed58a8a21ae6f58f7f45a0039"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/quality_ladder5_single_prompt.jsonl",
+      "source_repo_path": "results/phase10/quality_ladder5_single_prompt.jsonl",
+      "size_bytes": 2128,
+      "sha256": "b5a986ffc0acf535e5cbb769834e122de3fa3aa37dfa3382834dcb0e267e61d3"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/second_model5_360m.jsonl",
+      "source_repo_path": "results/phase10/second_model5_360m.jsonl",
+      "size_bytes": 8424,
+      "sha256": "ed41f40efa4f1318bb8aba0c3cd4c3e3b2a2a57a88b1ccab6152e1360743ad20"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/storage_theoretical_q5_extension.json",
+      "source_repo_path": "results/phase10/storage_theoretical_q5_extension.json",
+      "size_bytes": 2293,
+      "sha256": "af17935a71ab5c5d658db8873d7e8ec2d20fd5fce796555f727e32dd194c6c09"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q5-EVALUATION-10B/results/canonical/vulkan_matrix5_135m.jsonl",
+      "source_repo_path": "results/phase10/vulkan_matrix5_135m.jsonl",
+      "size_bytes": 18988,
+      "sha256": "3b26043903648a286461e60095b0d9a50625c05e803bb9b9d9b9548d2f3d08d0"
+    }
+  ]
+}

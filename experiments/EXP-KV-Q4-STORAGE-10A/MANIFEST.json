@@ -1,0 +1,90 @@
+{
+  "experiment_id": "EXP-KV-Q4-STORAGE-10A",
+  "phase": "10A",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/q4-kv-storage",
+  "source_head_sha": "4aa6757fc8a0e68d338b9815684277b68a423a50",
+  "base_sha": "a6d5377c852cc1eeb88d224b25726f74c515a405",
+  "date": "2026-08-14",
+  "purpose": "Evaluate experimental Q4_0 KV cache storage end-to-end (real ggml allocation, real decode) on CPU and Vulkan, to determine whether its real memory win clears a quality bar sufficient for product use.",
+  "verdict": "Q4_MEMORY_WIN_QUALITY_TOO_HIGH_COST",
+  "verdict_source": "results/q4-kv-validation.json:decision_gate.verdict (literal source field, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "reason_not_productized": "Real, reproducible quality cost too high (logit rel-L2 and delta-NLL 12.8x-58.6x worse than Q8, top-1 preservation 88.7-92.6% vs Q8's 98.8%) despite genuine memory and GPU-residency wins. Phase 10A's own charter explicitly forbade productizing before this quality-bar decision was reached. Superseded by EXP-KV-Q5-EVALUATION-10B.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM) for Vulkan results; CPU results are host-portable",
+  "artifacts": [
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/patches/phase10a-q4-kv-storage-prototype.patch",
+      "source_repo_path": "(derived) git diff a6d5377..experiment/q4-kv-storage -- tools/ scripts/",
+      "size_bytes": 29583,
+      "sha256": "e0ec96b0183d130603f37cb2a2213720efc4d89ff47a0ee0b7511f38d56cab9b"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/cpu_matrix_135m.jsonl",
+      "source_repo_path": "results/phase10/cpu_matrix_135m.jsonl",
+      "size_bytes": 12954,
+      "sha256": "910a7857089427dd9b8574f94dedde1fd65a0f1bc4aacbd3da2e641621bc6c69"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/gpu_memory_pressure_360m.json",
+      "source_repo_path": "results/phase10/gpu_memory_pressure_360m.json",
+      "size_bytes": 2836,
+      "sha256": "fdeb81fb5d0297c88c6d327051e83c52888ebb53957546dd8b2674310c56f448"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/long_generation_135m_q4.json",
+      "source_repo_path": "results/phase10/long_generation_135m_q4.json",
+      "size_bytes": 2018,
+      "sha256": "1dbf249b2531d869272104e4552ad8492ce67cd9139642ec84875172cad2df31"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/performance_repetition_135m_vulkan.json",
+      "source_repo_path": "results/phase10/performance_repetition_135m_vulkan.json",
+      "size_bytes": 902,
+      "sha256": "c78cb8a8e4539ecf697a5c489b246a7b9edcb0fee9f395e706a4a3996cc7dae3"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/q4-kv-validation.json",
+      "source_repo_path": "results/phase10/q4-kv-validation.json",
+      "size_bytes": 32980,
+      "sha256": "710f2a5c27cf63726e47cd7ecc207f9e37895f966e9e8eb72d0e69e7be94d3c9"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/quality_ladder.json",
+      "source_repo_path": "results/phase10/quality_ladder.json",
+      "size_bytes": 2474,
+      "sha256": "00c55fc3534fe8d73564562e324d08377db18a3671638f5b0ddcbd7e5e46fa9d"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/second_model_360m.jsonl",
+      "source_repo_path": "results/phase10/second_model_360m.jsonl",
+      "size_bytes": 5051,
+      "sha256": "b2dc9b1c73a2bb5d7b80969758c32a637f6659a062ac2f24e1211c64fddec257"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/section15_bench_cli_decision.json",
+      "source_repo_path": "results/phase10/section15_bench_cli_decision.json",
+      "size_bytes": 1842,
+      "sha256": "14b0c5524b0365d3f4da1b1657576bc3b3ebb14680648701544ffcc4856e25b8"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/storage_theoretical_vs_observed.json",
+      "source_repo_path": "results/phase10/storage_theoretical_vs_observed.json",
+      "size_bytes": 2178,
+      "sha256": "9f692d8ecbed6c1abe92743094ace04fd1c57f1a1bd78fed626931159d5458f9"
+    },
+    {
+      "research_repo_path": "experiments/EXP-KV-Q4-STORAGE-10A/results/canonical/vulkan_matrix_135m.jsonl",
+      "source_repo_path": "results/phase10/vulkan_matrix_135m.jsonl",
+      "size_bytes": 11393,
+      "sha256": "5b74f93b222c5eec34cd79c11f65e1263c76924663eea7a4e4b244ecf44f0ac6"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "note": "Phase 10A Section 12: expected KV storage size from ggml's real block formats (ggml-common.h, pinned llama.cpp commit c0bc8591), compared to observed allocation from cpu_matrix_135m.jsonl / vulkan_matrix_135m.jsonl / second_model_360m.jsonl.",
+  "block_formats": {
+    "F16 (native)": { "bytes_per_element": 2.0, "bits_per_element": 16.0, "source": "sizeof(ggml_fp16_t)" },
+    "Q8_0": {
+      "block_size_elements": 32,
+      "struct_bytes": 34,
+      "struct_layout": "ggml_half d (2 bytes scale) + int8_t qs[32] (32 bytes quants)",
+      "bytes_per_element": 1.0625,
+      "bits_per_element": 8.5
+    },
+    "Q4_0": {
+      "block_size_elements": 32,
+      "struct_bytes": 18,
+      "struct_layout": "ggml_half d (2 bytes scale) + uint8_t qs[16] (16 bytes packed nibbles)",
+      "bytes_per_element": 0.5625,
+      "bits_per_element": 4.5
+    }
+  },
+  "expected_ratios": {
+    "q8_over_native": 0.53125,
+    "q4_over_native": 0.28125,
+    "q4_over_q8": 0.529411765
+  },
+  "observed_ratios": {
+    "cpu_135m_all_6_contexts_512_to_16384": {
+      "q8_over_native": 0.5312,
+      "q4_over_native": 0.2812,
+      "q4_over_q8": 0.5294
+    },
+    "vulkan_135m_all_4_contexts": {
+      "q8_over_native": 0.5312,
+      "q4_over_native": 0.2812,
+      "q4_over_q8": 0.5294
+    },
+    "cpu_and_vulkan_360m_ctx2048": {
+      "q8_over_native": 0.5312,
+      "q4_over_native": 0.2812,
+      "q4_over_q8": 0.5294
+    }
+  },
+  "consistency": "EXACT MATCH to 4 significant figures at every measured context size (512/1024/2048/4096/8192/16384) and on both tested models. Q4_0's real 4.5-bit-per-element block format (not a naive '4 bits = 1/4 the memory' assumption) fully accounts for the observed allocation -- there is no discrepancy, hidden overhead, or unaccounted metadata in the real allocation vs the block-format-derived expectation.",
+  "explicit_caveat": "4-bit quantization is NOT exactly 25% (1/4) of F16's 16 bits, because Q4_0 carries a 16-bit fp16 scale per 32-element block (2 bytes / 32 elements = 0.5 bits/element of overhead) on top of the 4 raw quant bits -- true storage is 4.5 bits/element = 28.125% of F16, not 25%. This is exactly what was observed."
+}

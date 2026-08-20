@@ -1,0 +1,812 @@
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 6be88bf..781d05d 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -956,6 +956,265 @@ def _c50():
+ 	return len(bad) == 0, "; ".join(bad) if bad else "README has no Phase 10A / --kv q4 claims"
+ 
+ 
++# ---------------------------------------------------------------------
++# Phase 10B: experimental Q5 KV evaluation artifact
++# ---------------------------------------------------------------------
++P10B_ARTIFACT_PATH = REPO_ROOT / "results" / "phase10" / "q5-kv-evaluation.json"
++_P10B_CACHE = {}
++
++
++def _load_p10b_artifact():
++	key = str(P10B_ARTIFACT_PATH)
++	if key not in _P10B_CACHE:
++		_P10B_CACHE[key] = json.loads(P10B_ARTIFACT_PATH.read_text())
++	return _P10B_CACHE[key]
++
++
++@check("Phase 10B artifact exists, is valid JSON, and has schema_version 1")
++def _c51():
++	if not P10B_ARTIFACT_PATH.exists():
++		return False, f"{P10B_ARTIFACT_PATH} does not exist"
++	a = _load_p10b_artifact()
++	ok = a.get("schema_version") == 1
++	return ok, f"schema_version={a.get('schema_version')!r}"
++
++
++@check("Phase 10B artifact: membrane_commit and llama_cpp_commit look "
++	"like real commit SHAs (40 hex chars)")
++def _c52():
++	a = _load_p10b_artifact()
++	bad = []
++	for key in ("membrane_commit", "membrane_base_commit", "llama_cpp_commit"):
++		sha = a.get(key, "")
++		if not re.fullmatch(r"[0-9a-f]{40}", sha):
++			bad.append(f"{key}={sha!r}")
++	return len(bad) == 0, "; ".join(bad) if bad else "all 3 commit fields well-formed"
++
++
++@check("Phase 10A Q4 artifact is still intact (Phase 10B did not "
++	"overwrite or corrupt it)")
++def _c53():
++	a = _load_p10_artifact()
++	ok = (a.get("schema_version") == 1
++		and a.get("decision_gate", {}).get("verdict") == "Q4_MEMORY_WIN_QUALITY_TOO_HIGH_COST")
++	return ok, f"q4 artifact verdict={a.get('decision_gate', {}).get('verdict')!r}"
++
++
++@check("Phase 10B artifact: CPU context matrix -- q4 < q5_0 < q5_1 < "
++	"q8 < native bytes at every row (real format ordering)")
++def _c54():
++	a = _load_p10b_artifact()
++	rows = a.get("cpu_validation_135m", {}).get("context_matrix", [])
++	bad = []
++	if not rows:
++		return False, "no CPU context_matrix rows found"
++	for row in rows:
++		vals = {m: row[m]["kv_allocated_bytes"] for m in ("q4", "q5_0", "q5_1", "q8", "native")}
++		if not (vals["q4"] < vals["q5_0"] < vals["q5_1"] < vals["q8"] < vals["native"]):
++			bad.append(f"ctx={row['ctx']}: bytes not strictly ordered "
++				f"q4({vals['q4']}) < q5_0({vals['q5_0']}) < q5_1({vals['q5_1']}) "
++				f"< q8({vals['q8']}) < native({vals['native']})")
++			continue
++		for m in ("q8", "q5_0", "q5_1", "q4"):
++			expected = 100.0 * vals[m] / vals["native"]
++			field = f"{m}_over_native_pct"
++			if abs(expected - row[field]) > 0.01:
++				bad.append(f"ctx={row['ctx']}: {field}={row[field]} but computed={expected:.4f}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(rows)} rows checked"
++
++
++@check("Phase 10B artifact: CPU context matrix -- every run exited 0 "
++	"with no_fallback_occurred true, all 5 modes")
++def _c55():
++	a = _load_p10b_artifact()
++	rows = a.get("cpu_validation_135m", {}).get("context_matrix", [])
++	bad = []
++	for row in rows:
++		for kv in ("native", "q8", "q5_0", "q5_1", "q4"):
++			r = row[kv]
++			if r.get("exit_code") != 0:
++				bad.append(f"ctx={row['ctx']} {kv}: exit_code={r.get('exit_code')}")
++			if not r.get("no_fallback_occurred", False):
++				bad.append(f"ctx={row['ctx']} {kv}: no_fallback_occurred is false")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(rows)} rows checked"
++
++
++@check("Phase 10B artifact: Vulkan context matrix -- byte ordering "
++	"holds, all layers GPU-resident, exit 0, all 5 modes")
++def _c56():
++	a = _load_p10b_artifact()
++	rows = a.get("vulkan_validation_135m", {}).get("context_matrix", [])
++	bad = []
++	if not rows:
++		return False, "no Vulkan context_matrix rows found"
++	for row in rows:
++		vals = {m: row[m]["kv_allocated_bytes"] for m in ("q4", "q5_0", "q5_1", "q8", "native")}
++		if not (vals["q4"] < vals["q5_0"] < vals["q5_1"] < vals["q8"] < vals["native"]):
++			bad.append(f"ctx={row['ctx']}: byte ordering violated: {vals}")
++		for kv in ("native", "q8", "q5_0", "q5_1", "q4"):
++			r = row[kv]
++			if r.get("exit_code") != 0:
++				bad.append(f"ctx={row['ctx']} {kv}: exit_code={r.get('exit_code')}")
++			if r.get("gpu_layers_selected", 0) <= 0:
++				bad.append(f"ctx={row['ctx']} {kv}: gpu_layers_selected="
++					f"{r.get('gpu_layers_selected')} (expected > 0)")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(rows)} rows checked"
++
++
++@check("Phase 10B artifact: storage theory -- Q5_0/Q5_1 bit widths "
++	"and %-of-F16/%-of-Q8 are internally consistent with their block "
++	"struct sizes")
++def _c57():
++	a = _load_p10b_artifact()
++	st = a.get("storage_theory", {})
++	bf = st.get("block_formats", {})
++	bad = []
++	for name, expected_bits in (("Q5_0", 5.5), ("Q5_1", 6.0), ("Q4_0", 4.5), ("Q8_0", 8.5)):
++		got = bf.get(name, {}).get("bits_per_element")
++		if got != expected_bits:
++			bad.append(f"{name}: bits_per_element={got} expected {expected_bits}")
++	pct_f16 = st.get("pct_of_f16", {})
++	pct_q8 = st.get("pct_of_q8_0", {})
++	for name, bits in (("Q5_0", 5.5), ("Q5_1", 6.0), ("Q4_0", 4.5)):
++		expected_f16_pct = 100.0 * bits / 16.0
++		if abs(pct_f16.get(name, -1) - expected_f16_pct) > 0.01:
++			bad.append(f"pct_of_f16[{name}]={pct_f16.get(name)} expected {expected_f16_pct:.3f}")
++		expected_q8_pct = 100.0 * bits / 8.5
++		if abs(pct_q8.get(name, -1) - expected_q8_pct) > 0.01:
++			bad.append(f"pct_of_q8_0[{name}]={pct_q8.get(name)} expected {expected_q8_pct:.3f}")
++	return len(bad) == 0, "; ".join(bad) if bad else "all bit-width/percentage fields self-consistent"
++
++
++@check("Phase 10B artifact: multi-prompt aggregate has both models, "
++	"all 4 candidate modes, 5 prompts each, fields in valid ranges")
++def _c58():
++	a = _load_p10b_artifact()
++	agg = a.get("quality_multi_prompt_aggregate", {})
++	bad = []
++	for model in ("135M", "360M"):
++		if model not in agg:
++			bad.append(f"missing model {model}")
++			continue
++		for mode in ("q8", "q5_0", "q5_1", "q4"):
++			m = agg[model].get(mode)
++			if m is None:
++				bad.append(f"{model}/{mode}: missing")
++				continue
++			if m.get("n_prompts") != 5:
++				bad.append(f"{model}/{mode}: n_prompts={m.get('n_prompts')} expected 5")
++			top1 = m.get("mean_top1_preservation")
++			if top1 is None or not (0.0 <= top1 <= 1.0):
++				bad.append(f"{model}/{mode}: mean_top1_preservation={top1} out of [0,1]")
++			if not m.get("worst_case_prompt"):
++				bad.append(f"{model}/{mode}: missing worst_case_prompt")
++	return len(bad) == 0, "; ".join(bad) if bad else "2 models x 4 modes x 5 prompts checked"
++
++
++@check("Phase 10B artifact: multi-prompt aggregate -- both Q5 formats "
++	"beat Q4 on mean logit rel-L2, both models (the core quality claim)")
++def _c59():
++	a = _load_p10b_artifact()
++	agg = a.get("quality_multi_prompt_aggregate", {})
++	bad = []
++	for model in ("135M", "360M"):
++		q4_rel_l2 = agg.get(model, {}).get("q4", {}).get("mean_logit_rel_l2")
++		for mode in ("q5_0", "q5_1"):
++			rel_l2 = agg.get(model, {}).get(mode, {}).get("mean_logit_rel_l2")
++			if rel_l2 is None or q4_rel_l2 is None or not (rel_l2 < q4_rel_l2):
++				bad.append(f"{model}/{mode}: mean_logit_rel_l2={rel_l2} "
++					f"not < q4's {q4_rel_l2}")
++	return len(bad) == 0, "; ".join(bad) if bad else "both Q5 formats beat Q4 on mean rel-L2, both models"
++
++
++@check("Phase 10B artifact: GPU memory-pressure ladder backs its own "
++	"conclusion with real per-row exit codes (q8 fails where Q5 "
++	"succeeds at some context)")
++def _c60():
++	a = _load_p10b_artifact()
++	rows = a.get("gpu_memory_pressure_360m", {}).get("raw_rows", [])
++	bad = []
++	if not rows:
++		return False, "no gpu_memory_pressure_360m raw_rows found"
++
++	def mode_of(r):
++		return r.get("kv_store", r.get("kv_mode"))
++
++	def ctx_of(r):
++		return r.get("ctx_size", r.get("ctx"))
++
++	found = False
++	for r in rows:
++		if mode_of(r) == "q8" and r.get("exit_code") == 5:
++			ctx = ctx_of(r)
++			q5_at_ctx = [x for x in rows if ctx_of(x) == ctx
++				and mode_of(x) in ("q5_0", "q5_1") and x.get("exit_code") == 0]
++			if q5_at_ctx:
++				found = True
++	if not found:
++		bad.append("no context row found where q8 failed closed (exit 5) "
++			"but at least one Q5 format succeeded")
++	return len(bad) == 0, "; ".join(bad) if bad else (
++		f"{len(rows)} rows checked; confirmed >=1 ctx where q8 exit=5, a Q5 format exit=0")
++
++
++@check("Phase 10B artifact: no absolute filesystem paths anywhere in "
++	"the file")
++def _c61():
++	text = P10B_ARTIFACT_PATH.read_text()
++	posix = re.findall(
++		r'(?<![\w.\-])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+',
++		text,
++	)
++	windows = re.findall(r'[A-Za-z]:\\[^"\\]*(?:\\[^"\\]*)+', text)
++	hits = posix + windows
++	return len(hits) == 0, f"suspicious path-like strings: {hits[:5]}" if hits else "none found"
++
++
++@check("Phase 10B artifact: no NaN/Infinity anywhere in the file")
++def _c62():
++	a = _load_p10b_artifact()
++	bad = _no_nan_inf(a)
++	return len(bad) == 0, f"non-finite at: {bad[:5]}" if bad else "all values finite"
++
++
++@check("Phase 10B artifact: decision_gate names exactly one preferred "
++	"format only if verdict is Q5_PRODUCT_CANDIDATE, and does not "
++	"overclaim full quality clearance")
++def _c63():
++	a = _load_p10b_artifact()
++	dg = a.get("decision_gate", {})
++	verdict = dg.get("verdict", "")
++	bad = []
++	valid_verdicts = {"Q5_PRODUCT_CANDIDATE", "Q5_MEMORY_WIN_QUALITY_STILL_TOO_HIGH_COST",
++		"Q5_BACKEND_LIMITED", "Q5_NO_MEANINGFUL_ADVANTAGE", "Q5_INCONCLUSIVE"}
++	if verdict not in valid_verdicts:
++		bad.append(f"verdict {verdict!r} is not one of the defined Section 21 verdicts")
++	if verdict == "Q5_PRODUCT_CANDIDATE":
++		fmt = dg.get("preferred_format")
++		if fmt not in ("Q5_0", "Q5_1"):
++			bad.append(f"Q5_PRODUCT_CANDIDATE requires preferred_format Q5_0 or "
++				f"Q5_1, got {fmt!r}")
++		if "not_a_full_clearance" not in dg and "caveat" not in json.dumps(dg).lower():
++			bad.append("Q5_PRODUCT_CANDIDATE verdict does not disclose any "
++				"caveat/limitation alongside the positive verdict")
++	return len(bad) == 0, "; ".join(bad) if bad else f"verdict={verdict!r}"
++
++
++@check("README.md not updated with Phase 10B experimental headline "
++	"numbers yet (--kv q5_0/q5_1 stay undocumented as stable features)")
++def _c64():
++	readme = (REPO_ROOT / "README.md").read_text()
++	bad = []
++	if re.search(r"--kv\s+q5_0\b", readme) or re.search(r"--kv\s+q5_1\b", readme):
++		bad.append("README documents --kv q5_0/q5_1 as available flags -- "
++			"Phase 10B is experimental-only, this should not ship in "
++			"stable docs yet")
++	if "Phase 10B" in readme or "phase10" in readme.lower():
++		bad.append("README references Phase 10B -- experimental work "
++			"should not be headlined there yet")
++	return len(bad) == 0, "; ".join(bad) if bad else "README has no Phase 10B / --kv q5 claims"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -977,6 +1236,8 @@ def main() -> int:
+ 			_c33, _c34, _c35, _c36, _c37,
+ 			_c38, _c39, _c40, _c41, _c42, _c43, _c44, _c45, _c46, _c47,
+ 			_c48, _c49, _c50,
++			_c51, _c52, _c53, _c54, _c55, _c56, _c57, _c58, _c59, _c60,
++			_c61, _c62, _c63, _c64,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-llama-runtime/decode_loop.cpp b/tools/membrane-llama-runtime/decode_loop.cpp
+index b907aa2..cde4031 100644
+--- a/tools/membrane-llama-runtime/decode_loop.cpp
++++ b/tools/membrane-llama-runtime/decode_loop.cpp
+@@ -241,6 +241,22 @@ bool	run_kv_store_pass(llama_model *model,
+ 		cp.type_k = GGML_TYPE_Q4_0;
+ 		cp.type_v = GGML_TYPE_Q4_0;
+ 	}
++	else if (kv_store_mode == MEMBRANE_KV_STORE_Q5_0)
++	{
++		/* Phase 10B: GGML_TYPE_Q5_0 -- 5.5 bits/element, no per-block
++		 * min (like Q4_0/Q8_0's shape, one extra qh[] byte group for
++		 * the 5th quant bit). Same flash_attn requirement as above. */
++		cp.type_k = GGML_TYPE_Q5_0;
++		cp.type_v = GGML_TYPE_Q5_0;
++	}
++	else if (kv_store_mode == MEMBRANE_KV_STORE_Q5_1)
++	{
++		/* Phase 10B: GGML_TYPE_Q5_1 -- 6 bits/element, has a per-block
++		 * min like Q4_1 (not just a scale). Same flash_attn
++		 * requirement as above. */
++		cp.type_k = GGML_TYPE_Q5_1;
++		cp.type_v = GGML_TYPE_Q5_1;
++	}
+ 	collector = membrane_runtime_collector_create(
+ 			MEMBRANE_RUNTIME_MODE_BASELINE, MEMBRANE_RUNTIME_MAX_LAYERS);
+ 	if (collector == NULL)
+diff --git a/tools/membrane-llama-runtime/kv_store_telemetry.h b/tools/membrane-llama-runtime/kv_store_telemetry.h
+index ff5544d..7649172 100644
+--- a/tools/membrane-llama-runtime/kv_store_telemetry.h
++++ b/tools/membrane-llama-runtime/kv_store_telemetry.h
+@@ -20,6 +20,14 @@ extern "C" {
+  * shape as Q8 above. See tools/membrane-run/product_cli.cpp's --kv
+  * help text and docs/live-runtime.md for the measured tradeoffs. */
+ # define MEMBRANE_KV_STORE_Q4		2
++/* Phase 10B (experimental): GGML_TYPE_Q5_0/Q5_1 -- same authoritative-
++ * storage shape as Q4/Q8 above. Two distinct types, not one "q5"
++ * value: Q5_0 (5.5 bits/element, no per-block min) and Q5_1 (6 bits/
++ * element, has a per-block min like Q4_1) have different storage AND
++ * measured quality, so they get independent constants rather than a
++ * shared one with a sub-flag. */
++# define MEMBRANE_KV_STORE_Q5_0		3
++# define MEMBRANE_KV_STORE_Q5_1		4
+ 
+ /*
+  * Product Phase 7: llama-free core for compressed-KV-storage
+diff --git a/tools/membrane-llama-runtime/test_kv_store_telemetry.c b/tools/membrane-llama-runtime/test_kv_store_telemetry.c
+index 5ac1284..60c9dc7 100644
+--- a/tools/membrane-llama-runtime/test_kv_store_telemetry.c
++++ b/tools/membrane-llama-runtime/test_kv_store_telemetry.c
+@@ -70,6 +70,95 @@ static void	test_q8_smaller_than_native_same_shape(void)
+ 		"unrelated number");
+ }
+ 
++/* Phase 10A: Q4_0, 32-element blocks, 18 bytes/block (2-byte scale +
++ * 16 bytes packed nibbles) -- a 64-wide head is 2 blocks = 36
++ * bytes/token. */
++static void	test_total_bytes_q4(void)
++{
++	membrane_kv_store_bytes_t	b;
++	uint64_t					total;
++
++	b.n_layer = 30;
++	b.kv_size = 2048;
++	b.bytes_per_token_k = 36;	/* 2 blocks * 18 bytes (Q4_0) */
++	b.bytes_per_token_v = 36;
++	total = membrane_kv_store_total_bytes(&b);
++	TEST_ASSERT(total == 30ULL * 2048ULL * 72ULL,
++		"q4 bytes = n_layer * kv_size * (k_row + v_row)");
++}
++
++/* Phase 10B: Q5_0, 32-element blocks, 22 bytes/block (2-byte scale +
++ * 4-byte qh[] 5th-bit group + 16 bytes packed nibbles) -- a 64-wide
++ * head is 2 blocks = 44 bytes/token. */
++static void	test_total_bytes_q5_0(void)
++{
++	membrane_kv_store_bytes_t	b;
++	uint64_t					total;
++
++	b.n_layer = 30;
++	b.kv_size = 2048;
++	b.bytes_per_token_k = 44;	/* 2 blocks * 22 bytes (Q5_0) */
++	b.bytes_per_token_v = 44;
++	total = membrane_kv_store_total_bytes(&b);
++	TEST_ASSERT(total == 30ULL * 2048ULL * 88ULL,
++		"q5_0 bytes = n_layer * kv_size * (k_row + v_row)");
++}
++
++/* Phase 10B: Q5_1, 32-element blocks, 24 bytes/block (4-byte
++ * scale+min + 4-byte qh[] + 16 bytes packed nibbles) -- a 64-wide
++ * head is 2 blocks = 48 bytes/token. Deliberately a SEPARATE test
++ * from Q5_0's, not a parameterized variant of it -- Section 1's own
++ * instruction is not to assume the two Q5 formats behave identically,
++ * and this file should not silently bake that assumption in either. */
++static void	test_total_bytes_q5_1(void)
++{
++	membrane_kv_store_bytes_t	b;
++	uint64_t					total;
++
++	b.n_layer = 30;
++	b.kv_size = 2048;
++	b.bytes_per_token_k = 48;	/* 2 blocks * 24 bytes (Q5_1) */
++	b.bytes_per_token_v = 48;
++	total = membrane_kv_store_total_bytes(&b);
++	TEST_ASSERT(total == 30ULL * 2048ULL * 96ULL,
++		"q5_1 bytes = n_layer * kv_size * (k_row + v_row)");
++}
++
++/* Phase 10B Section 17: "no accidental Q4/Q8 aliasing" -- proves the
++ * five modes' byte totals are strictly ordered for the exact same
++ * layer/kv_size/head shape, matching each format's real ggml block
++ * cost (4.5/5.5/6/8.5/16 bits per element respectively). A copy-paste
++ * bug that aliased e.g. q5_1's byte-per-token constant to q8's would
++ * be caught here, not just by the individual per-type tests above. */
++static void	test_all_five_modes_strictly_ordered_same_shape(void)
++{
++	membrane_kv_store_bytes_t	shape;
++	uint64_t					native_total;
++	uint64_t					q8_total;
++	uint64_t					q5_1_total;
++	uint64_t					q5_0_total;
++	uint64_t					q4_total;
++
++	shape.n_layer = 30;
++	shape.kv_size = 2048;
++
++	shape.bytes_per_token_k = shape.bytes_per_token_v = 128;
++	native_total = membrane_kv_store_total_bytes(&shape);
++	shape.bytes_per_token_k = shape.bytes_per_token_v = 68;
++	q8_total = membrane_kv_store_total_bytes(&shape);
++	shape.bytes_per_token_k = shape.bytes_per_token_v = 48;
++	q5_1_total = membrane_kv_store_total_bytes(&shape);
++	shape.bytes_per_token_k = shape.bytes_per_token_v = 44;
++	q5_0_total = membrane_kv_store_total_bytes(&shape);
++	shape.bytes_per_token_k = shape.bytes_per_token_v = 36;
++	q4_total = membrane_kv_store_total_bytes(&shape);
++
++	TEST_ASSERT(q4_total < q5_0_total && q5_0_total < q5_1_total
++			&& q5_1_total < q8_total && q8_total < native_total,
++		"q4 < q5_0 < q5_1 < q8 < native for the same layer/kv_size/"
++		"head shape, no two modes accidentally alias the same bytes");
++}
++
+ static void	test_total_bytes_scales_with_ctx_size(void)
+ {
+ 	membrane_kv_store_bytes_t	small;
+@@ -136,6 +225,10 @@ int	main(void)
+ 	test_total_bytes_native_f16();
+ 	test_total_bytes_q8();
+ 	test_q8_smaller_than_native_same_shape();
++	test_total_bytes_q4();
++	test_total_bytes_q5_0();
++	test_total_bytes_q5_1();
++	test_all_five_modes_strictly_ordered_same_shape();
+ 	test_total_bytes_scales_with_ctx_size();
+ 	test_read_rss_populates_ru_maxrss();
+ 	test_rss_max_is_componentwise();
+diff --git a/tools/membrane-run/compat_check.c b/tools/membrane-run/compat_check.c
+index 185ab04..76ddde0 100644
+--- a/tools/membrane-run/compat_check.c
++++ b/tools/membrane-run/compat_check.c
+@@ -17,15 +17,27 @@ int	membrane_check_kv_compat(const char *arch_name, int32_t n_embd,
+ 	out->ok = 1;
+ 	if (kv_mode == 0)	/* MEMBRANE_KV_STORE_NATIVE: no checks apply */
+ 		return (1);
+-	/* Phase 10A: Q4_0's block size is checked against its own constant,
+-	 * not silently reused from Q8_0's -- they are equal (32) in the
+-	 * pinned ggml commit, but this keeps that a checked fact rather
+-	 * than an assumption baked into a shared branch. */
++	/* Phase 10A/10B: each type's block size is checked against its own
++	 * constant, not silently reused from another's -- they are all
++	 * equal (32) in the pinned ggml commit, but this keeps that a
++	 * checked fact rather than an assumption baked into a shared
++	 * branch (Section 1's own instruction: don't assume Q5_0/Q5_1
++	 * share storage/quality behavior just because they're both "Q5"). */
+ 	if (kv_mode == 2)	/* MEMBRANE_KV_STORE_Q4 */
+ 	{
+ 		block_size = MEMBRANE_Q4_0_BLOCK_SIZE;
+ 		type_label = "Q4_0";
+ 	}
++	else if (kv_mode == 3)	/* MEMBRANE_KV_STORE_Q5_0 */
++	{
++		block_size = MEMBRANE_Q5_0_BLOCK_SIZE;
++		type_label = "Q5_0";
++	}
++	else if (kv_mode == 4)	/* MEMBRANE_KV_STORE_Q5_1 */
++	{
++		block_size = MEMBRANE_Q5_1_BLOCK_SIZE;
++		type_label = "Q5_1";
++	}
+ 	else	/* MEMBRANE_KV_STORE_Q8 */
+ 	{
+ 		block_size = MEMBRANE_Q8_0_BLOCK_SIZE;
+diff --git a/tools/membrane-run/compat_check.h b/tools/membrane-run/compat_check.h
+index 423e38a..e732777 100644
+--- a/tools/membrane-run/compat_check.h
++++ b/tools/membrane-run/compat_check.h
+@@ -33,6 +33,11 @@ extern "C" {
+  * formats, not something this header should assume stays true; see
+  * membrane_check_kv_compat()'s kv_mode-specific block-size selection. */
+ # define MEMBRANE_Q4_0_BLOCK_SIZE	32u
++/* Phase 10B: Q5_0/Q5_1's own ggml block sizes, same reasoning as Q4_0
++ * above -- checked independently even though both are 32 in this ggml
++ * commit, same as Q4_0/Q8_0. */
++# define MEMBRANE_Q5_0_BLOCK_SIZE	32u
++# define MEMBRANE_Q5_1_BLOCK_SIZE	32u
+ 
+ typedef struct s_membrane_compat_result
+ {
+@@ -48,9 +53,10 @@ typedef struct s_membrane_compat_result
+  * ctx_size: the resolved (nonzero) context size the caller intends to
+  * use.
+  * kv_mode: MEMBRANE_KV_STORE_NATIVE (always ok, no checks),
+- * MEMBRANE_KV_STORE_Q8, or MEMBRANE_KV_STORE_Q4 (see
+- * kv_store_telemetry.h for the constants; not included here to keep
+- * this header dependency-free -- pass the raw 0/1/2 value).
++ * MEMBRANE_KV_STORE_Q8, MEMBRANE_KV_STORE_Q4, MEMBRANE_KV_STORE_Q5_0,
++ * or MEMBRANE_KV_STORE_Q5_1 (see kv_store_telemetry.h for the
++ * constants; not included here to keep this header dependency-free --
++ * pass the raw 0/1/2/3/4 value).
+  *
+  * Returns 1 (out->ok = 1) if supported, 0 otherwise with out->reason
+  * filled in. Never crashes on NULL/zero/negative inputs.
+diff --git a/tools/membrane-run/main.cpp b/tools/membrane-run/main.cpp
+index 5ba9f18..e445c0f 100644
+--- a/tools/membrane-run/main.cpp
++++ b/tools/membrane-run/main.cpp
+@@ -132,10 +132,32 @@ static uint64_t	q4_kv_bytes(const model_shape_t &s, uint32_t ctx_size)
+ 	return (membrane_kv_store_total_bytes(&b));
+ }
+ 
++static uint64_t	q5_0_kv_bytes(const model_shape_t &s, uint32_t ctx_size)
++{
++	membrane_kv_store_bytes_t	b;
++
++	b.n_layer = (uint64_t)s.n_layer;
++	b.kv_size = ctx_size;
++	b.bytes_per_token_k = ggml_row_size(GGML_TYPE_Q5_0, s.n_embd_gqa);
++	b.bytes_per_token_v = ggml_row_size(GGML_TYPE_Q5_0, s.n_embd_gqa);
++	return (membrane_kv_store_total_bytes(&b));
++}
++
++static uint64_t	q5_1_kv_bytes(const model_shape_t &s, uint32_t ctx_size)
++{
++	membrane_kv_store_bytes_t	b;
++
++	b.n_layer = (uint64_t)s.n_layer;
++	b.kv_size = ctx_size;
++	b.bytes_per_token_k = ggml_row_size(GGML_TYPE_Q5_1, s.n_embd_gqa);
++	b.bytes_per_token_v = ggml_row_size(GGML_TYPE_Q5_1, s.n_embd_gqa);
++	return (membrane_kv_store_total_bytes(&b));
++}
++
+ /* Real ggml_row_size()-based byte accounting for whichever of the
+- * three storage modes was requested -- the single place every call
+- * site below dispatches through, so native/q8/q4 can never drift
+- * out of sync with each other the way three separately-updated
++ * five storage modes was requested -- the single place every call
++ * site below dispatches through, so native/q8/q5_0/q5_1/q4 can never
++ * drift out of sync with each other the way five separately-updated
+  * ternaries could. */
+ static uint64_t	kv_bytes_for_mode(const model_shape_t &s, uint32_t ctx_size,
+ 				int kv_mode)
+@@ -144,6 +166,10 @@ static uint64_t	kv_bytes_for_mode(const model_shape_t &s, uint32_t ctx_size,
+ 		return (q8_kv_bytes(s, ctx_size));
+ 	if (kv_mode == MEMBRANE_KV_STORE_Q4)
+ 		return (q4_kv_bytes(s, ctx_size));
++	if (kv_mode == MEMBRANE_KV_STORE_Q5_0)
++		return (q5_0_kv_bytes(s, ctx_size));
++	if (kv_mode == MEMBRANE_KV_STORE_Q5_1)
++		return (q5_1_kv_bytes(s, ctx_size));
+ 	return (native_kv_bytes(s, ctx_size));
+ }
+ 
+@@ -153,6 +179,10 @@ static const char	*kv_mode_name(int kv_mode)
+ 		return ("q8");
+ 	if (kv_mode == MEMBRANE_KV_STORE_Q4)
+ 		return ("q4");
++	if (kv_mode == MEMBRANE_KV_STORE_Q5_0)
++		return ("q5_0");
++	if (kv_mode == MEMBRANE_KV_STORE_Q5_1)
++		return ("q5_1");
+ 	return ("native");
+ }
+ 
+@@ -162,6 +192,10 @@ static const char	*kv_type_label(int kv_mode)
+ 		return ("Q8_0");
+ 	if (kv_mode == MEMBRANE_KV_STORE_Q4)
+ 		return ("Q4_0");
++	if (kv_mode == MEMBRANE_KV_STORE_Q5_0)
++		return ("Q5_0");
++	if (kv_mode == MEMBRANE_KV_STORE_Q5_1)
++		return ("Q5_1");
+ 	return ("F16");
+ }
+ 
+@@ -1048,7 +1082,7 @@ int	main(int argc, char **argv)
+ 			return (llama_backend_free(), MEMBRANE_EXIT_UNSUPPORTED_KV);
+ 		}
+ 	}
+-	else if (o.kv_mode == MEMBRANE_KV_STORE_Q8 || o.kv_mode == MEMBRANE_KV_STORE_Q4)
++	else if (o.kv_mode != MEMBRANE_KV_STORE_NATIVE)
+ 	{
+ 		if (!membrane_check_kv_compat(shape.arch_name.c_str(),
+ 				shape.n_embd, shape.n_head, shape.n_head_kv, ctx_size,
+diff --git a/tools/membrane-run/product_cli.cpp b/tools/membrane-run/product_cli.cpp
+index 92d19bf..2d6985a 100644
+--- a/tools/membrane-run/product_cli.cpp
++++ b/tools/membrane-run/product_cli.cpp
+@@ -41,7 +41,8 @@ void	membrane_run_usage(FILE *out)
+ 		"                     mutually exclusive; exactly one required)\n"
+ 		"  --ctx N            KV cache context size (default: prompt\n"
+ 		"                     length + --gen-tokens + 8)\n"
+-		"  --kv native|q8|q4  KV cache storage (default: native).\n"
++		"  --kv native|q8|q5_0|q5_1|q4\n"
++		"                     KV cache storage (default: native).\n"
+ 		"                     native: unmodified llama.cpp behavior.\n"
+ 		"                     q8: KV cache tensors are genuinely\n"
+ 		"                     Q8_0-typed (not a shadow copy -- see\n"
+@@ -52,6 +53,13 @@ void	membrane_run_usage(FILE *out)
+ 		"                     sequence on long enough runs, though\n"
+ 		"                     aligned quality (top1/logit/NLL) stays\n"
+ 		"                     close in local testing.\n"
++		"                     q5_0/q5_1: EXPERIMENTAL (Phase 10B).\n"
++		"                     Genuinely Q5_0/Q5_1-typed (not a shadow\n"
++		"                     copy), between q8 and q4 in both memory\n"
++		"                     and measured quality -- see results/\n"
++		"                     phase10/ for the actual trade-off curve\n"
++		"                     before relying on either for anything\n"
++		"                     beyond experimentation.\n"
+ 		"                     q4: EXPERIMENTAL (Phase 10A). KV cache\n"
+ 		"                     tensors are genuinely Q4_0-typed (not a\n"
+ 		"                     shadow copy), roughly a quarter the\n"
+@@ -62,10 +70,10 @@ void	membrane_run_usage(FILE *out)
+ 		"                     this for anything beyond experimentation.\n"
+ 		"                     Ignored by --compare-kv/--gpu-bench, which\n"
+ 		"                     remain native-vs-q8 only.\n"
+-		"                     Both q8 and q4 are checked for\n"
+-		"                     compatibility before use; fail clearly\n"
+-		"                     (never silently fall back to native) if\n"
+-		"                     unsupported for this model.\n"
++		"                     q8, q5_0, q5_1, and q4 are all checked\n"
++		"                     for compatibility before use; fail\n"
++		"                     clearly (never silently fall back to\n"
++		"                     native) if unsupported for this model.\n"
+ 		"  --gen-tokens N     tokens to generate (default 128)\n"
+ 		"  --threads N        decode thread count (default: let\n"
+ 		"                     llama.cpp choose)\n"
+@@ -237,9 +245,13 @@ int	membrane_run_parse_opts(int argc, char **argv, membrane_run_opts_t *o)
+ 				o->kv_mode = MEMBRANE_KV_STORE_Q8;
+ 			else if (strcmp(argv[i], "q4") == 0)
+ 				o->kv_mode = MEMBRANE_KV_STORE_Q4;
++			else if (strcmp(argv[i], "q5_0") == 0)
++				o->kv_mode = MEMBRANE_KV_STORE_Q5_0;
++			else if (strcmp(argv[i], "q5_1") == 0)
++				o->kv_mode = MEMBRANE_KV_STORE_Q5_1;
+ 			else
+-				return (fprintf(stderr,
+-						"membrane-run: --kv must be native, q8, or q4\n"),
++				return (fprintf(stderr, "membrane-run: --kv must be "
++						"native, q8, q5_0, q5_1, or q4\n"),
+ 					MEMBRANE_EXIT_CLI_ERROR);
+ 		}
+ 		else if (strcmp(argv[i], "--gen-tokens") == 0 && i + 1 < argc)
+diff --git a/tools/membrane-run/product_cli.h b/tools/membrane-run/product_cli.h
+index 8db0c44..e4e02ea 100644
+--- a/tools/membrane-run/product_cli.h
++++ b/tools/membrane-run/product_cli.h
+@@ -51,10 +51,11 @@ typedef struct s_membrane_run_opts
+ 	const char					*prompt_file;	/* PROMPT_FILE only */
+ 
+ 	uint32_t	ctx;			/* 0 = auto-size to prompt + gen_tokens + 8 */
+-	int			kv_mode;		/* MEMBRANE_KV_STORE_NATIVE/Q8/Q4 (default
+-								 * NATIVE -- Section 4: v0.2 never
+-								 * unexpectedly changes model behavior.
+-								 * Q4 is Phase 10A, experimental) */
++	int			kv_mode;		/* MEMBRANE_KV_STORE_NATIVE/Q8/Q4/Q5_0/Q5_1
++								 * (default NATIVE -- Section 4: v0.2
++								 * never unexpectedly changes model
++								 * behavior. Q4 is Phase 10A, Q5_0/Q5_1
++								 * are Phase 10B, all experimental) */
+ 	int			gen_tokens;
+ 	int			threads;		/* 0 = let llama.cpp pick its own default */
+ 
+diff --git a/tools/membrane-run/test_compat_check.c b/tools/membrane-run/test_compat_check.c
+index 033649b..81c792c 100644
+--- a/tools/membrane-run/test_compat_check.c
++++ b/tools/membrane-run/test_compat_check.c
+@@ -6,6 +6,8 @@
+ #define KV_NATIVE	0
+ #define KV_Q8		1
+ #define KV_Q4		2
++#define KV_Q5_0		3
++#define KV_Q5_1		4
+ 
+ static void	test_native_always_ok(void)
+ {
+@@ -150,6 +152,93 @@ static void	test_q4_wrong_architecture_rejected(void)
+ 		"the q4-specific reason names Q4_0");
+ }
+ 
++/* Phase 10B: Q5_0 and Q5_1 checked independently -- same shapes as the
++ * q4/q8 tests above, but confirming neither aliases the other's or
++ * Q4's/Q8's reason text (Section 17's "no accidental Q4/Q8 aliasing"). */
++static void	test_q5_0_llama_smollm2_shape_ok(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("llama", 576, 9, 3, 2048, KV_Q5_0,
++			&r) == 1, "SmolLM2-135M's real shape passes q5_0 compat");
++	TEST_ASSERT(r.ok == 1, "out->ok reflects success");
++}
++
++static void	test_q5_1_llama_smollm2_shape_ok(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("llama", 576, 9, 3, 2048, KV_Q5_1,
++			&r) == 1, "SmolLM2-135M's real shape passes q5_1 compat");
++	TEST_ASSERT(r.ok == 1, "out->ok reflects success");
++}
++
++static void	test_q5_0_head_dim_not_block_aligned_rejected(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("llama", 640, 8, 8, 2048, KV_Q5_0,
++			&r) == 0, "head dim 80 (not divisible by 32) rejected for q5_0");
++	TEST_ASSERT(strstr(r.reason, "80") != NULL,
++		"the actual head dimension appears in the reason");
++	TEST_ASSERT(strstr(r.reason, "Q5_0") != NULL,
++		"the reason names Q5_0");
++	TEST_ASSERT(strstr(r.reason, "Q5_1") == NULL
++			&& strstr(r.reason, "Q4_0") == NULL
++			&& strstr(r.reason, "Q8_0") == NULL,
++		"a q5_0 check's reason never mentions another type (no aliasing)");
++}
++
++static void	test_q5_1_head_dim_not_block_aligned_rejected(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("llama", 640, 8, 8, 2048, KV_Q5_1,
++			&r) == 0, "head dim 80 (not divisible by 32) rejected for q5_1");
++	TEST_ASSERT(strstr(r.reason, "Q5_1") != NULL,
++		"the reason names Q5_1");
++	TEST_ASSERT(strstr(r.reason, "Q5_0") == NULL
++			&& strstr(r.reason, "Q4_0") == NULL
++			&& strstr(r.reason, "Q8_0") == NULL,
++		"a q5_1 check's reason never mentions another type (no aliasing)");
++}
++
++static void	test_q5_0_head_dim_block_aligned_accepted(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("llama", 512, 8, 8, 2048, KV_Q5_0,
++			&r) == 1, "head dim 64 (divisible by 32) accepted for q5_0");
++}
++
++static void	test_q5_1_head_dim_block_aligned_accepted(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("llama", 512, 8, 8, 2048, KV_Q5_1,
++			&r) == 1, "head dim 64 (divisible by 32) accepted for q5_1");
++}
++
++static void	test_q5_0_wrong_architecture_rejected(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("gemma3", 576, 9, 3, 2048, KV_Q5_0,
++			&r) == 0, "non-llama architecture rejected for q5_0");
++	TEST_ASSERT(strstr(r.reason, "Q5_0") != NULL,
++		"the q5_0-specific reason names Q5_0");
++}
++
++static void	test_q5_1_wrong_architecture_rejected(void)
++{
++	membrane_compat_result_t	r;
++
++	TEST_ASSERT(membrane_check_kv_compat("gemma3", 576, 9, 3, 2048, KV_Q5_1,
++			&r) == 0, "non-llama architecture rejected for q5_1");
++	TEST_ASSERT(strstr(r.reason, "Q5_1") != NULL,
++		"the q5_1-specific reason names Q5_1");
++}
++
+ static void	test_null_out_is_safe(void)
+ {
+ 	TEST_ASSERT(membrane_check_kv_compat("llama", 576, 9, 3, 2048, KV_Q8,
+@@ -171,6 +260,14 @@ int	main(void)
+ 	test_q4_head_dim_not_block_aligned_rejected();
+ 	test_q4_head_dim_block_aligned_accepted();
+ 	test_q4_wrong_architecture_rejected();
++	test_q5_0_llama_smollm2_shape_ok();
++	test_q5_1_llama_smollm2_shape_ok();
++	test_q5_0_head_dim_not_block_aligned_rejected();
++	test_q5_1_head_dim_not_block_aligned_rejected();
++	test_q5_0_head_dim_block_aligned_accepted();
++	test_q5_1_head_dim_block_aligned_accepted();
++	test_q5_0_wrong_architecture_rejected();
++	test_q5_1_wrong_architecture_rejected();
+ 	test_null_out_is_safe();
+ 	printf("test_compat_check: all tests passed\n");
+ 	return (0);
+diff --git a/tools/membrane-run/test_product_cli.cpp b/tools/membrane-run/test_product_cli.cpp
+index 0258d27..72f9989 100644
+--- a/tools/membrane-run/test_product_cli.cpp
++++ b/tools/membrane-run/test_product_cli.cpp
+@@ -163,6 +163,22 @@ static void	test_kv_flag(void)
+ 	TEST_ASSERT(o.kv_mode == 2 /* MEMBRANE_KV_STORE_Q4 */,
+ 		"--kv q4 sets q4 mode");
+ 
++	args = base_args();
++	args.push_back("--kv");
++	args.push_back("q5_0");
++	TEST_ASSERT(run_parse(args, &o) == MEMBRANE_EXIT_SUCCESS,
++		"--kv q5_0 accepted");
++	TEST_ASSERT(o.kv_mode == 3 /* MEMBRANE_KV_STORE_Q5_0 */,
++		"--kv q5_0 sets q5_0 mode");
++
++	args = base_args();
++	args.push_back("--kv");
++	args.push_back("q5_1");
++	TEST_ASSERT(run_parse(args, &o) == MEMBRANE_EXIT_SUCCESS,
++		"--kv q5_1 accepted");
++	TEST_ASSERT(o.kv_mode == 4 /* MEMBRANE_KV_STORE_Q5_1 */,
++		"--kv q5_1 sets q5_1 mode");
++
+ 	args = base_args();
+ 	args.push_back("--kv");
+ 	args.push_back("bogus");

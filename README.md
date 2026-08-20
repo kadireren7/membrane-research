@@ -86,6 +86,18 @@ exact-radix-4 Q4_0 divider that *did* reach production — see its
 related Q8_0 dual-divider/scheduler investigation — five phases
 complete, `RESEARCH_COMPLETE_NO_PROMOTION`, nothing merged).
 
+Two more (Phase 10, KV cache storage precision) were migrated from
+`kadireren7/membrane`'s research branches, each with an additional
+`MANIFEST.json` (machine-readable provenance/artifact-hash record) and
+`patches/` (the prototype code, as a `git diff` against its real base
+commit — not new source files):
+[`EXP-KV-Q4-STORAGE-10A`](experiments/EXP-KV-Q4-STORAGE-10A/README.md)
+(real memory win, real quality cost too high — `Q4_MEMORY_WIN_QUALITY_TOO_HIGH_COST`,
+not promoted) and
+[`EXP-KV-Q5-EVALUATION-10B`](experiments/EXP-KV-Q5-EVALUATION-10B/README.md)
+(Q5_1 clears the quality bar Q4 missed — `Q5_PRODUCT_CANDIDATE`,
+shipped as `--kv q5` via [kadireren7/membrane#19](https://github.com/kadireren7/membrane/pull/19)).
+
 ## How canonical results work
 
 A result is "canonical" only once it lives in an experiment's own

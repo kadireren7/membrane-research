@@ -1,0 +1,778 @@
+{
+  "schema_version": 1,
+  "phase": "10A-authoritative-q4-kv-storage",
+  "decision_gate": {
+    "verdict": "Q4_MEMORY_WIN_QUALITY_TOO_HIGH_COST",
+    "reasoning": "Storage/backend/performance results are all strongly positive: Q4_0 KV works authoritatively (no shadow cache) end-to-end on both CPU and Vulkan via the pure public API, byte accounting matches theory exactly at every measured point, no meaningful throughput cost vs Q8, long generation is stable, and the GPU memory-pressure test showed Q4 makes context sizes runnable (131072-220000 on a 4GB GTX 1650) that neither Q8 nor native can run at all. However, Section 11's own explicit quality failure bar was triggered on BOTH tested models: logit rel-L2 and delta NLL are more than an order of magnitude worse than Q8's (12.8x-14.8x and 49.6x-216x respectively), and top1 preservation drops materially (88.7%-93.4% vs 98.8%-99.4% for Q8). Generated text stayed coherent (not corrupt/collapsed) at 512 tokens, but the quantitative degradation is real, reproducible, and larger than what Q8 costs at the same operating point -- this is a quality cost, not noise, and the phase's own rule is to flag it rather than let a large memory win obscure it.",
+    "next_step_recommendation": "Do not merge or productize --kv q4 as-is. Investigate whether the quality gap narrows with a less aggressive Q4 variant already available through the same public API (Q5_0/Q5_1, both already in llama.cpp's own kv_cache_types list per Section 1) as a Phase 10B follow-up, before considering any adaptive Q4/Q8 mixing policy. Keep the GPU memory-pressure result (Section 13) as strong motivation to pursue that follow-up rather than abandoning sub-Q8 KV compression entirely."
+  },
+  "membrane_commit": "a6d5377c852cc1eeb88d224b25726f74c515a405",
+  "membrane_base_commit": "a6d5377c852cc1eeb88d224b25726f74c515a405",
+  "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "ggml_version": "0.17.0",
+  "host": {
+    "os": "Pop!_OS 24.04 LTS",
+    "ram_gib": 5.6,
+    "gpu_model": "NVIDIA GeForce GTX 1650",
+    "gpu_vram_mib_total": 4096,
+    "nvidia_driver": "580.159.03",
+    "vulkan_api_version_device": "1.4.312",
+    "vulkan_api_version_instance": "1.3.280"
+  },
+  "q4_type_investigated": {
+    "candidates_considered": [
+      "GGML_TYPE_Q4_0",
+      "GGML_TYPE_Q4_1"
+    ],
+    "candidate_selected_as_membrane_kv_q4": "GGML_TYPE_Q4_0",
+    "selection_reason": "Smaller of the two valid candidates (18 bytes/32-elem block vs Q4_1's 20 bytes/32-elem block -- no per-block min-value field); both were probed and both work end-to-end.",
+    "public_api_path": "llama_context_params.type_k / type_v, already-public fields (same mechanism v0.3's --kv q8 already uses) -- no llama.cpp source modification required or made.",
+    "required_constraint": "Quantized K and/or V requires flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED (upstream llama-context.cpp hard error otherwise) and per-layer head_dim %% ggml_blck_size(type) == 0 (32 for both Q4_0 and Q8_0 in this ggml commit)."
+  },
+  "backend_support_outcome": "A -- Q4 KV is already supported end-to-end via the pure public API, on both CPU and Vulkan, no llama.cpp modification needed.",
+  "authoritative_storage_proof": {
+    "method": "Direct inspection of llama-kv-cache.cpp's constructor (only ever allocates tensors of the requested type_k/type_v, no parallel/shadow allocation in any code path) plus live allocation logs from real context creation.",
+    "cpu_example_ctx512_135m": "llama_kv_cache: size = 3.16 MiB (512 cells, 30 layers, 1/1 seqs), K (q4_0): 1.58 MiB, V (q4_0): 1.58 MiB -- single allocation, no shadow buffer.",
+    "vulkan_example_ctx512_135m": "llama_kv_cache: Vulkan0 KV buffer size = 3.16 MiB, K (q4_0): 1.58 MiB, V (q4_0): 1.58 MiB, all 30/30 layers dev=Vulkan0 -- GPU-resident, no CPU shadow copy."
+  },
+  "cpu_validation_135m": {
+    "model": "SmolLM2-135M-Instruct-f16.gguf",
+    "prompt": "Once upon a time, in a small village,",
+    "gen_tokens_per_run": 64,
+    "context_matrix": [
+      {
+        "ctx": 512,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 11796480,
+          "rss_after_context_kb": 301296,
+          "peak_rss_kb": 302356,
+          "prompt_tok_per_s": 550.904089,
+          "generation_tok_per_s": 71.300328,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 6266880,
+          "rss_after_context_kb": 296100,
+          "peak_rss_kb": 297232,
+          "prompt_tok_per_s": 544.415603,
+          "generation_tok_per_s": 71.846814,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 3317760,
+          "rss_after_context_kb": 293256,
+          "peak_rss_kb": 294412,
+          "prompt_tok_per_s": 546.586317,
+          "generation_tok_per_s": 72.25455,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q4_over_native_pct": 28.125,
+        "q4_over_q8_pct": 52.9412
+      },
+      {
+        "ctx": 1024,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 23592960,
+          "rss_after_context_kb": 312876,
+          "peak_rss_kb": 313924,
+          "prompt_tok_per_s": 584.388232,
+          "generation_tok_per_s": 71.017741,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 12533760,
+          "rss_after_context_kb": 302320,
+          "peak_rss_kb": 303440,
+          "prompt_tok_per_s": 524.72989,
+          "generation_tok_per_s": 69.279919,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 6635520,
+          "rss_after_context_kb": 296508,
+          "peak_rss_kb": 297644,
+          "prompt_tok_per_s": 555.69803,
+          "generation_tok_per_s": 68.991971,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q4_over_native_pct": 28.125,
+        "q4_over_q8_pct": 52.9412
+      },
+      {
+        "ctx": 2048,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 47185920,
+          "rss_after_context_kb": 335848,
+          "peak_rss_kb": 336844,
+          "prompt_tok_per_s": 548.957332,
+          "generation_tok_per_s": 70.139,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 25067520,
+          "rss_after_context_kb": 314580,
+          "peak_rss_kb": 315728,
+          "prompt_tok_per_s": 587.439314,
+          "generation_tok_per_s": 70.752714,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 13271040,
+          "rss_after_context_kb": 302952,
+          "peak_rss_kb": 304096,
+          "prompt_tok_per_s": 547.466854,
+          "generation_tok_per_s": 69.896248,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q4_over_native_pct": 28.125,
+        "q4_over_q8_pct": 52.9412
+      },
+      {
+        "ctx": 4096,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 94371840,
+          "rss_after_context_kb": 382000,
+          "peak_rss_kb": 383136,
+          "prompt_tok_per_s": 510.693018,
+          "generation_tok_per_s": 69.656033,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 50135040,
+          "rss_after_context_kb": 338980,
+          "peak_rss_kb": 340176,
+          "prompt_tok_per_s": 526.558034,
+          "generation_tok_per_s": 69.864987,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 26542080,
+          "rss_after_context_kb": 316008,
+          "peak_rss_kb": 317252,
+          "prompt_tok_per_s": 553.739137,
+          "generation_tok_per_s": 67.030778,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q4_over_native_pct": 28.125,
+        "q4_over_q8_pct": 52.9412
+      },
+      {
+        "ctx": 8192,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 188743680,
+          "rss_after_context_kb": 474404,
+          "peak_rss_kb": 475492,
+          "prompt_tok_per_s": 560.658702,
+          "generation_tok_per_s": 70.57786,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 100270080,
+          "rss_after_context_kb": 388132,
+          "peak_rss_kb": 389324,
+          "prompt_tok_per_s": 525.231601,
+          "generation_tok_per_s": 71.887009,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 53084160,
+          "rss_after_context_kb": 342056,
+          "peak_rss_kb": 343244,
+          "prompt_tok_per_s": 586.677252,
+          "generation_tok_per_s": 71.254113,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q4_over_native_pct": 28.125,
+        "q4_over_q8_pct": 52.9412
+      },
+      {
+        "ctx": 16384,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 377487360,
+          "rss_after_context_kb": 659524,
+          "peak_rss_kb": 660576,
+          "prompt_tok_per_s": 535.41603,
+          "generation_tok_per_s": 68.945794,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 200540160,
+          "rss_after_context_kb": 486840,
+          "peak_rss_kb": 488024,
+          "prompt_tok_per_s": 548.791909,
+          "generation_tok_per_s": 69.135594,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 106168320,
+          "rss_after_context_kb": 394632,
+          "peak_rss_kb": 395804,
+          "prompt_tok_per_s": 541.757298,
+          "generation_tok_per_s": 69.680978,
+          "generated_tokens": 64,
+          "exit_code": 0,
+          "no_fallback_occurred": true
+        },
+        "q8_over_native_pct": 53.125,
+        "q4_over_native_pct": 28.125,
+        "q4_over_q8_pct": 52.9412
+      }
+    ]
+  },
+  "vulkan_validation_135m": {
+    "model": "SmolLM2-135M-Instruct-f16.gguf",
+    "prompt": "Once upon a time, in a small village,",
+    "gen_tokens_per_run": 128,
+    "gpu_layers": "all",
+    "vram_measurement_method": "background process launch + nvidia-smi --query-compute-apps=pid,used_memory polled every 0.03s until process exit",
+    "context_matrix": [
+      {
+        "ctx": 512,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 11796480,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 314,
+          "rss_after_context_kb": 274468,
+          "prompt_tok_per_s": 774.900598,
+          "generation_tok_per_s": 282.646089,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 6266880,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 309,
+          "rss_after_context_kb": 274988,
+          "prompt_tok_per_s": 779.269924,
+          "generation_tok_per_s": 258.675374,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 3317760,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 306,
+          "rss_after_context_kb": 274836,
+          "prompt_tok_per_s": 763.546809,
+          "generation_tok_per_s": 260.029328,
+          "exit_code": 0
+        }
+      },
+      {
+        "ctx": 2048,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 47185920,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 347,
+          "rss_after_context_kb": 276552,
+          "prompt_tok_per_s": 969.300038,
+          "generation_tok_per_s": 295.576494,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 25067520,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 326,
+          "rss_after_context_kb": 275892,
+          "prompt_tok_per_s": 932.292447,
+          "generation_tok_per_s": 257.587607,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 13271040,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 316,
+          "rss_after_context_kb": 275712,
+          "prompt_tok_per_s": 855.768517,
+          "generation_tok_per_s": 256.739382,
+          "exit_code": 0
+        }
+      },
+      {
+        "ctx": 8192,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 188743680,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 477,
+          "rss_after_context_kb": 284856,
+          "prompt_tok_per_s": 975.946815,
+          "generation_tok_per_s": 299.134256,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 100270080,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 396,
+          "rss_after_context_kb": 281896,
+          "prompt_tok_per_s": 858.819149,
+          "generation_tok_per_s": 254.072314,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 53084160,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 352,
+          "rss_after_context_kb": 280064,
+          "prompt_tok_per_s": 942.706628,
+          "generation_tok_per_s": 256.067531,
+          "exit_code": 0
+        }
+      },
+      {
+        "ctx": 16384,
+        "native": {
+          "kv_type": "F16",
+          "kv_allocated_bytes": 377487360,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 651,
+          "rss_after_context_kb": 295024,
+          "prompt_tok_per_s": 693.630296,
+          "generation_tok_per_s": 299.74171,
+          "exit_code": 0
+        },
+        "q8": {
+          "kv_type": "Q8_0",
+          "kv_allocated_bytes": 200540160,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 488,
+          "rss_after_context_kb": 289564,
+          "prompt_tok_per_s": 809.459735,
+          "generation_tok_per_s": 258.618194,
+          "exit_code": 0
+        },
+        "q4": {
+          "kv_type": "Q4_0",
+          "kv_allocated_bytes": 106168320,
+          "gpu_layers_selected": 30,
+          "external_peak_vram_mib": 401,
+          "rss_after_context_kb": 286580,
+          "prompt_tok_per_s": 834.738476,
+          "generation_tok_per_s": 262.106207,
+          "exit_code": 0
+        }
+      }
+    ]
+  },
+  "second_model_360m_ctx2048": {
+    "cpu": {
+      "native": {
+        "kv_type": "F16",
+        "kv_allocated_bytes": 83886080,
+        "rss_after_context_kb": 751552,
+        "external_peak_vram_mib": null,
+        "prompt_tok_per_s": 146.657295,
+        "generation_tok_per_s": 22.331226,
+        "generated_tokens": 64,
+        "exit_code": 0
+      },
+      "q8": {
+        "kv_type": "Q8_0",
+        "kv_allocated_bytes": 44564480,
+        "rss_after_context_kb": 777664,
+        "external_peak_vram_mib": null,
+        "prompt_tok_per_s": 223.209597,
+        "generation_tok_per_s": 24.047748,
+        "generated_tokens": 64,
+        "exit_code": 0
+      },
+      "q4": {
+        "kv_type": "Q4_0",
+        "kv_allocated_bytes": 23592960,
+        "rss_after_context_kb": 757192,
+        "external_peak_vram_mib": null,
+        "prompt_tok_per_s": 212.876667,
+        "generation_tok_per_s": 23.803567,
+        "generated_tokens": 64,
+        "exit_code": 0
+      }
+    },
+    "vulkan": {
+      "native": {
+        "kv_type": "F16",
+        "kv_allocated_bytes": 83886080,
+        "rss_after_context_kb": 365352,
+        "external_peak_vram_mib": 804,
+        "prompt_tok_per_s": 561.738171,
+        "generation_tok_per_s": 141.242294,
+        "generated_tokens": 128,
+        "exit_code": 0
+      },
+      "q8": {
+        "kv_type": "Q8_0",
+        "kv_allocated_bytes": 44564480,
+        "rss_after_context_kb": 366040,
+        "external_peak_vram_mib": 767,
+        "prompt_tok_per_s": 645.815355,
+        "generation_tok_per_s": 131.107385,
+        "generated_tokens": 128,
+        "exit_code": 0
+      },
+      "q4": {
+        "kv_type": "Q4_0",
+        "kv_allocated_bytes": 23592960,
+        "rss_after_context_kb": 364328,
+        "external_peak_vram_mib": 747,
+        "prompt_tok_per_s": 445.71785,
+        "generation_tok_per_s": 127.860074,
+        "generated_tokens": 128,
+        "exit_code": 0
+      }
+    }
+  },
+  "storage_theoretical_vs_observed": {
+    "note": "Phase 10A Section 12: expected KV storage size from ggml's real block formats (ggml-common.h, pinned llama.cpp commit c0bc8591), compared to observed allocation from cpu_matrix_135m.jsonl / vulkan_matrix_135m.jsonl / second_model_360m.jsonl.",
+    "block_formats": {
+      "F16 (native)": {
+        "bytes_per_element": 2.0,
+        "bits_per_element": 16.0,
+        "source": "sizeof(ggml_fp16_t)"
+      },
+      "Q8_0": {
+        "block_size_elements": 32,
+        "struct_bytes": 34,
+        "struct_layout": "ggml_half d (2 bytes scale) + int8_t qs[32] (32 bytes quants)",
+        "bytes_per_element": 1.0625,
+        "bits_per_element": 8.5
+      },
+      "Q4_0": {
+        "block_size_elements": 32,
+        "struct_bytes": 18,
+        "struct_layout": "ggml_half d (2 bytes scale) + uint8_t qs[16] (16 bytes packed nibbles)",
+        "bytes_per_element": 0.5625,
+        "bits_per_element": 4.5
+      }
+    },
+    "expected_ratios": {
+      "q8_over_native": 0.53125,
+      "q4_over_native": 0.28125,
+      "q4_over_q8": 0.529411765
+    },
+    "observed_ratios": {
+      "cpu_135m_all_6_contexts_512_to_16384": {
+        "q8_over_native": 0.5312,
+        "q4_over_native": 0.2812,
+        "q4_over_q8": 0.5294
+      },
+      "vulkan_135m_all_4_contexts": {
+        "q8_over_native": 0.5312,
+        "q4_over_native": 0.2812,
+        "q4_over_q8": 0.5294
+      },
+      "cpu_and_vulkan_360m_ctx2048": {
+        "q8_over_native": 0.5312,
+        "q4_over_native": 0.2812,
+        "q4_over_q8": 0.5294
+      }
+    },
+    "consistency": "EXACT MATCH to 4 significant figures at every measured context size (512/1024/2048/4096/8192/16384) and on both tested models. Q4_0's real 4.5-bit-per-element block format (not a naive '4 bits = 1/4 the memory' assumption) fully accounts for the observed allocation -- there is no discrepancy, hidden overhead, or unaccounted metadata in the real allocation vs the block-format-derived expectation.",
+    "explicit_caveat": "4-bit quantization is NOT exactly 25% (1/4) of F16's 16 bits, because Q4_0 carries a 16-bit fp16 scale per 32-element block (2 bytes / 32 elements = 0.5 bits/element of overhead) on top of the 4 raw quant bits -- true storage is 4.5 bits/element = 28.125% of F16, not 25%. This is exactly what was observed."
+  },
+  "quality_ladder": {
+    "note": "Phase 10A Section 9-11 quality ladder. Produced by an uncommitted research probe (not shipped CLI) that reuses MEMBRANE's real run_kv_store_pass()/record_kv_store_behavior()/membrane_runtime_detect_divergence() -- the exact same machinery tools/membrane-run/main.cpp's --compare-kv uses for native-vs-q8, applied to native-vs-q4 as well. ctx=2048, 256 greedy-generated tokens, prompt 'Once upon a time, in a small village,'.",
+    "runs": [
+      {
+        "model": "SmolLM2-135M-Instruct-f16.gguf",
+        "candidate": "q8",
+        "token_identical": false,
+        "first_divergence_step": 40,
+        "top1_preservation": 0.988281,
+        "logit_rel_l2": 0.008181,
+        "delta_nll": 0.000717
+      },
+      {
+        "model": "SmolLM2-135M-Instruct-f16.gguf",
+        "candidate": "q4",
+        "token_identical": false,
+        "first_divergence_step": 32,
+        "top1_preservation": 0.886719,
+        "logit_rel_l2": 0.109847,
+        "delta_nll": 0.035592
+      },
+      {
+        "model": "SmolLM2-360M-Instruct-f16.gguf",
+        "candidate": "q8",
+        "token_identical": false,
+        "first_divergence_step": 87,
+        "top1_preservation": 0.988281,
+        "logit_rel_l2": 0.007549,
+        "delta_nll": 0.000649
+      },
+      {
+        "model": "SmolLM2-360M-Instruct-f16.gguf",
+        "candidate": "q4",
+        "token_identical": false,
+        "first_divergence_step": 28,
+        "top1_preservation": 0.925781,
+        "logit_rel_l2": 0.096646,
+        "delta_nll": 0.038062
+      }
+    ],
+    "section_11_failure_bar_assessment": {
+      "bar": "Using measured q8 results as the internal reference (Section 11 of the Phase 10A brief): flag q4 as problematic if logit rel-L2 increases by an order of magnitude vs q8, delta NLL becomes materially worse, or top1 preservation drops dramatically relative to q8.",
+      "135m": {
+        "logit_rel_l2_ratio_q4_over_q8": 13.43,
+        "delta_nll_ratio_q4_over_q8": 49.6,
+        "top1_drop_pp": 10.2
+      },
+      "360m": {
+        "logit_rel_l2_ratio_q4_over_q8": 12.8,
+        "delta_nll_ratio_q4_over_q8": 58.6,
+        "top1_drop_pp": 6.3
+      },
+      "verdict": "FLAGGED. On both tested models, q4's logit rel-L2 and delta NLL are more than an order of magnitude worse than q8's (12.8x-13.4x and 49.6x-58.6x respectively), and top1 preservation drops materially (88.7%-92.6% vs 98.8% for q8). q4 also diverges from the native reference earlier than q8 in both runs (step 28-32 vs 40-87). This is a real, reproducible quality cost, not memory-savings-obscured noise."
+    }
+  },
+  "long_generation_135m_q4": {
+    "note": "Phase 10A Section 10: SmolLM2-135M, ctx=2048, --kv q4, 512 requested generation tokens.",
+    "model": "SmolLM2-135M-Instruct-f16.gguf",
+    "ctx": 2048,
+    "kv_mode": "q4",
+    "kv_type": "Q4_0",
+    "requested_gen_tokens": 512,
+    "actual_gen_tokens": 512,
+    "hit_eos_early": false,
+    "kv_allocated_bytes": 13271040,
+    "rss_after_context_kb": 302964,
+    "rss_final_kb": 303880,
+    "peak_rss_kb": 303932,
+    "prompt_tok_per_s": 507.206028,
+    "generation_tok_per_s": 61.564764,
+    "exit_code": 0,
+    "no_fallback_occurred": true,
+    "crash_or_error": false,
+    "quality_vs_native_at_512_tokens": {
+      "q8_reference": {
+        "first_divergence_step": 40,
+        "top1_preservation": 0.994141,
+        "logit_rel_l2": 0.009941,
+        "delta_nll": 0.00015
+      },
+      "q4": {
+        "first_divergence_step": 32,
+        "top1_preservation": 0.933594,
+        "logit_rel_l2": 0.146776,
+        "delta_nll": 0.0324
+      },
+      "q4_vs_q8_ratio": {
+        "logit_rel_l2": 14.77,
+        "delta_nll": 216.0
+      },
+      "note": "Quality gap widens with longer generation (256-token ladder in quality_ladder.json showed 13.4x/49.6x on this same model; at 512 tokens it is 14.8x/216x) -- consistent with autoregressive error accumulation under a fixed compressed KV precision, not new instability."
+    },
+    "text_stability_observation": {
+      "q4_text": "Coherent, grammatical, on-topic prose for all 512 tokens. Mild near-verbatim paragraph repetition appears once, roughly two-thirds through the generation.",
+      "native_text_for_comparison": "MORE repetitive than q4 at the same length -- native falls into a tight exact-loop (alternating 'the path of the future'/'the path of the past' paragraphs) that repeats several times by token 512.",
+      "conclusion": "The repetition/degeneration observed is a generic small-model-plus-greedy-decoding-plus-long-generation failure mode, reproduced (more severely) in native as well. Not attributable to q4 specifically -- q4's own text is not visibly less stable than native's at this length."
+    }
+  },
+  "gpu_memory_pressure_360m": {
+    "note": "Phase 10A Section 13: GPU memory-pressure test, SmolLM2-360M, Vulkan (NVIDIA GTX 1650, 4096 MiB total, ~3956 MiB free at test time), --gpu-layers auto (MEMBRANE's own real policy engine, not forced).",
+    "device": "NVIDIA GeForce GTX 1650, 4096 MiB total VRAM",
+    "model_layers": 32,
+    "runs": [
+      {
+        "ctx": 131072,
+        "kv_mode": "native",
+        "exit_code": 5,
+        "result": "FAILED CLOSED -- 0 layers fit (est. KV alone = 5GB > 4GB total VRAM)"
+      },
+      {
+        "ctx": 131072,
+        "kv_mode": "q8",
+        "exit_code": 0,
+        "gpu_layers_selected": 31,
+        "of_layers": 32,
+        "kv_mib": 2720.0,
+        "result": "partial offload -- 1 layer stays on CPU"
+      },
+      {
+        "ctx": 131072,
+        "kv_mode": "q4",
+        "exit_code": 0,
+        "gpu_layers_selected": 32,
+        "of_layers": 32,
+        "kv_mib": 1440.0,
+        "result": "full offload"
+      },
+      {
+        "ctx": 180000,
+        "kv_mode": "q8",
+        "exit_code": 5,
+        "result": "FAILED CLOSED -- 0 layers fit"
+      },
+      {
+        "ctx": 180000,
+        "kv_mode": "q4",
+        "exit_code": 0,
+        "gpu_layers_selected": 32,
+        "of_layers": 32,
+        "kv_mib": 1977.5,
+        "result": "full offload"
+      },
+      {
+        "ctx": 220000,
+        "kv_mode": "q8",
+        "exit_code": 5,
+        "result": "FAILED CLOSED -- 0 layers fit"
+      },
+      {
+        "ctx": 220000,
+        "kv_mode": "q4",
+        "exit_code": 0,
+        "gpu_layers_selected": 32,
+        "of_layers": 32,
+        "kv_mib": 2417.0,
+        "result": "full offload"
+      },
+      {
+        "ctx": 260000,
+        "kv_mode": "q8",
+        "exit_code": 5,
+        "result": "FAILED CLOSED -- 0 layers fit"
+      },
+      {
+        "ctx": 260000,
+        "kv_mode": "q4",
+        "exit_code": 0,
+        "gpu_layers_selected": 23,
+        "of_layers": 32,
+        "kv_mib": 2856.4,
+        "result": "partial offload -- q4 itself now hits its own real boundary, degrades gracefully rather than failing"
+      }
+    ],
+    "findings": [
+      "At ctx=131072, native fails completely (fail-closed, exit 5, no silent CPU fallback -- existing MEMBRANE behavior, unaffected by Phase 10A).",
+      "At the same ctx=131072, q8 fits but only 31/32 layers -- one layer forced to CPU.",
+      "At the same ctx=131072, q4 fits with all 32/32 layers fully GPU-resident.",
+      "Across ctx 131072-220000, q8 fails completely (0 layers fit) while q4 keeps all 32 layers on GPU the entire range -- a real, substantial usable-context extension, not a marginal one.",
+      "q4's own boundary is real too: at ctx=260000 it drops to 23/32 layers (partial offload, not failure) -- MEMBRANE's fail-closed/graceful-degradation policy behaves correctly for q4 exactly as it already does for q8/native, no special-casing needed."
+    ],
+    "conclusion": "CONFIRMED (Section 13's central question): on this GPU/model, Q4 KV allows both (a) more layers to remain GPU-resident than Q8 at a fixed context, and (b) a substantially larger usable context range under full GPU residency than either Q8 or native support at all. This is likely the most operationally significant Phase 10A result -- it is not just a memory accounting win, it changes what configurations are even runnable on this class of GPU."
+  },
+  "performance_repetition_135m_vulkan": {
+    "note": "Phase 10A Section 14: 7 fresh-process repetitions, SmolLM2-135M, ctx=2048, Vulkan (gpu-layers=all), generation tok/s.",
+    "q8": {
+      "n": 7,
+      "values": [
+        262.229649,
+        267.388473,
+        266.215037,
+        268.694017,
+        257.447474,
+        267.95455,
+        260.766081
+      ],
+      "min": 257.45,
+      "max": 268.69,
+      "mean": 264.39,
+      "median": 266.22,
+      "stddev": 4.27
+    },
+    "q4": {
+      "n": 7,
+      "values": [
+        267.846926,
+        259.15536,
+        262.08249,
+        263.814117,
+        258.377267,
+        261.184001,
+        258.103651
+      ],
+      "min": 258.1,
+      "max": 267.85,
+      "mean": 261.51,
+      "median": 261.18,
+      "stddev": 3.48
+    },
+    "q4_vs_q8_mean_delta_pct": -1.09,
+    "conclusion": "No meaningful performance difference between q4 and q8 on this GPU/backend/model -- the -1.09% delta is well within both modes' own run-to-run stddev (~3.5-4.3 tok/s on a ~260 tok/s mean), i.e. noise, not a real regression. Q4's memory/VRAM advantages (Sections 6-8, 13) come with no measurable generation-throughput cost here."
+  },
+  "bench_cli_extension_decision": {
+    "note": "Phase 10A Section 15: decision on whether to extend --compare-kv/--gpu-bench (or add a new --kv-bench) to a three-way native/q8/q4 comparison.",
+    "decision": "NOT implemented in Phase 10A.",
+    "reasoning": [
+      "All quality/performance/memory data required for this phase's own Sections 9-11, 13-14 was already obtained via a standalone, uncommitted research probe that reuses the exact same run_kv_store_pass()/record_kv_store_behavior()/membrane_runtime_detect_divergence() functions run_native_q8_comparison() already uses for --compare-kv -- zero duplicated decode logic, and no new CLI surface was needed to get real results.",
+      "Section 11's quality-ladder result flagged q4 as having a real, order-of-magnitude-worse logit rel-L2 and delta NLL than q8 on both tested models -- shipping a polished three-way comparison CLI for a mode not yet classified as viable (Section 20 decision gate has not run yet at this point in the phase) would be premature productization, which Phase 10A's own charter (Section 21) explicitly forbids ('Do NOT productize yet... Do NOT document it as stable').",
+      "A three-way --compare-kv would also need real design thought (output format changes, human-readable table layout, JSON schema versioning for existing consumers) that deserves a decision made WITH the Section 20 verdict in hand, not before it -- exactly the 'avoid confusing CLI design' caution Section 15 itself calls out."
+    ],
+    "recommendation_for_a_future_phase": "If a later phase decides q4 (or an adaptive q4/q8 policy) is worth productizing, extend the existing run_native_q8_comparison()-style 3-pass helper to accept a list of candidate modes rather than hardcoding Q8, and reuse it under both --compare-kv (now natively 2+ candidates) and --gpu-bench. Do not write a second decode/comparison implementation."
+  },
+  "compatibility": {
+    "verified_architecture": "LLM_ARCH_LLAMA only (SmolLM2 135M/360M) -- same scope as existing --kv q8",
+    "compat_precheck": "membrane_check_kv_compat() extended with an explicit MEMBRANE_Q4_0_BLOCK_SIZE constant (not reused from Q8's), same numeric value (32) in this ggml commit but checked independently; fails closed with exit 5 and a message naming the actual offending type (Q4_0, not a hardcoded 'Q8').",
+    "cli_flag": "--kv native|q8|q4 (was native|q8). q4 opt-in, default unchanged (native), fails closed (never silently falls back), JSON reports exact kv_store mode name and kv_type."
+  },
+  "limitations": [
+    "Only 2 models tested (SmolLM2 135M, 360M), both small (<400M params) and both LLM_ARCH_LLAMA -- not validated on larger models or other architectures.",
+    "Quality ladder used greedy decoding + a single fixed prompt -- not a broad task/prompt suite.",
+    "GPU memory-pressure test (Section 13) used only SmolLM2-360M on a single GPU (GTX 1650, 4GB) -- boundary contexts will differ on other hardware.",
+    "Q4's quality cost (Section 9-11) is real and flagged: logit rel-L2 and delta NLL are more than an order of magnitude worse than Q8's on both tested models.",
+    "--compare-kv/--gpu-bench were NOT extended to a three-way native/q8/q4 mode this phase (Section 15 decision, see bench_cli_extension_decision above) -- the quality/perf data above came from an uncommitted research probe reusing the same underlying functions, not a new shipped CLI feature.",
+    "No adaptive/mixed Q4+Q8 policy was implemented or evaluated -- explicitly out of scope for Phase 10A."
+  ]
+}

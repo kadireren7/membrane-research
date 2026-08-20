@@ -1,0 +1,24 @@
+{
+  "note": "Phase 10A Section 13: GPU memory-pressure test, SmolLM2-360M, Vulkan (NVIDIA GTX 1650, 4096 MiB total, ~3956 MiB free at test time), --gpu-layers auto (MEMBRANE's own real policy engine, not forced).",
+  "device": "NVIDIA GeForce GTX 1650, 4096 MiB total VRAM",
+  "model_layers": 32,
+  "runs": [
+    { "ctx": 131072, "kv_mode": "native", "exit_code": 5, "result": "FAILED CLOSED -- 0 layers fit (est. KV alone = 5GB > 4GB total VRAM)" },
+    { "ctx": 131072, "kv_mode": "q8", "exit_code": 0, "gpu_layers_selected": 31, "of_layers": 32, "kv_mib": 2720.0, "result": "partial offload -- 1 layer stays on CPU" },
+    { "ctx": 131072, "kv_mode": "q4", "exit_code": 0, "gpu_layers_selected": 32, "of_layers": 32, "kv_mib": 1440.0, "result": "full offload" },
+    { "ctx": 180000, "kv_mode": "q8", "exit_code": 5, "result": "FAILED CLOSED -- 0 layers fit" },
+    { "ctx": 180000, "kv_mode": "q4", "exit_code": 0, "gpu_layers_selected": 32, "of_layers": 32, "kv_mib": 1977.5, "result": "full offload" },
+    { "ctx": 220000, "kv_mode": "q8", "exit_code": 5, "result": "FAILED CLOSED -- 0 layers fit" },
+    { "ctx": 220000, "kv_mode": "q4", "exit_code": 0, "gpu_layers_selected": 32, "of_layers": 32, "kv_mib": 2417.0, "result": "full offload" },
+    { "ctx": 260000, "kv_mode": "q8", "exit_code": 5, "result": "FAILED CLOSED -- 0 layers fit" },
+    { "ctx": 260000, "kv_mode": "q4", "exit_code": 0, "gpu_layers_selected": 23, "of_layers": 32, "kv_mib": 2856.4, "result": "partial offload -- q4 itself now hits its own real boundary, degrades gracefully rather than failing" }
+  ],
+  "findings": [
+    "At ctx=131072, native fails completely (fail-closed, exit 5, no silent CPU fallback -- existing MEMBRANE behavior, unaffected by Phase 10A).",
+    "At the same ctx=131072, q8 fits but only 31/32 layers -- one layer forced to CPU.",
+    "At the same ctx=131072, q4 fits with all 32/32 layers fully GPU-resident.",
+    "Across ctx 131072-220000, q8 fails completely (0 layers fit) while q4 keeps all 32 layers on GPU the entire range -- a real, substantial usable-context extension, not a marginal one.",
+    "q4's own boundary is real too: at ctx=260000 it drops to 23/32 layers (partial offload, not failure) -- MEMBRANE's fail-closed/graceful-degradation policy behaves correctly for q4 exactly as it already does for q8/native, no special-casing needed."
+  ],
+  "conclusion": "CONFIRMED (Section 13's central question): on this GPU/model, Q4 KV allows both (a) more layers to remain GPU-resident than Q8 at a fixed context, and (b) a substantially larger usable context range under full GPU residency than either Q8 or native support at all. This is likely the most operationally significant Phase 10A result -- it is not just a memory accounting win, it changes what configurations are even runnable on this class of GPU."
+}
