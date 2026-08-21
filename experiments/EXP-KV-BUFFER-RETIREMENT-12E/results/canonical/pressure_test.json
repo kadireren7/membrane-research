@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 20,
+  "note": "Reuses the exact real hardware boundary established in Phase 12B/12C/12D: SmolLM2-360M, ctx=200000, GTX 1650, split=16 (16/16 CPU/GPU KV split succeeds where full-GPU KV hard-fails). This phase adds: promote a selected CPU-KV layer to GPU, decode, demote it back, RETIRE (physically free) the old GPU backing with the validated fix, confirm VRAM returns.",
+  "config": {
+    "model": "SmolLM2-360M-Instruct-f16.gguf",
+    "n_ctx": 200000,
+    "kv_type": "Q8_0",
+    "split": 16,
+    "layer": 12
+  },
+  "result": {
+    "schema_version": 1,
+    "mode": "multi_retire",
+    "n_layers": 1,
+    "promote_ok": true,
+    "decode_after_promote_ok": true,
+    "retire_ok": true,
+    "decode_after_retire_ok": true,
+    "vram_before_mib": 3107,
+    "vram_after_promote_mib": 3237,
+    "vram_after_retire_mib": 3105,
+    "vram_reclaimed_mib": 132
+  },
+  "vram_before_promote_mib": 3107,
+  "vram_during_promote_mib": 3237,
+  "vram_after_retire_mib": 3105,
+  "vram_reclaimed_mib": 132,
+  "weights_unchanged": "mp.n_gpu_layers=-1 invariant unchanged this phase, not independently re-measured here (see results/phase12/runtime-relocate/weights_unchanged.json for the established methodology, and this phase's own weights_unchanged evidence in raw_weights_table_*.json).",
+  "oom_forced": false,
+  "conclusion": "This is the first TRUE dynamic memory reclamation proof in the constrained real-hardware regime: static split -> promote -> decode -> demote -> RETIRE -> VRAM genuinely returns (3107 -> 3237 -> 3105 MiB, a clean 132 MiB reclaim, matching the real layer's byte size), with no crash, no destabilization, at the exact ctx=200000 boundary where full-GPU KV is known to hard-fail.",
+  "raw_data": "raw_pressure_retirement_360m_ctx200000.jsonl"
+}

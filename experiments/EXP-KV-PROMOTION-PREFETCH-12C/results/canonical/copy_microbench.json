@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 9,
+  "method": "membrane-kv-promotion-prefetch-probe 'copybench' mode: no llama context, real ggml_backend_dev_init for CPU and Vulkan1 devices, real scratch tensors sized to match real KV layer byte counts (1/2/4/8 layers' worth of K+V bytes at SmolLM2-135M/ctx=2048/Q8_0 = 835584/1671168/3342336/6684672 bytes), 10 repetitions per (group size, direction, sync/async) combination.",
+  "results": {
+    "1layer_cpu_to_gpu_async": {
+      "bytes": 835584,
+      "n_layers_equivalent": 1,
+      "direction": "cpu_to_gpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.25,
+        "median": 0.1804,
+        "min": 0.1783,
+        "max": 0.8723,
+        "stddev": 0.2074
+      },
+      "effective_gbps": 3.3423
+    },
+    "1layer_cpu_to_gpu_sync": {
+      "bytes": 835584,
+      "n_layers_equivalent": 1,
+      "direction": "cpu_to_gpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.1678,
+        "median": 0.1643,
+        "min": 0.1641,
+        "max": 0.182,
+        "stddev": 0.0055
+      },
+      "effective_gbps": 4.9796
+    },
+    "1layer_gpu_to_cpu_async": {
+      "bytes": 835584,
+      "n_layers_equivalent": 1,
+      "direction": "gpu_to_cpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.1832,
+        "median": 0.1797,
+        "min": 0.178,
+        "max": 0.2036,
+        "stddev": 0.0076
+      },
+      "effective_gbps": 4.561
+    },
+    "1layer_gpu_to_cpu_sync": {
+      "bytes": 835584,
+      "n_layers_equivalent": 1,
+      "direction": "gpu_to_cpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.3243,
+        "median": 0.2266,
+        "min": 0.2184,
+        "max": 1.1864,
+        "stddev": 0.2877
+      },
+      "effective_gbps": 2.5766
+    },
+    "2layer_cpu_to_gpu_async": {
+      "bytes": 1671168,
+      "n_layers_equivalent": 2,
+      "direction": "cpu_to_gpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.3999,
+        "median": 0.3234,
+        "min": 0.3159,
+        "max": 1.1059,
+        "stddev": 0.2354
+      },
+      "effective_gbps": 4.179
+    },
+    "2layer_cpu_to_gpu_sync": {
+      "bytes": 1671168,
+      "n_layers_equivalent": 2,
+      "direction": "cpu_to_gpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.3329,
+        "median": 0.3281,
+        "min": 0.3274,
+        "max": 0.3627,
+        "stddev": 0.0104
+      },
+      "effective_gbps": 5.02
+    },
+    "2layer_gpu_to_cpu_async": {
+      "bytes": 1671168,
+      "n_layers_equivalent": 2,
+      "direction": "gpu_to_cpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.3511,
+        "median": 0.3498,
+        "min": 0.3423,
+        "max": 0.3616,
+        "stddev": 0.0071
+      },
+      "effective_gbps": 4.7598
+    },
+    "2layer_gpu_to_cpu_sync": {
+      "bytes": 1671168,
+      "n_layers_equivalent": 2,
+      "direction": "gpu_to_cpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.508,
+        "median": 0.4033,
+        "min": 0.3952,
+        "max": 1.4449,
+        "stddev": 0.3124
+      },
+      "effective_gbps": 3.2897
+    },
+    "4layer_cpu_to_gpu_async": {
+      "bytes": 3342336,
+      "n_layers_equivalent": 4,
+      "direction": "cpu_to_gpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.8217,
+        "median": 0.6757,
+        "min": 0.6478,
+        "max": 1.9076,
+        "stddev": 0.3664
+      },
+      "effective_gbps": 4.0676
+    },
+    "4layer_cpu_to_gpu_sync": {
+      "bytes": 3342336,
+      "n_layers_equivalent": 4,
+      "direction": "cpu_to_gpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.6982,
+        "median": 0.69,
+        "min": 0.6598,
+        "max": 0.7811,
+        "stddev": 0.0338
+      },
+      "effective_gbps": 4.7871
+    },
+    "4layer_gpu_to_cpu_async": {
+      "bytes": 3342336,
+      "n_layers_equivalent": 4,
+      "direction": "gpu_to_cpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.7174,
+        "median": 0.6828,
+        "min": 0.666,
+        "max": 0.8718,
+        "stddev": 0.0684
+      },
+      "effective_gbps": 4.659
+    },
+    "4layer_gpu_to_cpu_sync": {
+      "bytes": 3342336,
+      "n_layers_equivalent": 4,
+      "direction": "gpu_to_cpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 0.958,
+        "median": 0.8195,
+        "min": 0.7844,
+        "max": 2.1173,
+        "stddev": 0.3887
+      },
+      "effective_gbps": 3.4889
+    },
+    "8layer_cpu_to_gpu_async": {
+      "bytes": 6684672,
+      "n_layers_equivalent": 8,
+      "direction": "cpu_to_gpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 2.6487,
+        "median": 2.4954,
+        "min": 1.924,
+        "max": 4.761,
+        "stddev": 0.8189
+      },
+      "effective_gbps": 2.5238
+    },
+    "8layer_cpu_to_gpu_sync": {
+      "bytes": 6684672,
+      "n_layers_equivalent": 8,
+      "direction": "cpu_to_gpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 1.7275,
+        "median": 1.6888,
+        "min": 1.5881,
+        "max": 2.268,
+        "stddev": 0.1938
+      },
+      "effective_gbps": 3.8696
+    },
+    "8layer_gpu_to_cpu_async": {
+      "bytes": 6684672,
+      "n_layers_equivalent": 8,
+      "direction": "gpu_to_cpu",
+      "sync": false,
+      "latency_ms": {
+        "n": 10,
+        "mean": 1.7134,
+        "median": 1.5044,
+        "min": 1.4191,
+        "max": 3.1699,
+        "stddev": 0.5046
+      },
+      "effective_gbps": 3.9014
+    },
+    "8layer_gpu_to_cpu_sync": {
+      "bytes": 6684672,
+      "n_layers_equivalent": 8,
+      "direction": "gpu_to_cpu",
+      "sync": true,
+      "latency_ms": {
+        "n": 10,
+        "mean": 2.823,
+        "median": 2.4007,
+        "min": 1.8573,
+        "max": 5.1854,
+        "stddev": 1.0666
+      },
+      "effective_gbps": 2.3679
+    }
+  },
+  "raw_data": "raw_copybench.jsonl"
+}

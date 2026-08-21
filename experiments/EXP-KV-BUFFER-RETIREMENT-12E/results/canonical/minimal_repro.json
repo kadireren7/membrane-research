@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 2,
+  "method": "membrane-kv-runtime-relocate-probe 'repro2' mode (reused from Phase 12D, mode name preserved for continuity), SmolLM2-135M, ctx=2048, Q8_0, split=8, one live context, one layer (4, initially CPU-resident). Sequence: initial CPU -> relocate GPU -> decode ('second sentence') -> relocate CPU (this frees the now-orphaned dedicated GPU backing from the first relocation) -> decode ('third sentence').",
+  "reproduced_reliably": true,
+  "crash_signatures_observed_across_this_investigation": [
+    {
+      "signature": "SIGSEGV (rc=139)",
+      "context": "this session's repro2 mode, ctx=2048, layer 4, before the fix"
+    },
+    {
+      "signature": "GGML_ASSERT(buffer != nullptr) at ggml-vulkan.cpp:7815 (ggml_vk_tensor_subbuffer)",
+      "context": "Phase 12D's cycle mode, ctx=8192, before the fix (documented in results/phase12/runtime-relocate/release_failure.json)"
+    }
+  ],
+  "diagnostic_capture": {
+    "old_tensor_pointer": "captured at point C (post relocation #1) -- see failing_tensor_trace.json",
+    "old_buffer_pointer": "captured at point C -- see failing_tensor_trace.json",
+    "old_data_pointer": "captured at point C -- see failing_tensor_trace.json",
+    "new_tensor_pointer": "captured at point E (post relocation #2, pre-fix run) -- identical to point C, confirming graph reuse (not a fresh tensor)",
+    "graph_tensor_view_pointers": "captured via temporary instrumentation directly inside ggml_vk_tensor_subbuffer -- see raw_failing_tensor_trace_excerpt.txt",
+    "scheduler_split_alloc_identities": "not directly captured (ggml_backend_sched's internal split/hash-set state is not exposed via any public or easily-instrumentable API) -- the relevant mechanism was found one level higher, in llama_context::process_ubatch's graph-reuse decision (see scheduler_lifetime.json)",
+    "vulkan_tensor_extra_subbuffer_info": "see vulkan_extra_lifetime.json -- Vulkan backend does not use ggml_tensor::extra in any way relevant to this bug",
+    "exact_failing_tensor_at_assertion": "see failing_tensor_trace.json"
+  },
+  "fix_validated": true,
+  "fix_validation_evidence": "With llama_invalidate_graph_cache() called after each relocate_layer() call and before the next decode, the identical sequence completes with rc=0, E_graph_after_reloc2 shows a genuinely new tensor/buffer (buffer_name=CPU, matching the actual post-relocation-2 placement), and generation output matches an independent clean reference exactly. See retirement_timing.json and cycle_stability.json.",
+  "raw_data": [
+    "raw_failing_tensor_trace_excerpt.txt",
+    "raw_cpy_get_v_trace.txt"
+  ]
+}

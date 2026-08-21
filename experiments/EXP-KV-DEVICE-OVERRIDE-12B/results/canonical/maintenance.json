@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 22: patch maintenance assessment.",
+  "patch_line_count": {"insertions": 68, "deletions": 7, "net": 61},
+  "files_changed_inside_llama_cpp": 6,
+  "api_surface_added": {
+    "public_struct_fields": ["llama_context_params::kv_dev_override", "llama_context_params::kv_dev_override_ud"],
+    "internal_struct_fields": ["llama_memory_params::kv_dev_override", "llama_memory_params::kv_dev_override_ud"],
+    "new_public_functions": 0,
+    "new_types": 0,
+    "note": "no new public function, no new enum, no new class -- purely two additional optional fields on an already-existing, already-optional-field-carrying public struct, plus the matching constructor parameters threaded through (mirroring kv_type_override's own already-accepted precedent exactly)."
+  },
+  "dependency_on_internal_structs": "llama_memory_params (internal, src/llama-memory.h) and the llama_kv_cache constructor's parameter list (internal, src/llama-kv-cache.h) both gained two new fields/parameters -- these are NOT part of the public API surface, so upstream is free to reshape them without breaking MEMBRANE's public llama.h usage, but a submodule bump that reshapes llama_memory_params or the kv_cache constructor's signature would require re-deriving this patch's internal-facing hunks (same exposure the existing kv_type_override patch already has).",
+  "expected_conflict_risk_on_llama_cpp_updates": {
+    "risk_level": "LOW-MODERATE, same class as kv_type_override",
+    "reasoning": "the patch's hunks sit in a single, actively-maintained-but-not-frequently-restructured function (llama_kv_cache's constructor) and two small struct definitions -- upstream llama.cpp does periodically refactor KV cache internals (the file's own header comment includes a TODO about a future 'refactor the memory instances' effort), which is the single most likely source of future conflict. The struct-field additions (llama.h, llama-memory.h) are lower-risk (additive, unlikely to be touched by unrelated changes) than the constructor-body edit (llama-kv-cache.cpp), which depends on the exact current shape of the per-layer allocation loop."
+  },
+  "could_reasonably_be_proposed_upstream": {
+    "answer": true,
+    "reasoning": "the callback is fully generic (no MEMBRANE-specific naming, policy, or behavior inside llama.cpp itself -- see patch_scope.json's scope_bar_compliance), backward-compatible (NULL preserves exact upstream behavior, verified), small, and solves a real, generally-useful problem (independent KV/weight device placement) that is not specific to MEMBRANE's own research goals. It follows the exact precedent llama.cpp's own maintainers already accepted for kv_type_override-shaped extension points in this codebase's usage pattern (though kv_type_override itself is a MEMBRANE-local patch that has never merged upstream -- both patches follow the SAME style of minimal, additive, optional-callback extension that is common in the ggml/llama.cpp ecosystem for other override points)."
+  },
+  "comparison_to_kv_type_override_patch": {
+    "kv_type_override": {"insertions": 61, "deletions": 19, "files": 6},
+    "kv_dev_override": {"insertions": 68, "deletions": 7, "files": 6},
+    "relative_risk": "comparable overall size and shape; kv_dev_override's core-loop edit is somewhat larger (adds an explicit if-block plus a device-by-type lookup) than kv_type_override's (a single ternary-like two-line resolution), but both touch the exact same function and are equally exposed to the same future KV-cache-refactor risk. Maintaining BOTH patches together going forward costs roughly 2x a single patch's review effort on each submodule bump, not more -- they do not meaningfully interact with or complicate each other beyond the adjacency-driven idempotency-check fix already made (see patch_scope.json)."
+  }
+}

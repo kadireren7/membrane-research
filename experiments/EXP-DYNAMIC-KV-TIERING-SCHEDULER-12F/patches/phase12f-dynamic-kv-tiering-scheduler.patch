@@ -1,0 +1,2372 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b79aa68..84c6c59 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -222,6 +222,19 @@ add_library(membrane_relocate_state STATIC
+ target_include_directories(membrane_relocate_state PUBLIC
+   tools/membrane-kv-runtime-relocate)
+ 
++# Phase 12F: llama-free deterministic KV tiering scheduler CORE (config
++# validation, per-layer/scheduler state machines, deterministic action
++# planning, budget guard) -- pure policy logic, no ggml/llama
++# dependency, no backend calls. The real llama-enabled driver
++# (tiering_probe.cpp, built only under MEMBRANE_ENABLE_LLAMA below)
++# calls the ALREADY-ESTABLISHED Phase 12B-12E primitives to apply
++# whatever this module decides. RESEARCH ONLY, experiment/dynamic-kv-
++# tiering-scheduler branch only. Never linked into membrane-run.
++add_library(membrane_tiering_scheduler_core STATIC
++  tools/membrane-kv-tiering-scheduler/scheduler_core.c)
++target_include_directories(membrane_tiering_scheduler_core PUBLIC
++  tools/membrane-kv-tiering-scheduler)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -375,6 +388,13 @@ if(MEMBRANE_ENABLE_LLAMA)
+   # kv-runtime-relocate branch only, no product CLI exposure.
+   add_subdirectory(tools/membrane-kv-runtime-relocate)
+ 
++  # Phase 12F: real llama-enabled deterministic KV tiering scheduler
++  # driver, built entirely on the Phase 12B-12E primitives -- no new
++  # llama.cpp patch this phase (policy logic stays out of llama.cpp
++  # per Phase 12F's own constraint). RESEARCH ONLY, experiment/dynamic-
++  # kv-tiering-scheduler branch only, no product CLI exposure.
++  add_subdirectory(tools/membrane-kv-tiering-scheduler)
++
+   # Product Phase 5: the live llama.cpp shadow runtime (membrane-llama-
+   # run). Deliberately does NOT use the kv_type_override patch above --
+   # it observes live K/V projection tensors via the clean, unmodified,
+@@ -662,6 +682,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_relocate_state COMMAND test_relocate_state)
+ 
++  add_executable(test_scheduler_core
++    tools/membrane-kv-tiering-scheduler/test_scheduler_core.c)
++  target_link_libraries(test_scheduler_core PRIVATE
++    membrane_tiering_scheduler_core)
++  target_include_directories(test_scheduler_core PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_scheduler_core COMMAND test_scheduler_core)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/phase12f_build_artifacts.py b/scripts/phase12f_build_artifacts.py
+new file mode 100644
+index 0000000..e28091e
+--- /dev/null
++++ b/scripts/phase12f_build_artifacts.py
+@@ -0,0 +1,350 @@
++#!/usr/bin/env python3
++"""One-shot script that reads Phase 12F raw probe output and writes the
++processed results/phase12/dynamic-tiering-scheduler/*.json artifacts.
++Not part of the product; research-only, run once, kept for provenance."""
++import json
++import re
++from pathlib import Path
++
++R = Path(__file__).resolve().parent.parent / "results" / "phase12" / "dynamic-tiering-scheduler"
++
++
++def load_jsonl(path):
++    out = []
++    with open(path) as f:
++        for line in f:
++            line = line.strip()
++            if line:
++                out.append(json.loads(line))
++    return out
++
++
++def load_json_lines_mixed(path):
++    """stderr logs mix llama.cpp text logs with JSON lines; extract only JSON lines."""
++    out = []
++    with open(path) as f:
++        for line in f:
++            line = line.strip()
++            if line.startswith("{"):
++                try:
++                    out.append(json.loads(line))
++                except json.JSONDecodeError:
++                    pass
++    return out
++
++
++# ---------- scheduler_config.json (Section 4) ----------
++scheduler_config = {
++    "schema_version": 1,
++    "n_total_layers_135m": 30,
++    "n_total_layers_360m": 32,
++    "initial_gpu_layers_135m": list(range(20, 30)),
++    "promotion_groups": [
++        {"decode_trigger": 5, "layers": [16, 17, 18, 19]},
++    ],
++    "demotion_groups": [
++        {"decode_trigger": 10, "layers": [16, 17, 18, 19]},
++    ],
++    "note": "Deterministic V1 policy: fixed decode-index triggers, fixed layer "
++            "groups. No learned/adaptive component. See scheduler_core.h/.c.",
++}
++(R / "scheduler_config.json").write_text(json.dumps(scheduler_config, indent=2))
++
++# ---------- state_machine.json (Section 2) ----------
++state_machine = {
++    "schema_version": 1,
++    "layer_states": ["CPU_RESIDENT", "GPU_RESIDENT", "PROMOTING", "DEMOTING", "ERROR"],
++    "sched_states": ["IDLE", "PLANNING", "APPLYING", "SYNCING", "FAILED"],
++    "transitions": {
++        "begin_promote": "CPU_RESIDENT -> PROMOTING",
++        "commit_promote": "PROMOTING -> GPU_RESIDENT",
++        "fail_promote": "PROMOTING -> ERROR",
++        "begin_demote": "GPU_RESIDENT -> DEMOTING",
++        "commit_demote": "DEMOTING -> CPU_RESIDENT",
++        "fail_demote": "DEMOTING -> ERROR",
++    },
++    "invariant": "ERROR is terminal for a layer within a run; no transition out "
++                 "of ERROR is defined in scheduler_core.c.",
++}
++(R / "state_machine.json").write_text(json.dumps(state_machine, indent=2))
++
++# ---------- first_schedule.json (Section 6) + decision_trace.jsonl (Section 26) ----------
++trace = load_jsonl(R / "raw_first_schedule_trace.jsonl")
++stderr_lines = load_json_lines_mixed(R / "raw_first_schedule_stderr.txt")
++vram_steps = [l for l in stderr_lines if "vram_step" in l]
++gen_tokens = next((l["generated_tokens"] for l in stderr_lines if "generated_tokens" in l), None)
++
++with open(R / "decision_trace.jsonl", "w") as f:
++    for entry in trace:
++        f.write(json.dumps(entry) + "\n")
++
++expected = [
++    (5, 16, "PROMOTE"), (5, 17, "PROMOTE"), (5, 18, "PROMOTE"), (5, 19, "PROMOTE"),
++    (10, 16, "DEMOTE"), (10, 17, "DEMOTE"), (10, 18, "DEMOTE"), (10, 19, "DEMOTE"),
++]
++actual = [(e["decode_idx"], e["layer"], e["action"]) for e in trace]
++all_expected_occurred = all(e in actual for e in expected)
++all_ok = all(e["result"] == "ok" for e in trace)
++
++first_schedule = {
++    "schema_version": 1,
++    "model": "SmolLM2-135M-Instruct-f16.gguf",
++    "n_ctx": 2048,
++    "kv_type": "Q8_0",
++    "n_layer": 30,
++    "n_decodes": 15,
++    "expected_transitions": [{"decode_idx": d, "layer": l, "action": a} for d, l, a in expected],
++    "observed_transitions": trace,
++    "all_expected_transitions_occurred": all_expected_occurred,
++    "all_transitions_ok": all_ok,
++    "generated_tokens": gen_tokens,
++    "decode_completed_without_error": gen_tokens is not None and len(gen_tokens) == 15,
++}
++(R / "first_schedule.json").write_text(json.dumps(first_schedule, indent=2))
++
++# ---------- vram_timeseries.json (Section 8) ----------
++vram_ts = {
++    "schema_version": 1,
++    "source": "raw_first_schedule_stderr.txt",
++    "samples": vram_steps,
++    "note": "vram_used_mib sampled via nvidia-smi after each decode step; "
++            "promotion at decode 5 -> +4 MiB (373-369); demotion at decode 10 "
++            "-> -6 MiB (367-373), consistent with 4x835584-byte KV layers "
++            "moving GPU<->CPU.",
++}
++(R / "vram_timeseries.json").write_text(json.dumps(vram_ts, indent=2))
++
++# ---------- correctness.json (Section 9) ----------
++hotset = load_jsonl(R / "raw_hotset_sweep.jsonl")
++hotset_tokens = {h["split"]: h["generated_tokens"][:15] for h in hotset}
++reference = hotset_tokens.get(0)
++all_splits_match = all(toks == reference for toks in hotset_tokens.values())
++dynamic_matches_static = gen_tokens == reference if gen_tokens else False
++
++correctness = {
++    "schema_version": 1,
++    "method": "greedy-decode token-sequence comparison at identical sequence "
++              "positions across full-GPU KV, full-CPU KV, all static mixed "
++              "splits, and the dynamic promote/demote schedule",
++    "reference_tokens_full_gpu_kv": reference,
++    "static_split_tokens_by_split": hotset_tokens,
++    "all_static_splits_match_reference": all_splits_match,
++    "dynamic_schedule_tokens": gen_tokens,
++    "dynamic_schedule_matches_reference": dynamic_matches_static,
++    "verdict": "IDENTICAL" if (all_splits_match and dynamic_matches_static) else "MISMATCH",
++}
++(R / "correctness.json").write_text(json.dumps(correctness, indent=2))
++
++# ---------- hotset_sweep.json (Section 13) + performance.json (Section 12) + pareto.json (Section 25) ----------
++hotset_sweep = {"schema_version": 1, "runs": hotset}
++(R / "hotset_sweep.json").write_text(json.dumps(hotset_sweep, indent=2))
++
++pareto = {
++    "schema_version": 1,
++    "axis_x": "gpu_kv_bytes",
++    "axis_y": "generation_tok_s",
++    "points": [
++        {"split": h["split"], "gpu_kv_bytes": h["gpu_kv_bytes"],
++         "tok_s": h["generation_tok_s"], "vram_used_mib": h["vram_used_mib"]}
++        for h in hotset
++    ],
++    "note": "At this model/context scale (135M, ctx=2048) throughput is "
++            "compute-bound, not KV-placement-bound: tok/s varies only "
++            "~21.9-24.3 across the full split range 0-30, consistent with "
++            "Phase 6.2's finding of no bytes/token win at tested scale.",
++}
++(R / "pareto.json").write_text(json.dumps(pareto, indent=2))
++
++performance = {
++    "schema_version": 1,
++    "static_all_gpu_tok_s": next(h["generation_tok_s"] for h in hotset if h["split"] == 0),
++    "static_all_cpu_tok_s": next(h["generation_tok_s"] for h in hotset if h["split"] == 30),
++    "static_split20_tok_s": next(h["generation_tok_s"] for h in hotset if h["split"] == 22),
++    "dynamic_schedule_note": "dynamic schedule interleaves promote/demote "
++        "overhead with decode; see transition_latency.json for the "
++        "per-transition cost measured directly.",
++}
++(R / "performance.json").write_text(json.dumps(performance, indent=2))
++
++# ---------- promotion_group_sweep.json (Section 14) ----------
++promo = load_jsonl(R / "raw_promo_group_sweep.jsonl")
++(R / "promotion_group_sweep.json").write_text(json.dumps({"schema_version": 1, "runs": promo}, indent=2))
++
++# ---------- frequency_sweep.json (Section 15) ----------
++freq = load_jsonl(R / "raw_freq_sweep.jsonl")
++(R / "frequency_sweep.json").write_text(json.dumps({"schema_version": 1, "runs": freq}, indent=2))
++
++# ---------- transition_latency.json (Section 11) ----------
++promo_durations = [e["duration_us"] for e in trace if e["action"] == "PROMOTE"]
++demote_durations = [e["duration_us"] for e in trace if e["action"] == "DEMOTE"]
++transition_latency = {
++    "schema_version": 1,
++    "first_schedule_promote_us": promo_durations,
++    "first_schedule_demote_us": demote_durations,
++    "promo_group_sweep_ms_by_group_size": {str(p["group_size"]): p["promotion_ms"] for p in promo},
++    "demo_group_sweep_ms_by_group_size": {str(p["group_size"]): p["demotion_ms"] for p in promo},
++    "note": "demotion is consistently more expensive than promotion for the "
++            "same group size (established in Phase 12E as the immediate-"
++            "retirement path doing extra live-reference bookkeeping on free).",
++}
++(R / "transition_latency.json").write_text(json.dumps(transition_latency, indent=2))
++
++# ---------- budget_guard.json (Sections 17/18) ----------
++budget_ok = load_json_lines_mixed(R / "raw_budget_ok.txt")[0]
++budget_ok_trace = load_jsonl(R / "raw_budget_ok_trace.jsonl")
++budget_fail = load_json_lines_mixed(R / "raw_budget_fail.txt")[0]
++budget_fail_trace = load_jsonl(R / "raw_budget_fail_trace.jsonl")
++budget_guard = {
++    "schema_version": 1,
++    "generous_budget": {**budget_ok, "trace": budget_ok_trace},
++    "impossible_budget_fail_closed": {**budget_fail, "trace": budget_fail_trace},
++    "fail_closed_verified": (
++        budget_fail_trace[0]["reason"] == "PROMOTION_SKIPPED_BUDGET"
++        and budget_fail_trace[0]["result"] == "skipped"
++        and budget_fail["layer_still_cpu"] is True
++    ),
++}
++(R / "budget_guard.json").write_text(json.dumps(budget_guard, indent=2))
++
++# ---------- q5.json (Section 20) ----------
++q5_stderr = load_json_lines_mixed(R / "raw_q5_stderr.txt")
++q5_gen = next((l["generated_tokens"] for l in q5_stderr if "generated_tokens" in l), None)
++q5_trace = load_jsonl(R / "raw_q5_trace.jsonl")
++q5_promo = load_jsonl(R / "raw_q5_promo_group.jsonl")
++q5 = {
++    "schema_version": 1,
++    "kv_type": "Q5_1",
++    "schedule_transitions": q5_trace,
++    "generated_tokens": q5_gen,
++    "matches_q8_reference": q5_gen == reference,
++    "promotion_group_latency": q5_promo,
++}
++(R / "q5.json").write_text(json.dumps(q5, indent=2))
++
++# ---------- second_model.json (Section 21) ----------
++m360_stderr = load_json_lines_mixed(R / "raw_360m_stderr.txt")
++m360_gen = next((l["generated_tokens"] for l in m360_stderr if "generated_tokens" in l), None)
++m360_trace = load_jsonl(R / "raw_360m_trace.jsonl")
++second_model = {
++    "schema_version": 1,
++    "model": "SmolLM2-360M-Instruct-f16.gguf",
++    "n_layer": 32,
++    "schedule_transitions": m360_trace,
++    "generated_tokens": m360_gen,
++    "all_transitions_ok": all(e["result"] == "ok" for e in m360_trace),
++    "n_transitions": len(m360_trace),
++}
++(R / "second_model.json").write_text(json.dumps(second_model, indent=2))
++
++# ---------- long_context.json (Section 22) ----------
++lc_stderr = load_json_lines_mixed(R / "raw_longctx_stderr.txt")
++lc_gen = next((l["generated_tokens"] for l in lc_stderr if "generated_tokens" in l), None)
++lc_trace = load_jsonl(R / "raw_longctx_trace.jsonl")
++long_context = {
++    "schema_version": 1,
++    "n_ctx": 16384,
++    "schedule_transitions": lc_trace,
++    "generated_tokens": lc_gen,
++    "matches_ctx2048_reference": lc_gen == reference,
++    "all_transitions_ok": all(e["result"] == "ok" for e in lc_trace),
++}
++(R / "long_context.json").write_text(json.dumps(long_context, indent=2))
++
++# ---------- pressure_test.json (Section 16) ----------
++p20_stderr = load_json_lines_mixed(R / "raw_pressure_split20.txt")
++p20_json = load_json_lines_mixed(R / "raw_pressure_split20.jsonl")
++psched_stderr = load_json_lines_mixed(R / "raw_pressure_schedule_stderr.txt")
++psched_trace = load_jsonl(R / "raw_pressure_schedule_trace.jsonl")
++psched_gen = next((l["generated_tokens"] for l in psched_stderr if "generated_tokens" in l), None)
++pressure_test = {
++    "schema_version": 1,
++    "n_ctx": 65536,
++    "deviation_from_spec": "Spec suggested ctx~=200000; scaled to 65536 because "
++        "the host had only ~214 MiB free system RAM and 4.9/9.6 GiB swap "
++        "already in use from unrelated concurrent processes (2nd Claude "
++        "session, Firefox, an unrelated pytest run) at test time -- launching "
++        "the full 200000 test risked OOM-killing unrelated work rather than "
++        "just this experiment. journalctl was checked before and after both "
++        "runs; no OOM kill occurred either way.",
++    "static_split20_result": p20_json[0] if p20_json else None,
++    "dynamic_schedule_result": {
++        "transitions": psched_trace,
++        "generated_tokens": psched_gen,
++        "matches_ctx2048_reference": psched_gen == reference,
++        "all_transitions_ok": all(e["result"] == "ok" for e in psched_trace),
++    },
++    "oom_detected": False,
++}
++(R / "pressure_test.json").write_text(json.dumps(pressure_test, indent=2))
++
++# ---------- stability.json (Section 10) ----------
++stability_raw = load_jsonl(R / "raw_stability_50.jsonl")[0]
++stability = {
++    "schema_version": 1,
++    "n_relocations": stability_raw["n_relocations"],
++    "meets_50_transition_requirement": stability_raw["n_relocations"] >= 50,
++    "vram_used_mib_after": stability_raw["vram_used_mib"],
++    "vram_used_mib_steady_state_reference": 371,
++    "no_leak_detected": stability_raw["vram_used_mib"] <= 371 + 5,
++    "raw": stability_raw,
++}
++(R / "stability.json").write_text(json.dumps(stability, indent=2))
++
++# ---------- policy_comparison.json (Section 24) ----------
++policy_comparison = {
++    "schema_version": 1,
++    "static_all_gpu": {"tok_s": performance["static_all_gpu_tok_s"], "vram_peak_mib": next(h["vram_used_mib"] for h in hotset if h["split"] == 0)},
++    "static_split": {"tok_s": performance["static_split20_tok_s"], "vram_peak_mib": next(h["vram_used_mib"] for h in hotset if h["split"] == 22)},
++    "dynamic_schedule": {
++        "note": "same token output as static references (see correctness.json); "
++                "adds bounded per-transition overhead (see transition_latency.json, "
++                "frequency_sweep.json) in exchange for time-varying VRAM footprint",
++        "peak_vram_mib_during_promoted_window": 373,
++        "vram_mib_outside_promoted_window": 367,
++    },
++    "conclusion": "Dynamic scheduling is mechanically correct and adds no "
++        "output divergence, but at this model/context scale there is no "
++        "throughput advantage over a static split -- KV placement is not the "
++        "bottleneck (matches Phase 6.2's finding).",
++}
++(R / "policy_comparison.json").write_text(json.dumps(policy_comparison, indent=2))
++
++# ---------- failure_cases.json (Section 27) ----------
++failure_cases = {
++    "schema_version": 1,
++    "cases": [
++        {
++            "case": "budget_guard_fail_closed",
++            "description": "promotion requested with an intentionally impossible "
++                "reserve+margin (999999999 MiB each) is correctly SKIPPED, layer "
++                "stays CPU_RESIDENT, no relocate_layer call is even attempted",
++            "evidence_file": "budget_guard.json",
++            "verdict": "FAILS_CLOSED_CORRECTLY",
++        },
++        {
++            "case": "config_validation_rejects_invalid_configs",
++            "description": "scheduler_core rejects out-of-range layers, duplicate "
++                "layers within a group, duplicate GPU layers, and layer-count "
++                "mismatches before any relocation is attempted (see "
++                "test_scheduler_core.c config-validation tests)",
++            "evidence_file": "N/A (covered by test_scheduler_core, run under "
++                "both Release and ASan+UBSan, see summary.json sanitizer_matrix)",
++            "verdict": "REJECTED_AT_VALIDATION",
++        },
++        {
++            "case": "already_resident_promotion_is_noted_not_silent",
++            "description": "planning a promotion for a layer that is already "
++                "GPU_RESIDENT produces an explicit action=NONE, "
++                "reason=ALREADY_RESIDENT entry rather than silently omitting it",
++            "evidence_file": "N/A (covered by "
++                "test_plan_already_resident_promotion_is_noted_not_skipped_silently "
++                "in test_scheduler_core.c)",
++            "verdict": "REPORTED_NOT_SILENT",
++        },
++    ],
++}
++(R / "failure_cases.json").write_text(json.dumps(failure_cases, indent=2))
++
++print("wrote artifacts:")
++for p in sorted(R.glob("*.json")):
++    print(" ", p.name)
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index c1d4f9e..973aefa 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -17,6 +17,7 @@ import json
+ import math
+ import re
+ import statistics
++import subprocess
+ import sys
+ from pathlib import Path
+ 
+@@ -2370,6 +2371,265 @@ def _c109():
+ 	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all buffer-retirement artifact files"
+ 
+ 
++V12F_DIR = REPO_ROOT / "results" / "phase12" / "dynamic-tiering-scheduler"
++_V12F_CACHE = {}
++
++
++def _load_v12f(name):
++	key = name
++	if key not in _V12F_CACHE:
++		path = V12F_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12F_CACHE[key] = rows
++		elif name.endswith((".txt", ".log")):
++			_V12F_CACHE[key] = path.read_text()
++		else:
++			_V12F_CACHE[key] = json.loads(path.read_text())
++	return _V12F_CACHE[key]
++
++
++@check("Phase 12F: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual processed .json artifact under 'artifacts' "
++	"(raw_* evidence files are listed separately under raw_evidence_files)")
++def _c110():
++	if not (V12F_DIR / "manifest.json").exists():
++		return False, f"{V12F_DIR}/manifest.json does not exist"
++	m = _load_v12f("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed_artifacts = set(m.get("artifacts", {}).keys())
++	actual_processed = {
++		p.name for p in list(V12F_DIR.glob("*.json")) + list(V12F_DIR.glob("*.jsonl"))
++		if not p.name.startswith("raw_") and p.name != "manifest.json"
++	}
++	if listed_artifacts != actual_processed:
++		bad.append(f"artifacts listed-vs-actual mismatch: missing={actual_processed - listed_artifacts}, extra={listed_artifacts - actual_processed}")
++	listed_raw = set(m.get("raw_evidence_files", []))
++	actual_raw = {p.name for p in V12F_DIR.glob("raw_*")}
++	if listed_raw != actual_raw:
++		bad.append(f"raw_evidence_files listed-vs-actual mismatch: missing={actual_raw - listed_raw}, extra={listed_raw - actual_raw}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed_artifacts)} artifacts + {len(listed_raw)} raw files, exact match with directory contents"
++
++
++@check("Phase 12F: first_schedule.json's claimed transitions are exactly "
++	"reproduced by recomputing from raw_first_schedule_trace.jsonl -- every "
++	"expected (decode_idx, layer, action) actually occurred with result=ok, "
++	"and no unexpected actions were emitted")
++def _c111():
++	fs = _load_v12f("first_schedule.json")
++	raw = _load_v12f("raw_first_schedule_trace.jsonl")
++	bad = []
++	expected = {(e["decode_idx"], e["layer"], e["action"]) for e in fs.get("expected_transitions", [])}
++	actual = {(e["decode_idx"], e["layer"], e["action"]) for e in raw}
++	if expected != actual:
++		bad.append(f"expected vs raw-trace transition set mismatch: missing={expected - actual}, extra={actual - expected}")
++	non_ok = [e for e in raw if e.get("result") != "ok"]
++	if non_ok:
++		bad.append(f"raw trace has non-ok results: {non_ok[:3]}")
++	if len(raw) != 8:
++		bad.append(f"expected exactly 8 transition entries (4 promote + 4 demote), got {len(raw)}")
++	if fs.get("generated_tokens") is None or len(fs["generated_tokens"]) != 15:
++		bad.append(f"generated_tokens missing or wrong length: {fs.get('generated_tokens')}")
++	return len(bad) == 0, "; ".join(bad) if bad else "8/8 transitions match raw trace exactly, all result=ok, 15 tokens generated"
++
++
++@check("Phase 12F: correctness.json's IDENTICAL verdict is reproduced by "
++	"recomputing token-sequence equality directly from raw_hotset_sweep.jsonl "
++	"and raw_first_schedule_stderr.txt, independent of the summary's own claim")
++def _c112():
++	c = _load_v12f("correctness.json")
++	hotset_raw = _load_v12f("raw_hotset_sweep.jsonl")
++	stderr_lines = [json.loads(l) for l in _load_v12f("raw_first_schedule_stderr.txt").splitlines() if l.strip().startswith("{")]
++	gen = next((l["generated_tokens"] for l in stderr_lines if "generated_tokens" in l), None)
++	bad = []
++	if not hotset_raw:
++		bad.append("raw_hotset_sweep.jsonl empty")
++	else:
++		ref = hotset_raw[0]["generated_tokens"][:15]
++		mismatched = [h["split"] for h in hotset_raw if h["generated_tokens"][:15] != ref]
++		if mismatched:
++			bad.append(f"static splits diverge from split=0 reference: {mismatched}")
++		if gen != ref:
++			bad.append(f"dynamic schedule tokens {gen} != static reference {ref}")
++	if c.get("verdict") != "IDENTICAL":
++		bad.append(f"correctness.json claims verdict={c.get('verdict')!r} but recomputation is consistent with IDENTICAL")
++	return len(bad) == 0, "; ".join(bad) if bad else "recomputed token identity across all static splits and the dynamic schedule matches the IDENTICAL verdict"
++
++
++@check("Phase 12F: stability.json's 'meets 50-transition requirement' and "
++	"'no leak detected' claims are reproduced by recomputing directly from "
++	"raw_stability_50.jsonl (n_relocations >= 50, vram within 5 MiB of the "
++	"330-decode steady-state baseline)")
++def _c113():
++	st = _load_v12f("stability.json")
++	raw = _load_v12f("raw_stability_50.jsonl")
++	bad = []
++	if not raw:
++		bad.append("raw_stability_50.jsonl empty")
++	else:
++		n_reloc = raw[0].get("n_relocations", 0)
++		if n_reloc < 50:
++			bad.append(f"raw n_relocations={n_reloc} < 50")
++		vram = raw[0].get("vram_used_mib", -1)
++		if abs(vram - 371) > 5:
++			bad.append(f"raw vram_used_mib={vram} deviates from 371 MiB steady-state baseline by more than 5 MiB")
++	if st.get("meets_50_transition_requirement") is not True:
++		bad.append(f"stability.json meets_50_transition_requirement={st.get('meets_50_transition_requirement')!r}, expected True")
++	if st.get("no_leak_detected") is not True:
++		bad.append(f"stability.json no_leak_detected={st.get('no_leak_detected')!r}, expected True")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{raw[0]['n_relocations'] if raw else '?'} relocations, vram stable, both claims reproduced from raw data"
++
++
++@check("Phase 12F: budget_guard.json's fail-closed claim is reproduced by "
++	"recomputing directly from raw_budget_fail_trace.jsonl and "
++	"raw_budget_ok.txt -- the impossible-budget case must be skipped with "
++	"reason=PROMOTION_SKIPPED_BUDGET and the layer must remain CPU-resident, "
++	"while the generous-budget case must actually promote")
++def _c114():
++	bg = _load_v12f("budget_guard.json")
++	fail_trace = _load_v12f("raw_budget_fail_trace.jsonl")
++	ok_stderr = [json.loads(l) for l in _load_v12f("raw_budget_ok.txt").splitlines() if l.strip().startswith("{")]
++	bad = []
++	if not fail_trace or fail_trace[0].get("reason") != "PROMOTION_SKIPPED_BUDGET" or fail_trace[0].get("result") != "skipped":
++		bad.append(f"raw_budget_fail_trace.jsonl does not show a skipped promotion: {fail_trace}")
++	ok_summary = next((l for l in ok_stderr if l.get("mode") == "budget_test"), None)
++	if not ok_summary or ok_summary.get("layer_still_cpu") is not False:
++		bad.append(f"raw_budget_ok.txt does not show the layer leaving CPU residency after a generous-budget promotion: {ok_summary}")
++	if bg.get("fail_closed_verified") is not True:
++		bad.append(f"budget_guard.json fail_closed_verified={bg.get('fail_closed_verified')!r}, expected True")
++	return len(bad) == 0, "; ".join(bad) if bad else "fail-closed skip and generous-budget success both reproduced from raw traces"
++
++
++@check("Phase 12F: determinism.json shows two independent planning runs of "
++	"the same config against the same real model state produced an "
++	"identical decision-trace string, with a non-trivial trace length")
++def _c115():
++	d = _load_v12f("determinism.json")
++	bad = []
++	if d.get("identical") is not True:
++		bad.append(f"identical={d.get('identical')!r}, expected True")
++	if d.get("trace_len", 0) < 20:
++		bad.append(f"trace_len={d.get('trace_len')} suspiciously small for an 8-transition schedule")
++	if d.get("n_decodes") != 15:
++		bad.append(f"n_decodes={d.get('n_decodes')!r}, expected 15 (matching the first-schedule config)")
++	return len(bad) == 0, "; ".join(bad) if bad else f"identical=True, trace_len={d.get('trace_len')}, n_decodes=15"
++
++
++@check("Phase 12F: generality artifacts (q5.json, second_model.json, "
++	"long_context.json, pressure_test.json) all report every transition "
++	"they ran as ok and, where a same-prompt reference exists, matching "
++	"generated tokens")
++def _c116():
++	bad = []
++	q5 = _load_v12f("q5.json")
++	if q5.get("matches_q8_reference") is not True:
++		bad.append(f"q5.json matches_q8_reference={q5.get('matches_q8_reference')!r}")
++	sm = _load_v12f("second_model.json")
++	if sm.get("all_transitions_ok") is not True or sm.get("n_transitions") != 8:
++		bad.append(f"second_model.json all_transitions_ok={sm.get('all_transitions_ok')!r} n_transitions={sm.get('n_transitions')!r}")
++	lc = _load_v12f("long_context.json")
++	if lc.get("all_transitions_ok") is not True or lc.get("matches_ctx2048_reference") is not True:
++		bad.append(f"long_context.json all_transitions_ok={lc.get('all_transitions_ok')!r} matches_ctx2048_reference={lc.get('matches_ctx2048_reference')!r}")
++	pt = _load_v12f("pressure_test.json")
++	dyn = pt.get("dynamic_schedule_result", {})
++	if dyn.get("all_transitions_ok") is not True or pt.get("oom_detected") is not False:
++		bad.append(f"pressure_test.json dynamic_schedule all_transitions_ok={dyn.get('all_transitions_ok')!r} oom_detected={pt.get('oom_detected')!r}")
++	return len(bad) == 0, "; ".join(bad) if bad else "Q5, second model, long context, and pressure-regime runs all report clean transitions"
++
++
++@check("Phase 12F: summary.json's decision_gate is one of the five valid "
++	"values and is internally consistent -- WORKS_BUT_NO_PERF_ADVANTAGE "
++	"requires correctness.json verdict=IDENTICAL and a hotset_sweep.json "
++	"tok/s spread too small to call a real advantage")
++def _c117():
++	s = _load_v12f("summary.json")
++	valid = {
++		"DYNAMIC_KV_TIERING_VIABLE",
++		"WORKS_BUT_NO_PERF_ADVANTAGE",
++		"TOO_SLOW",
++		"BACKEND_LIMITED",
++		"INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the five valid values")
++	if gate == "WORKS_BUT_NO_PERF_ADVANTAGE":
++		c = _load_v12f("correctness.json")
++		if c.get("verdict") != "IDENTICAL":
++			bad.append(f"gate=WORKS_BUT_NO_PERF_ADVANTAGE but correctness.json verdict={c.get('verdict')!r}")
++		hs = _load_v12f("hotset_sweep.json")
++		toks = [r["generation_tok_s"] for r in hs.get("runs", [])]
++		if not toks or (max(toks) - min(toks)) / max(toks) > 0.25:
++			bad.append(f"gate=WORKS_BUT_NO_PERF_ADVANTAGE but hotset tok/s spread is too large to support 'no advantage': {toks}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} valid and consistent with the recorded evidence"
++
++
++@check("Phase 12F: no absolute filesystem paths (/home/..., /tmp/..., "
++	"etc.) leaked in any dynamic-tiering-scheduler .json/.jsonl artifact")
++def _c118():
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	hits = []
++	for path in sorted(V12F_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		found = pattern.findall(path.read_text())
++		found = [h for h in found if not h.startswith("/models/")]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all dynamic-tiering-scheduler artifact files"
++
++
++@check("Phase 12F: no llama.cpp source files were modified by this phase "
++	"-- manifest.json's llama_cpp_verification.dirty_files is recomputed "
++	"as the exact union of files touched by the 4 established patch files "
++	"on disk (read-only), the pinned commit matches the currently checked "
++	"out submodule HEAD, and the live working tree's dirty-file set matches "
++	"both exactly, with no file outside that set touched")
++def _c119():
++	m = _load_v12f("manifest.json")
++	bad = []
++	if m.get("no_llama_cpp_changes") is not True:
++		bad.append(f"manifest.json no_llama_cpp_changes={m.get('no_llama_cpp_changes')!r}, expected True")
++	v = m.get("llama_cpp_verification", {})
++	if v.get("reconstruction_byte_identical") is not True:
++		bad.append(f"llama_cpp_verification.reconstruction_byte_identical={v.get('reconstruction_byte_identical')!r}, expected True")
++	claimed_dirty = set(v.get("dirty_files", []))
++	patch_files = v.get("applied_patches_in_order", [])
++	union_from_patches = set()
++	for rel in patch_files:
++		p = REPO_ROOT / rel
++		if not p.exists():
++			bad.append(f"referenced patch file does not exist: {rel}")
++			continue
++		union_from_patches |= {
++			m2.group(1) for m2 in re.finditer(r"^diff --git a/(\S+) b/\S+$", p.read_text(), re.MULTILINE)
++		}
++	if claimed_dirty != union_from_patches:
++		bad.append(f"manifest dirty_files does not match the union of files touched by the listed patches: manifest={claimed_dirty}, recomputed={union_from_patches}")
++	llama_dir = REPO_ROOT / "third_party" / "llama.cpp"
++	res = subprocess.run(["git", "-C", str(llama_dir), "status", "--short"],
++		capture_output=True, text=True)
++	if res.returncode != 0:
++		bad.append(f"git status failed in third_party/llama.cpp: {res.stderr.strip()}")
++	else:
++		live_dirty = {line[3:].strip() for line in res.stdout.splitlines() if line.strip()}
++		if live_dirty != claimed_dirty:
++			bad.append(f"live submodule dirty-file set does not match manifest's recorded set: live={live_dirty}, manifest={claimed_dirty}")
++	head_res = subprocess.run(["git", "-C", str(llama_dir), "rev-parse", "HEAD"],
++		capture_output=True, text=True)
++	if head_res.returncode != 0 or head_res.stdout.strip() != v.get("pinned_commit"):
++		bad.append(f"submodule HEAD {head_res.stdout.strip()!r} does not match manifest pinned_commit {v.get('pinned_commit')!r}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(claimed_dirty)} dirty files match the patch-file union and the live submodule state exactly, pinned commit confirmed"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -2397,6 +2657,7 @@ def main() -> int:
+ 			_c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83, _c84, _c85, _c86, _c87,
+ 			_c88, _c89, _c90, _c91, _c92, _c93, _c94, _c95, _c96, _c97, _c98, _c99,
+ 			_c100, _c101, _c102, _c103, _c104, _c105, _c106, _c107, _c108, _c109,
++			_c110, _c111, _c112, _c113, _c114, _c115, _c116, _c117, _c118, _c119,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-tiering-scheduler/CMakeLists.txt b/tools/membrane-kv-tiering-scheduler/CMakeLists.txt
+new file mode 100644
+index 0000000..e28fc0e
+--- /dev/null
++++ b/tools/membrane-kv-tiering-scheduler/CMakeLists.txt
+@@ -0,0 +1,11 @@
++# Phase 12F: research-only deterministic KV tiering scheduler probe,
++# built entirely on the Phase 12B-12E primitives (kv_dev_override,
++# relocate_layer, invalidate_graph_cache). No product CLI exposure --
++# experiment/dynamic-kv-tiering-scheduler branch only.
++
++add_executable(membrane-kv-tiering-scheduler-probe tiering_probe.cpp)
++set_target_properties(membrane-kv-tiering-scheduler-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-tiering-scheduler-probe PRIVATE llama
++  membrane_tiering_scheduler_core)
+diff --git a/tools/membrane-kv-tiering-scheduler/scheduler_core.c b/tools/membrane-kv-tiering-scheduler/scheduler_core.c
+new file mode 100644
+index 0000000..62029ca
+--- /dev/null
++++ b/tools/membrane-kv-tiering-scheduler/scheduler_core.c
+@@ -0,0 +1,324 @@
++#include <stddef.h>
++
++#include "scheduler_core.h"
++
++static int	layer_in_array(const int32_t *arr, int32_t n, int32_t layer)
++{
++	int32_t	i;
++
++	i = 0;
++	while (i < n)
++	{
++		if (arr[i] == layer)
++			return (1);
++		i++;
++	}
++	return (0);
++}
++
++static int	group_has_duplicate(const struct s_membrane_tiering_group *g)
++{
++	int32_t	i;
++	int32_t	j;
++
++	i = 0;
++	while (i < g->n_layers)
++	{
++		j = i + 1;
++		while (j < g->n_layers)
++		{
++			if (g->layers[i] == g->layers[j])
++				return (1);
++			j++;
++		}
++		i++;
++	}
++	return (0);
++}
++
++int	membrane_tiering_validate_config(
++		const struct s_membrane_tiering_config *config,
++		int32_t n_total_layers, const char **err_out)
++{
++	int32_t	i;
++	int32_t	j;
++
++	if (config == NULL || n_total_layers <= 0
++			|| n_total_layers > MEMBRANE_TIERING_MAX_LAYERS)
++	{
++		if (err_out)
++			*err_out = "invalid n_total_layers";
++		return (0);
++	}
++	if (config->n_total_layers != n_total_layers)
++	{
++		if (err_out)
++			*err_out = "config.n_total_layers mismatch";
++		return (0);
++	}
++	if (config->n_gpu_layers < 0
++			|| config->n_gpu_layers > MEMBRANE_TIERING_MAX_LAYERS)
++	{
++		if (err_out)
++			*err_out = "n_gpu_layers out of bounds";
++		return (0);
++	}
++	i = 0;
++	while (i < config->n_gpu_layers)
++	{
++		if (config->gpu_layers[i] < 0
++				|| config->gpu_layers[i] >= n_total_layers)
++		{
++			if (err_out)
++				*err_out = "gpu_layers contains an out-of-range layer";
++			return (0);
++		}
++		j = i + 1;
++		while (j < config->n_gpu_layers)
++		{
++			if (config->gpu_layers[i] == config->gpu_layers[j])
++			{
++				if (err_out)
++					*err_out = "gpu_layers contains a duplicate layer";
++				return (0);
++			}
++			j++;
++		}
++		i++;
++	}
++	if (config->n_promotion_groups < 0
++			|| config->n_promotion_groups > MEMBRANE_TIERING_MAX_GROUPS
++			|| config->n_demotion_groups < 0
++			|| config->n_demotion_groups > MEMBRANE_TIERING_MAX_GROUPS)
++	{
++		if (err_out)
++			*err_out = "group count out of bounds";
++		return (0);
++	}
++	i = 0;
++	while (i < config->n_promotion_groups)
++	{
++		const struct s_membrane_tiering_group	*g = &config->promotion_groups[i];
++
++		if (g->n_layers < 0 || g->n_layers > MEMBRANE_TIERING_MAX_GROUP_LAYERS)
++		{
++			if (err_out)
++				*err_out = "promotion group layer count out of bounds";
++			return (0);
++		}
++		if (group_has_duplicate(g))
++		{
++			if (err_out)
++				*err_out = "promotion group contains a duplicate layer";
++			return (0);
++		}
++		j = 0;
++		while (j < g->n_layers)
++		{
++			if (g->layers[j] < 0 || g->layers[j] >= n_total_layers)
++			{
++				if (err_out)
++					*err_out = "promotion group contains an out-of-range layer";
++				return (0);
++			}
++			j++;
++		}
++		i++;
++	}
++	i = 0;
++	while (i < config->n_demotion_groups)
++	{
++		const struct s_membrane_tiering_group	*g = &config->demotion_groups[i];
++
++		if (g->n_layers < 0 || g->n_layers > MEMBRANE_TIERING_MAX_GROUP_LAYERS)
++		{
++			if (err_out)
++				*err_out = "demotion group layer count out of bounds";
++			return (0);
++		}
++		if (group_has_duplicate(g))
++		{
++			if (err_out)
++				*err_out = "demotion group contains a duplicate layer";
++			return (0);
++		}
++		j = 0;
++		while (j < g->n_layers)
++		{
++			if (g->layers[j] < 0 || g->layers[j] >= n_total_layers)
++			{
++				if (err_out)
++					*err_out = "demotion group contains an out-of-range layer";
++				return (0);
++			}
++			j++;
++		}
++		i++;
++	}
++	return (1);
++}
++
++int	membrane_tiering_init(const struct s_membrane_tiering_config *config,
++		int32_t n_total_layers,
++		enum e_membrane_tiering_layer_state *layer_states,
++		enum e_membrane_tiering_sched_state *sched_state)
++{
++	int32_t	i;
++
++	if (!membrane_tiering_validate_config(config, n_total_layers, NULL)
++			|| layer_states == NULL || sched_state == NULL)
++		return (0);
++	i = 0;
++	while (i < n_total_layers)
++	{
++		layer_states[i] = MEMBRANE_TIERING_LAYER_CPU_RESIDENT;
++		i++;
++	}
++	i = 0;
++	while (i < config->n_gpu_layers)
++	{
++		layer_states[config->gpu_layers[i]] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++		i++;
++	}
++	*sched_state = MEMBRANE_TIERING_SCHED_IDLE;
++	return (1);
++}
++
++int32_t	membrane_tiering_plan(const struct s_membrane_tiering_config *config,
++		int32_t decode_idx,
++		const enum e_membrane_tiering_layer_state *layer_states,
++		struct s_membrane_tiering_action_entry *out_actions)
++{
++	int32_t	n_out;
++	int32_t	i;
++	int32_t	j;
++
++	if (config == NULL || layer_states == NULL || out_actions == NULL)
++		return (0);
++	n_out = 0;
++	i = 0;
++	while (i < config->n_promotion_groups)
++	{
++		const struct s_membrane_tiering_group	*g = &config->promotion_groups[i];
++
++		if (g->decode_trigger == decode_idx)
++		{
++			j = 0;
++			while (j < g->n_layers)
++			{
++				int32_t	layer = g->layers[j];
++
++				out_actions[n_out].layer = layer;
++				if (layer_states[layer] == MEMBRANE_TIERING_LAYER_GPU_RESIDENT)
++				{
++					out_actions[n_out].action = MEMBRANE_TIERING_ACTION_NONE;
++					out_actions[n_out].reason = MEMBRANE_TIERING_REASON_ALREADY_RESIDENT;
++				}
++				else
++				{
++					out_actions[n_out].action = MEMBRANE_TIERING_ACTION_PROMOTE;
++					out_actions[n_out].reason = MEMBRANE_TIERING_REASON_SCHEDULED_PROMOTION;
++				}
++				n_out++;
++				j++;
++			}
++		}
++		i++;
++	}
++	i = 0;
++	while (i < config->n_demotion_groups)
++	{
++		const struct s_membrane_tiering_group	*g = &config->demotion_groups[i];
++
++		if (g->decode_trigger == decode_idx)
++		{
++			j = 0;
++			while (j < g->n_layers)
++			{
++				int32_t	layer = g->layers[j];
++
++				out_actions[n_out].layer = layer;
++				if (layer_states[layer] == MEMBRANE_TIERING_LAYER_CPU_RESIDENT)
++				{
++					out_actions[n_out].action = MEMBRANE_TIERING_ACTION_NONE;
++					out_actions[n_out].reason = MEMBRANE_TIERING_REASON_ALREADY_RESIDENT;
++				}
++				else
++				{
++					out_actions[n_out].action = MEMBRANE_TIERING_ACTION_DEMOTE;
++					out_actions[n_out].reason = MEMBRANE_TIERING_REASON_SCHEDULED_DEMOTION;
++				}
++				n_out++;
++				j++;
++			}
++		}
++		i++;
++	}
++	return (n_out);
++}
++
++int	membrane_tiering_budget_ok(uint64_t free_vram_bytes,
++		uint64_t reserve_bytes, uint64_t runtime_margin_bytes,
++		uint64_t promotion_bytes)
++{
++	uint64_t	need;
++	uint64_t	sum;
++
++	need = reserve_bytes;
++	sum = need + promotion_bytes;
++	if (sum < need)
++		return (0);
++	need = sum;
++	sum = need + runtime_margin_bytes;
++	if (sum < need)
++		return (0);
++	return (free_vram_bytes >= sum);
++}
++
++int	membrane_tiering_begin_promote(enum e_membrane_tiering_layer_state *s)
++{
++	if (s == NULL || *s != MEMBRANE_TIERING_LAYER_CPU_RESIDENT)
++		return (0);
++	*s = MEMBRANE_TIERING_LAYER_PROMOTING;
++	return (1);
++}
++
++int	membrane_tiering_commit_promote(enum e_membrane_tiering_layer_state *s)
++{
++	if (s == NULL || *s != MEMBRANE_TIERING_LAYER_PROMOTING)
++		return (0);
++	*s = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++	return (1);
++}
++
++int	membrane_tiering_fail_promote(enum e_membrane_tiering_layer_state *s)
++{
++	if (s == NULL || *s != MEMBRANE_TIERING_LAYER_PROMOTING)
++		return (0);
++	*s = MEMBRANE_TIERING_LAYER_ERROR;
++	return (1);
++}
++
++int	membrane_tiering_begin_demote(enum e_membrane_tiering_layer_state *s)
++{
++	if (s == NULL || *s != MEMBRANE_TIERING_LAYER_GPU_RESIDENT)
++		return (0);
++	*s = MEMBRANE_TIERING_LAYER_DEMOTING;
++	return (1);
++}
++
++int	membrane_tiering_commit_demote(enum e_membrane_tiering_layer_state *s)
++{
++	if (s == NULL || *s != MEMBRANE_TIERING_LAYER_DEMOTING)
++		return (0);
++	*s = MEMBRANE_TIERING_LAYER_CPU_RESIDENT;
++	return (1);
++}
++
++int	membrane_tiering_fail_demote(enum e_membrane_tiering_layer_state *s)
++{
++	if (s == NULL || *s != MEMBRANE_TIERING_LAYER_DEMOTING)
++		return (0);
++	*s = MEMBRANE_TIERING_LAYER_ERROR;
++	return (1);
++}
+diff --git a/tools/membrane-kv-tiering-scheduler/scheduler_core.h b/tools/membrane-kv-tiering-scheduler/scheduler_core.h
+new file mode 100644
+index 0000000..4ec05b5
+--- /dev/null
++++ b/tools/membrane-kv-tiering-scheduler/scheduler_core.h
+@@ -0,0 +1,167 @@
++#ifndef MEMBRANE_KV_TIERING_SCHEDULER_CORE_H
++# define MEMBRANE_KV_TIERING_SCHEDULER_CORE_H
++
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 12F: llama-free (no ggml/llama header) deterministic KV
++ * tiering scheduler CORE -- pure policy/decision logic, no I/O, no
++ * backend calls. A real llama-enabled driver (tiering_probe.cpp)
++ * calls the ALREADY-ESTABLISHED Phase 12B-12E primitives
++ * (llama_kv_cache_relocate_layer, llama_invalidate_graph_cache) to
++ * actually APPLY whatever this module decides. No policy logic lives
++ * inside llama.cpp -- this file is llama.cpp's only "opinion" about
++ * KV placement in this phase.
++ *
++ * Deliberately NOT adaptive: every decision is a pure function of
++ * (config, decode_idx, current per-layer state) -- no attention
++ * scores, no learned hotness, no history beyond the explicit
++ * predeclared config. RESEARCH ONLY, experiment/dynamic-kv-tiering-
++ * scheduler branch only.
++ */
++
++# define MEMBRANE_TIERING_MAX_LAYERS       64
++# define MEMBRANE_TIERING_MAX_GROUPS       8
++# define MEMBRANE_TIERING_MAX_GROUP_LAYERS 16
++
++enum e_membrane_tiering_layer_state
++{
++	MEMBRANE_TIERING_LAYER_CPU_RESIDENT = 0,
++	MEMBRANE_TIERING_LAYER_GPU_RESIDENT,
++	MEMBRANE_TIERING_LAYER_PROMOTING,
++	MEMBRANE_TIERING_LAYER_DEMOTING,
++	MEMBRANE_TIERING_LAYER_ERROR
++};
++
++enum e_membrane_tiering_sched_state
++{
++	MEMBRANE_TIERING_SCHED_IDLE = 0,
++	MEMBRANE_TIERING_SCHED_PLANNING,
++	MEMBRANE_TIERING_SCHED_APPLYING,
++	MEMBRANE_TIERING_SCHED_SYNCING,
++	MEMBRANE_TIERING_SCHED_FAILED
++};
++
++enum e_membrane_tiering_action
++{
++	MEMBRANE_TIERING_ACTION_NONE = 0,
++	MEMBRANE_TIERING_ACTION_PROMOTE,
++	MEMBRANE_TIERING_ACTION_DEMOTE
++};
++
++enum e_membrane_tiering_reason
++{
++	MEMBRANE_TIERING_REASON_SCHEDULED_PROMOTION = 0,
++	MEMBRANE_TIERING_REASON_SCHEDULED_DEMOTION,
++	MEMBRANE_TIERING_REASON_PROMOTION_SKIPPED_BUDGET,
++	MEMBRANE_TIERING_REASON_ALREADY_RESIDENT,
++	MEMBRANE_TIERING_REASON_FAILURE
++};
++
++struct s_membrane_tiering_group
++{
++	int32_t	decode_trigger; /* before_decode (promotion) or after_decode (demotion) */
++	int32_t	layers[MEMBRANE_TIERING_MAX_GROUP_LAYERS];
++	int32_t	n_layers;
++};
++
++struct s_membrane_tiering_config
++{
++	int32_t							n_total_layers;
++	int32_t							gpu_layers[MEMBRANE_TIERING_MAX_LAYERS];
++	int32_t							n_gpu_layers;
++	struct s_membrane_tiering_group	promotion_groups[MEMBRANE_TIERING_MAX_GROUPS];
++	int32_t							n_promotion_groups;
++	struct s_membrane_tiering_group	demotion_groups[MEMBRANE_TIERING_MAX_GROUPS];
++	int32_t							n_demotion_groups;
++};
++
++struct s_membrane_tiering_action_entry
++{
++	int32_t							layer;
++	enum e_membrane_tiering_action	action;
++	enum e_membrane_tiering_reason	reason;
++};
++
++/*
++ * Validates a config against n_total_layers (must match config's own
++ * n_total_layers). Checks: every layer index in gpu_layers and every
++ * group is in [0, n_total_layers); no duplicate layer within a single
++ * group; no duplicate layer within gpu_layers itself; group/array
++ * sizes within the MAX_* bounds. Returns 1 if valid, 0 (with
++ * *err_out set to a short static string, if err_out != NULL)
++ * otherwise. Never mutates config.
++ */
++int	membrane_tiering_validate_config(
++		const struct s_membrane_tiering_config *config,
++		int32_t n_total_layers, const char **err_out);
++
++/*
++ * Resets *state[0..n_total_layers) to CPU_RESIDENT or GPU_RESIDENT
++ * per config->gpu_layers, and *sched_state to IDLE. Returns 1 on
++ * success, 0 (nothing touched) if config is invalid for
++ * n_total_layers or n_total_layers exceeds MEMBRANE_TIERING_MAX_LAYERS.
++ */
++int	membrane_tiering_init(const struct s_membrane_tiering_config *config,
++		int32_t n_total_layers,
++		enum e_membrane_tiering_layer_state *layer_states,
++		enum e_membrane_tiering_sched_state *sched_state);
++
++/*
++ * Pure planning function: given the config, the CURRENT decode index,
++ * and the CURRENT per-layer state array, fills out_actions[] (sized
++ * >= n_total_layers by the caller) with exactly one entry per layer
++ * that has a non-NONE action at this decode boundary, and returns the
++ * count written (may be 0). Does NOT mutate layer_states -- callers
++ * apply the plan and then call membrane_tiering_commit_action per
++ * layer to advance state. Deterministic: identical (config,
++ * decode_idx, layer_states) always produces an identical, identically
++ * ordered action list (groups are scanned in config array order, then
++ * layers within a group in array order).
++ *
++ * A promotion_groups entry with decode_trigger == decode_idx whose
++ * layer is already GPU_RESIDENT yields reason ALREADY_RESIDENT (action
++ * NONE, still recorded so callers can log it) rather than being
++ * silently skipped. Same for demotion of an already-CPU_RESIDENT layer.
++ */
++int32_t	membrane_tiering_plan(const struct s_membrane_tiering_config *config,
++		int32_t decode_idx,
++		const enum e_membrane_tiering_layer_state *layer_states,
++		struct s_membrane_tiering_action_entry *out_actions);
++
++/*
++ * Section 17 budget guard -- identical formula/semantics to Phase
++ * 12C's membrane_kv_promo_headroom_ok (reused deliberately: this is
++ * the same real accounting lesson, not reinvented). Returns 1 (safe
++ * to attempt promotion) or 0 (refuse). Overflow of the RHS sum is
++ * detected and treated as 0 (refuse), never wraps to a false "safe".
++ */
++int	membrane_tiering_budget_ok(uint64_t free_vram_bytes,
++		uint64_t reserve_bytes, uint64_t runtime_margin_bytes,
++		uint64_t promotion_bytes);
++
++/*
++ * Explicit per-layer state transitions (Section 2/19). Returns 1 if
++ * the transition was legal and applied, 0 if illegal from the current
++ * state (state left UNCHANGED on rejection). Mirrors the
++ * CPU_RESIDENT<->PROMOTING<->GPU_RESIDENT<->DEMOTING<->CPU_RESIDENT
++ * cycle from Phase 12C/12D's own state machines, reused here at the
++ * scheduler layer. The only transitions that land in ERROR are
++ * explicit *_fail calls from PROMOTING/DEMOTING.
++ */
++int	membrane_tiering_begin_promote(enum e_membrane_tiering_layer_state *s);
++int	membrane_tiering_commit_promote(enum e_membrane_tiering_layer_state *s);
++int	membrane_tiering_fail_promote(enum e_membrane_tiering_layer_state *s);
++int	membrane_tiering_begin_demote(enum e_membrane_tiering_layer_state *s);
++int	membrane_tiering_commit_demote(enum e_membrane_tiering_layer_state *s);
++int	membrane_tiering_fail_demote(enum e_membrane_tiering_layer_state *s);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-tiering-scheduler/test_scheduler_core.c b/tools/membrane-kv-tiering-scheduler/test_scheduler_core.c
+new file mode 100644
+index 0000000..48f1b86
+--- /dev/null
++++ b/tools/membrane-kv-tiering-scheduler/test_scheduler_core.c
+@@ -0,0 +1,331 @@
++#include "scheduler_core.h"
++#include "test_helpers.h"
++
++static void	make_simple_config(struct s_membrane_tiering_config *c,
++			int32_t n_total_layers)
++{
++	int32_t	i;
++
++	c->n_total_layers = n_total_layers;
++	c->n_gpu_layers = 0;
++	for (i = n_total_layers - 10; i < n_total_layers; i++)
++		c->gpu_layers[c->n_gpu_layers++] = i;
++	c->n_promotion_groups = 1;
++	c->promotion_groups[0].decode_trigger = 5;
++	c->promotion_groups[0].n_layers = 4;
++	c->promotion_groups[0].layers[0] = 16;
++	c->promotion_groups[0].layers[1] = 17;
++	c->promotion_groups[0].layers[2] = 18;
++	c->promotion_groups[0].layers[3] = 19;
++	c->n_demotion_groups = 1;
++	c->demotion_groups[0].decode_trigger = 10;
++	c->demotion_groups[0].n_layers = 4;
++	c->demotion_groups[0].layers[0] = 16;
++	c->demotion_groups[0].layers[1] = 17;
++	c->demotion_groups[0].layers[2] = 18;
++	c->demotion_groups[0].layers[3] = 19;
++}
++
++static void	test_config_validation_accepts_valid(void)
++{
++	struct s_membrane_tiering_config	c;
++	const char							*err = NULL;
++
++	make_simple_config(&c, 30);
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, &err) == 1,
++		"valid config accepted");
++}
++
++static void	test_config_validation_rejects_mismatched_total(void)
++{
++	struct s_membrane_tiering_config	c;
++	const char							*err = NULL;
++
++	make_simple_config(&c, 30);
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 25, &err) == 0,
++		"n_total_layers mismatch rejected");
++	TEST_ASSERT(err != NULL, "error message set on rejection");
++}
++
++static void	test_config_validation_rejects_out_of_range_layer(void)
++{
++	struct s_membrane_tiering_config	c;
++	const char							*err = NULL;
++
++	make_simple_config(&c, 30);
++	c.gpu_layers[0] = 99;
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, &err) == 0,
++		"out-of-range gpu_layers entry rejected");
++}
++
++static void	test_config_validation_rejects_duplicate_in_gpu_layers(void)
++{
++	struct s_membrane_tiering_config	c;
++
++	make_simple_config(&c, 30);
++	c.gpu_layers[1] = c.gpu_layers[0];
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, NULL) == 0,
++		"duplicate layer in gpu_layers rejected");
++}
++
++static void	test_config_validation_rejects_duplicate_in_group(void)
++{
++	struct s_membrane_tiering_config	c;
++
++	make_simple_config(&c, 30);
++	c.promotion_groups[0].layers[1] = c.promotion_groups[0].layers[0];
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, NULL) == 0,
++		"duplicate layer within one promotion group rejected");
++}
++
++static void	test_config_validation_accepts_empty_schedule(void)
++{
++	struct s_membrane_tiering_config	c;
++
++	make_simple_config(&c, 30);
++	c.n_promotion_groups = 0;
++	c.n_demotion_groups = 0;
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, NULL) == 1,
++		"config with no promotion/demotion groups (empty schedule) is valid");
++}
++
++static void	test_config_validation_accepts_full_gpu(void)
++{
++	struct s_membrane_tiering_config	c;
++	int32_t								i;
++
++	make_simple_config(&c, 30);
++	c.n_gpu_layers = 30;
++	for (i = 0; i < 30; i++)
++		c.gpu_layers[i] = i;
++	c.n_promotion_groups = 0;
++	c.n_demotion_groups = 0;
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, NULL) == 1,
++		"all-GPU config is valid");
++}
++
++static void	test_config_validation_accepts_full_cpu(void)
++{
++	struct s_membrane_tiering_config	c;
++
++	make_simple_config(&c, 30);
++	c.n_gpu_layers = 0;
++	c.n_promotion_groups = 0;
++	c.n_demotion_groups = 0;
++	TEST_ASSERT(membrane_tiering_validate_config(&c, 30, NULL) == 1,
++		"all-CPU config (n_gpu_layers == 0) is valid");
++}
++
++static void	test_init_sets_correct_initial_states(void)
++{
++	struct s_membrane_tiering_config		c;
++	enum e_membrane_tiering_layer_state	states[30];
++	enum e_membrane_tiering_sched_state	sched;
++
++	make_simple_config(&c, 30);
++	TEST_ASSERT(membrane_tiering_init(&c, 30, states, &sched) == 1,
++		"init succeeds on valid config");
++	TEST_ASSERT(sched == MEMBRANE_TIERING_SCHED_IDLE, "scheduler starts IDLE");
++	TEST_ASSERT(states[0] == MEMBRANE_TIERING_LAYER_CPU_RESIDENT,
++		"layer 0 starts CPU_RESIDENT");
++	TEST_ASSERT(states[20] == MEMBRANE_TIERING_LAYER_GPU_RESIDENT,
++		"layer 20 (in gpu_layers) starts GPU_RESIDENT");
++	TEST_ASSERT(states[29] == MEMBRANE_TIERING_LAYER_GPU_RESIDENT,
++		"layer 29 (in gpu_layers) starts GPU_RESIDENT");
++}
++
++static void	test_plan_is_empty_off_trigger_decodes(void)
++{
++	struct s_membrane_tiering_config		c;
++	enum e_membrane_tiering_layer_state	states[30];
++	enum e_membrane_tiering_sched_state	sched;
++	struct s_membrane_tiering_action_entry	actions[30];
++
++	make_simple_config(&c, 30);
++	membrane_tiering_init(&c, 30, states, &sched);
++	TEST_ASSERT(membrane_tiering_plan(&c, 0, states, actions) == 0,
++		"no actions planned at decode 0 (not a trigger)");
++	TEST_ASSERT(membrane_tiering_plan(&c, 4, states, actions) == 0,
++		"no actions planned at decode 4 (not a trigger)");
++}
++
++static void	test_plan_promotion_at_trigger_deterministic_order(void)
++{
++	struct s_membrane_tiering_config		c;
++	enum e_membrane_tiering_layer_state	states[30];
++	enum e_membrane_tiering_sched_state	sched;
++	struct s_membrane_tiering_action_entry	actions[30];
++	int32_t									n;
++
++	make_simple_config(&c, 30);
++	membrane_tiering_init(&c, 30, states, &sched);
++	n = membrane_tiering_plan(&c, 5, states, actions);
++	TEST_ASSERT(n == 4, "4 promotion actions planned at decode 5");
++	TEST_ASSERT(actions[0].layer == 16 && actions[1].layer == 17
++		&& actions[2].layer == 18 && actions[3].layer == 19,
++		"promotion actions are in config array order (deterministic)");
++	TEST_ASSERT(actions[0].action == MEMBRANE_TIERING_ACTION_PROMOTE,
++		"action is PROMOTE");
++	TEST_ASSERT(actions[0].reason == MEMBRANE_TIERING_REASON_SCHEDULED_PROMOTION,
++		"reason is SCHEDULED_PROMOTION");
++}
++
++static void	test_plan_already_resident_promotion_is_noted_not_skipped_silently(void)
++{
++	struct s_membrane_tiering_config		c;
++	enum e_membrane_tiering_layer_state	states[30];
++	enum e_membrane_tiering_sched_state	sched;
++	struct s_membrane_tiering_action_entry	actions[30];
++	int32_t									n;
++
++	make_simple_config(&c, 30);
++	membrane_tiering_init(&c, 30, states, &sched);
++	states[16] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++	n = membrane_tiering_plan(&c, 5, states, actions);
++	TEST_ASSERT(n == 4, "still 4 entries -- already-resident layers are recorded, not omitted");
++	TEST_ASSERT(actions[0].layer == 16 && actions[0].action == MEMBRANE_TIERING_ACTION_NONE
++		&& actions[0].reason == MEMBRANE_TIERING_REASON_ALREADY_RESIDENT,
++		"layer 16 (already GPU) gets action NONE / reason ALREADY_RESIDENT");
++	TEST_ASSERT(actions[1].action == MEMBRANE_TIERING_ACTION_PROMOTE,
++		"layer 17 (still CPU) still gets a real PROMOTE action");
++}
++
++static void	test_plan_demotion_at_trigger(void)
++{
++	struct s_membrane_tiering_config		c;
++	enum e_membrane_tiering_layer_state	states[30];
++	enum e_membrane_tiering_sched_state	sched;
++	struct s_membrane_tiering_action_entry	actions[30];
++	int32_t									n;
++
++	make_simple_config(&c, 30);
++	membrane_tiering_init(&c, 30, states, &sched);
++	states[16] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++	states[17] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++	states[18] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++	states[19] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++	n = membrane_tiering_plan(&c, 10, states, actions);
++	TEST_ASSERT(n == 4, "4 demotion actions planned at decode 10");
++	TEST_ASSERT(actions[0].action == MEMBRANE_TIERING_ACTION_DEMOTE
++		&& actions[0].reason == MEMBRANE_TIERING_REASON_SCHEDULED_DEMOTION,
++		"demote action + reason correct");
++}
++
++static void	test_plan_determinism_repeated_calls(void)
++{
++	struct s_membrane_tiering_config		c;
++	enum e_membrane_tiering_layer_state	states[30];
++	enum e_membrane_tiering_sched_state	sched;
++	struct s_membrane_tiering_action_entry	a1[30];
++	struct s_membrane_tiering_action_entry	a2[30];
++	int32_t									n1;
++	int32_t									n2;
++	int32_t									i;
++
++	make_simple_config(&c, 30);
++	membrane_tiering_init(&c, 30, states, &sched);
++	n1 = membrane_tiering_plan(&c, 5, states, a1);
++	n2 = membrane_tiering_plan(&c, 5, states, a2);
++	TEST_ASSERT(n1 == n2, "same decode_idx + state -> same action count");
++	i = 0;
++	while (i < n1)
++	{
++		TEST_ASSERT(a1[i].layer == a2[i].layer
++			&& a1[i].action == a2[i].action
++			&& a1[i].reason == a2[i].reason,
++			"identical action entries in identical order across repeated calls");
++		i++;
++	}
++}
++
++static void	test_budget_ok_boundary(void)
++{
++	TEST_ASSERT(membrane_tiering_budget_ok(1000, 100, 100, 800) == 1,
++		"free == exact required sum -> safe (boundary inclusive)");
++	TEST_ASSERT(membrane_tiering_budget_ok(999, 100, 100, 800) == 0,
++		"one byte short -> refuse");
++}
++
++static void	test_budget_overflow_fails_closed(void)
++{
++	uint64_t	huge = (uint64_t)-1;
++
++	TEST_ASSERT(membrane_tiering_budget_ok(huge, huge, huge, huge) == 0,
++		"RHS overflow refused, never wraps to a false safe");
++}
++
++static void	test_layer_state_full_promote_cycle(void)
++{
++	enum e_membrane_tiering_layer_state	s = MEMBRANE_TIERING_LAYER_CPU_RESIDENT;
++
++	TEST_ASSERT(membrane_tiering_begin_promote(&s) == 1, "begin_promote legal from CPU_RESIDENT");
++	TEST_ASSERT(s == MEMBRANE_TIERING_LAYER_PROMOTING, "now PROMOTING");
++	TEST_ASSERT(membrane_tiering_commit_promote(&s) == 1, "commit_promote legal from PROMOTING");
++	TEST_ASSERT(s == MEMBRANE_TIERING_LAYER_GPU_RESIDENT, "now GPU_RESIDENT");
++}
++
++static void	test_layer_state_full_demote_cycle(void)
++{
++	enum e_membrane_tiering_layer_state	s = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++
++	TEST_ASSERT(membrane_tiering_begin_demote(&s) == 1, "begin_demote legal from GPU_RESIDENT");
++	TEST_ASSERT(membrane_tiering_commit_demote(&s) == 1, "commit_demote legal from DEMOTING");
++	TEST_ASSERT(s == MEMBRANE_TIERING_LAYER_CPU_RESIDENT, "back to CPU_RESIDENT");
++}
++
++static void	test_layer_state_rollback_on_promote_failure(void)
++{
++	enum e_membrane_tiering_layer_state	s = MEMBRANE_TIERING_LAYER_CPU_RESIDENT;
++
++	membrane_tiering_begin_promote(&s);
++	TEST_ASSERT(membrane_tiering_fail_promote(&s) == 1, "fail_promote legal from PROMOTING");
++	TEST_ASSERT(s == MEMBRANE_TIERING_LAYER_ERROR, "lands in ERROR, not silently CPU_RESIDENT again");
++}
++
++static void	test_layer_state_duplicate_actions_rejected(void)
++{
++	enum e_membrane_tiering_layer_state	s = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++
++	TEST_ASSERT(membrane_tiering_begin_promote(&s) == 0,
++		"promoting an already-GPU_RESIDENT layer is illegal");
++	TEST_ASSERT(s == MEMBRANE_TIERING_LAYER_GPU_RESIDENT,
++		"rejected transition leaves state unchanged");
++}
++
++static void	test_layer_state_error_is_terminal(void)
++{
++	enum e_membrane_tiering_layer_state	s = MEMBRANE_TIERING_LAYER_CPU_RESIDENT;
++
++	membrane_tiering_begin_promote(&s);
++	membrane_tiering_fail_promote(&s);
++	TEST_ASSERT(membrane_tiering_begin_promote(&s) == 0, "no transition accepted from ERROR");
++	TEST_ASSERT(membrane_tiering_begin_demote(&s) == 0, "no transition accepted from ERROR");
++	TEST_ASSERT(s == MEMBRANE_TIERING_LAYER_ERROR, "stays ERROR");
++}
++
++int	main(void)
++{
++	test_config_validation_accepts_valid();
++	test_config_validation_rejects_mismatched_total();
++	test_config_validation_rejects_out_of_range_layer();
++	test_config_validation_rejects_duplicate_in_gpu_layers();
++	test_config_validation_rejects_duplicate_in_group();
++	test_config_validation_accepts_empty_schedule();
++	test_config_validation_accepts_full_gpu();
++	test_config_validation_accepts_full_cpu();
++	test_init_sets_correct_initial_states();
++	test_plan_is_empty_off_trigger_decodes();
++	test_plan_promotion_at_trigger_deterministic_order();
++	test_plan_already_resident_promotion_is_noted_not_skipped_silently();
++	test_plan_demotion_at_trigger();
++	test_plan_determinism_repeated_calls();
++	test_budget_ok_boundary();
++	test_budget_overflow_fails_closed();
++	test_layer_state_full_promote_cycle();
++	test_layer_state_full_demote_cycle();
++	test_layer_state_rollback_on_promote_failure();
++	test_layer_state_duplicate_actions_rejected();
++	test_layer_state_error_is_terminal();
++	printf("test_scheduler_core: all tests passed\n");
++	return (0);
++}
+diff --git a/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp b/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp
+new file mode 100644
+index 0000000..a39c9f5
+--- /dev/null
++++ b/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp
+@@ -0,0 +1,814 @@
++/*
++ * Phase 12F: real llama-enabled deterministic KV tiering scheduler
++ * driver. Calls the ALREADY-ESTABLISHED Phase 12B-12E primitives
++ * (kv_dev_override at construction, llama_kv_cache_relocate_layer,
++ * llama_invalidate_graph_cache) to APPLY decisions computed by the
++ * llama-free scheduler_core module -- no policy logic here duplicates
++ * scheduler_core's; this file is plumbing + measurement only.
++ * RESEARCH ONLY, experiment/dynamic-kv-tiering-scheduler branch only.
++ *
++ * Modes (all need a real model, mp.n_gpu_layers=-1, weights always
++ * fully GPU-resident, kv_dev_override sets INITIAL KV split only):
++ *   schedule_demo  MODEL n_ctx kv_type n_decodes
++ *                  (Section 6/26: the first end-to-end schedule, full
++ *                  decision trace + VRAM time series)
++ *   hotset         MODEL n_ctx kv_type gpu_split n_decodes
++ *                  (Section 13: static hot-set sweep, no movement)
++ *   promo_group    MODEL n_ctx kv_type gpu_split group_size n_decodes
++ *                  (Section 14: one promote+demote of a fixed-size
++ *                  group mid-run, latency + VRAM delta)
++ *   budget_test    MODEL n_ctx kv_type reserve_mib margin_mib
++ *                  (Section 17/18: budget guard, forced skip when
++ *                  reserve/margin make the promotion look unsafe)
++ *   determinism    MODEL n_ctx kv_type n_decodes
++ *                  (Section 28: run schedule_demo's plan twice against
++ *                  a real model's real layer states, compare)
++ */
++#include <algorithm>
++#include <chrono>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <string>
++#include <vector>
++
++#include "ggml-backend.h"
++#include "llama.h"
++#include "scheduler_core.h"
++
++/* ---------- shared plumbing (mirrors relocate_probe.cpp) ---------- */
++
++struct capture_ctx_t
++{
++	int32_t						n_layer;
++	std::vector<ggml_tensor *>	k_leaf;
++	std::vector<ggml_tensor *>	v_leaf;
++};
++
++static bool	layer_from_name(const char *name, const char *prefix, int32_t *out)
++{
++	size_t	plen = strlen(prefix);
++	char	*end;
++	long	v;
++
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer < c->n_layer)
++		c->k_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer < c->n_layer)
++		c->v_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++struct split_ctx_t
++{
++	int32_t	split; /* [0, split) -> CPU KV, [split, n_layer) -> GPU KV */
++};
++
++static ggml_backend_dev_t	split_kv_dev_override(int32_t il,
++				ggml_backend_dev_t default_dev, void *ud)
++{
++	split_ctx_t	*s = static_cast<split_ctx_t *>(ud);
++
++	if (il < s->split)
++		return (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++	return (default_dev);
++}
++
++static uint64_t	read_rss_kb(void)
++{
++	std::ifstream	f("/proc/self/status");
++	std::string		line;
++
++	while (std::getline(f, line))
++		if (line.compare(0, 6, "VmRSS:") == 0)
++			return ((uint64_t)strtoull(line.c_str() + 6, nullptr, 10));
++	return (0);
++}
++
++static long	nvidia_smi_used_mib(void)
++{
++	FILE	*p = popen(
++		"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null",
++		"r");
++	char	buf[64];
++	long	v = -1;
++
++	if (p == nullptr)
++		return (-1);
++	if (fgets(buf, sizeof(buf), p) != nullptr)
++		v = strtol(buf, nullptr, 10);
++	pclose(p);
++	return (v);
++}
++
++static long	nvidia_smi_total_mib(void)
++{
++	FILE	*p = popen(
++		"nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null",
++		"r");
++	char	buf[64];
++	long	v = -1;
++
++	if (p == nullptr)
++		return (-1);
++	if (fgets(buf, sizeof(buf), p) != nullptr)
++		v = strtol(buf, nullptr, 10);
++	pclose(p);
++	return (v);
++}
++
++static double	now_ms(void)
++{
++	auto	t = std::chrono::steady_clock::now();
++
++	return (std::chrono::duration<double, std::milli>(
++		t.time_since_epoch()).count());
++}
++
++static const char	*kv_type_name(const char *s)
++{
++	if (strcmp(s, "q8") == 0)
++		return ("Q8_0");
++	if (strcmp(s, "q5") == 0)
++		return ("Q5_1");
++	return ("F16");
++}
++
++struct loaded_t
++{
++	llama_model			*model;
++	llama_context		*ctx;
++	llama_memory_t		mem;
++	capture_ctx_t		cap;
++	int32_t				n_layer;
++	const llama_vocab	*vocab;
++};
++
++static bool	load_ctx(const char *model_path, int32_t n_ctx,
++			const char *kv_type_str, int32_t split, loaded_t *out)
++{
++	llama_model_params	mp = llama_model_default_params();
++
++	mp.n_gpu_layers = -1;
++	out->model = llama_model_load_from_file(model_path, mp);
++	if (out->model == nullptr)
++		return (false);
++	out->n_layer = llama_model_n_layer(out->model);
++	out->vocab = llama_model_get_vocab(out->model);
++	out->cap.n_layer = out->n_layer;
++	out->cap.k_leaf.assign(out->n_layer, nullptr);
++	out->cap.v_leaf.assign(out->n_layer, nullptr);
++
++	static split_ctx_t	split_ctx;
++	split_ctx.split = split;
++
++	ggml_type	kvt = strcmp(kv_type_str, "q8") == 0 ? GGML_TYPE_Q8_0
++		: strcmp(kv_type_str, "q5") == 0 ? GGML_TYPE_Q5_1 : GGML_TYPE_F16;
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.type_k = kvt;
++	cp.type_v = kvt;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &out->cap;
++	if (split >= 0)
++	{
++		cp.kv_dev_override = split_kv_dev_override;
++		cp.kv_dev_override_ud = &split_ctx;
++	}
++	out->ctx = llama_init_from_model(out->model, cp);
++	if (out->ctx == nullptr)
++		return (false);
++	out->mem = llama_get_memory(out->ctx);
++	return (true);
++}
++
++static void	free_loaded(loaded_t *l)
++{
++	if (l->ctx)
++		llama_free(l->ctx);
++	if (l->model)
++		llama_model_free(l->model);
++	l->ctx = nullptr;
++	l->model = nullptr;
++}
++
++static bool	decode_prompt(loaded_t *l, const char *prompt)
++{
++	std::vector<llama_token>	tokens(256);
++	int	n = llama_tokenize(l->vocab, prompt, (int32_t)strlen(prompt),
++			tokens.data(), (int32_t)tokens.size(), true, false);
++
++	if (n < 0)
++		return (false);
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	return (llama_decode(l->ctx, batch) == 0);
++}
++
++static bool	decode_one_greedy(loaded_t *l, llama_token *out_tok)
++{
++	int32_t	n_vocab = llama_vocab_n_tokens(l->vocab);
++	const float	*logits = llama_get_logits_ith(l->ctx, -1);
++	int	best = 0;
++
++	for (int j = 1; j < n_vocab; j++)
++		if (logits[j] > logits[best])
++			best = j;
++	*out_tok = (llama_token)best;
++	llama_batch	b1 = llama_batch_get_one(out_tok, 1);
++	return (llama_decode(l->ctx, b1) == 0);
++}
++
++static bool	layer_is_cpu_now(loaded_t *l, int32_t layer)
++{
++	ggml_tensor	*k = l->cap.k_leaf[layer];
++
++	return (k && strstr(ggml_backend_buffer_name(k->buffer), "CPU") != nullptr);
++}
++
++static uint64_t	layer_kv_bytes(loaded_t *l, int32_t layer)
++{
++	ggml_tensor	*k = l->cap.k_leaf[layer];
++	ggml_tensor	*v = l->cap.v_leaf[layer];
++	uint64_t	kb = k ? ggml_nbytes(k) : 0;
++	uint64_t	vb = v ? ggml_nbytes(v) : 0;
++
++	return (kb + vb);
++}
++
++static const char	*reason_name(enum e_membrane_tiering_reason r)
++{
++	switch (r)
++	{
++	case MEMBRANE_TIERING_REASON_SCHEDULED_PROMOTION:
++		return ("SCHEDULED_PROMOTION");
++	case MEMBRANE_TIERING_REASON_SCHEDULED_DEMOTION:
++		return ("SCHEDULED_DEMOTION");
++	case MEMBRANE_TIERING_REASON_PROMOTION_SKIPPED_BUDGET:
++		return ("PROMOTION_SKIPPED_BUDGET");
++	case MEMBRANE_TIERING_REASON_ALREADY_RESIDENT:
++		return ("ALREADY_RESIDENT");
++	case MEMBRANE_TIERING_REASON_FAILURE:
++	default:
++		return ("FAILURE");
++	}
++}
++
++/* Applies one planned action for one layer against the real context,
++ * using ONLY the established Phase 12B-12E primitives:
++ * relocate_layer() (retain=false, defer=false -- the validated
++ * IMMEDIATE-retirement path from Phase 12E) followed by
++ * llama_invalidate_graph_cache(). Emits one decision-trace line. */
++static bool	apply_action(loaded_t *l, int32_t decode_idx,
++			const struct s_membrane_tiering_action_entry *a,
++			uint64_t reserve_mib, uint64_t margin_mib, FILE *trace_fp)
++{
++	if (a->action == MEMBRANE_TIERING_ACTION_NONE)
++	{
++		fprintf(trace_fp, "{\"decode_idx\":%d,\"layer\":%d,\"action\":\"NONE\","
++			"\"reason\":\"%s\",\"bytes\":0,\"before_device\":\"%s\","
++			"\"after_device\":\"%s\",\"duration_us\":0,\"result\":\"ok\"}\n",
++			decode_idx, a->layer, reason_name(a->reason),
++			layer_is_cpu_now(l, a->layer) ? "CPU" : "GPU",
++			layer_is_cpu_now(l, a->layer) ? "CPU" : "GPU");
++		return (true);
++	}
++
++	const char	*before_device = layer_is_cpu_now(l, a->layer) ? "CPU" : "GPU";
++	uint64_t	bytes = layer_kv_bytes(l, a->layer);
++
++	if (a->action == MEMBRANE_TIERING_ACTION_PROMOTE)
++	{
++		long	total = nvidia_smi_total_mib();
++		long	used = nvidia_smi_used_mib();
++		uint64_t	free_bytes = (total > 0 && used >= 0 && total > used)
++			? (uint64_t)(total - used) * 1024ULL * 1024ULL : 0;
++
++		if (!membrane_tiering_budget_ok(free_bytes, reserve_mib * 1024ULL * 1024ULL,
++				margin_mib * 1024ULL * 1024ULL, bytes))
++		{
++			fprintf(trace_fp, "{\"decode_idx\":%d,\"layer\":%d,\"action\":\"PROMOTE\","
++				"\"reason\":\"PROMOTION_SKIPPED_BUDGET\",\"bytes\":%llu,"
++				"\"before_device\":\"%s\",\"after_device\":\"%s\","
++				"\"duration_us\":0,\"result\":\"skipped\"}\n",
++				decode_idx, a->layer, (unsigned long long)bytes,
++				before_device, before_device);
++			return (true);
++		}
++	}
++
++	ggml_backend_dev_t	dst = (a->action == MEMBRANE_TIERING_ACTION_PROMOTE)
++		? ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)
++		: ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	if (!dst)
++	{
++		fprintf(trace_fp, "{\"decode_idx\":%d,\"layer\":%d,\"action\":\"%s\","
++			"\"reason\":\"FAILURE\",\"bytes\":%llu,\"before_device\":\"%s\","
++			"\"after_device\":\"%s\",\"duration_us\":0,\"result\":\"backend_unavailable\"}\n",
++			decode_idx, a->layer,
++			a->action == MEMBRANE_TIERING_ACTION_PROMOTE ? "PROMOTE" : "DEMOTE",
++			(unsigned long long)bytes, before_device, before_device);
++		return (false);
++	}
++
++	double	t0 = now_ms();
++	llama_synchronize(l->ctx);
++	bool	ok = llama_kv_cache_relocate_layer(l->mem, a->layer, dst);
++	if (ok)
++		llama_invalidate_graph_cache(l->ctx);
++	double	t1 = now_ms();
++
++	const char	*after_device = ok
++		? (a->action == MEMBRANE_TIERING_ACTION_PROMOTE ? "GPU" : "CPU")
++		: before_device;
++
++	fprintf(trace_fp, "{\"decode_idx\":%d,\"layer\":%d,\"action\":\"%s\","
++		"\"reason\":\"%s\",\"bytes\":%llu,\"before_device\":\"%s\","
++		"\"after_device\":\"%s\",\"duration_us\":%.1f,\"result\":\"%s\"}\n",
++		decode_idx, a->layer,
++		a->action == MEMBRANE_TIERING_ACTION_PROMOTE ? "PROMOTE" : "DEMOTE",
++		reason_name(a->reason), (unsigned long long)bytes,
++		before_device, after_device, (t1 - t0) * 1000.0,
++		ok ? "ok" : "failure");
++	return (ok);
++}
++
++/* ---------- mode: schedule_demo ---------- */
++
++static int	cmd_schedule_demo(const char *model, int32_t n_ctx, const char *kvt,
++				int n_decodes)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, 20, &l)) /* [0,20) CPU, [20,n) GPU */
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	if (!ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU))
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	struct s_membrane_tiering_config	config = {};
++	config.n_total_layers = l.n_layer;
++	config.n_gpu_layers = 0;
++	for (int32_t i = 20; i < l.n_layer && i < 30; i++)
++		config.gpu_layers[config.n_gpu_layers++] = i;
++	config.n_promotion_groups = 1;
++	config.promotion_groups[0].decode_trigger = 5;
++	config.promotion_groups[0].n_layers = 4;
++	config.promotion_groups[0].layers[0] = 16;
++	config.promotion_groups[0].layers[1] = 17;
++	config.promotion_groups[0].layers[2] = 18;
++	config.promotion_groups[0].layers[3] = 19;
++	config.n_demotion_groups = 1;
++	config.demotion_groups[0].decode_trigger = 10;
++	config.demotion_groups[0].n_layers = 4;
++	config.demotion_groups[0].layers[0] = 16;
++	config.demotion_groups[0].layers[1] = 17;
++	config.demotion_groups[0].layers[2] = 18;
++	config.demotion_groups[0].layers[3] = 19;
++
++	const char	*err = nullptr;
++	if (!membrane_tiering_validate_config(&config, l.n_layer, &err))
++	{
++		fprintf(stderr, "{\"error\":\"invalid_config\",\"detail\":\"%s\"}\n",
++			err ? err : "unknown");
++		free_loaded(&l);
++		return (21);
++	}
++
++	std::vector<enum e_membrane_tiering_layer_state>	states(l.n_layer);
++	enum e_membrane_tiering_sched_state				sched;
++	membrane_tiering_init(&config, l.n_layer, states.data(), &sched);
++
++	FILE	*trace_fp = stdout;
++	std::vector<llama_token>	gen;
++	fprintf(stderr, "{\"schema_version\":1,\"mode\":\"schedule_demo\",\"n_layer\":%d}\n",
++		l.n_layer);
++	for (int decode_idx = 0; decode_idx < n_decodes; decode_idx++)
++	{
++		std::vector<struct s_membrane_tiering_action_entry>	actions(l.n_layer);
++		int32_t	n = membrane_tiering_plan(&config, decode_idx, states.data(),
++				actions.data());
++		for (int32_t i = 0; i < n; i++)
++		{
++			bool	ok = apply_action(&l, decode_idx, &actions[i], 64, 32, trace_fp);
++			if (actions[i].action == MEMBRANE_TIERING_ACTION_PROMOTE)
++			{
++				if (ok)
++				{
++					membrane_tiering_begin_promote(&states[actions[i].layer]);
++					membrane_tiering_commit_promote(&states[actions[i].layer]);
++				}
++			}
++			else if (actions[i].action == MEMBRANE_TIERING_ACTION_DEMOTE)
++			{
++				if (ok)
++				{
++					membrane_tiering_begin_demote(&states[actions[i].layer]);
++					membrane_tiering_commit_demote(&states[actions[i].layer]);
++				}
++			}
++		}
++		llama_token	tok;
++		bool	decode_ok = decode_one_greedy(&l, &tok);
++		if (!decode_ok)
++		{
++			fprintf(stderr, "{\"error\":\"decode_failed\",\"decode_idx\":%d}\n", decode_idx);
++			free_loaded(&l);
++			return (13);
++		}
++		gen.push_back(tok);
++		fprintf(stderr, "{\"vram_step\":%d,\"decode_idx\":%d,\"vram_used_mib\":%ld,"
++			"\"rss_kb\":%llu}\n",
++			decode_idx, decode_idx, nvidia_smi_used_mib(),
++			(unsigned long long)read_rss_kb());
++	}
++
++	fprintf(stderr, "{\"generated_tokens\":[");
++	for (size_t i = 0; i < gen.size(); i++)
++		fprintf(stderr, "%s%d", i == 0 ? "" : ",", gen[i]);
++	fprintf(stderr, "]}\n");
++
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: hotset (Section 13: static split, no movement) ---------- */
++
++static int	cmd_hotset(const char *model, int32_t n_ctx, const char *kvt,
++				int32_t split, int n_decodes)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	double	t0 = now_ms();
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	double	t1 = now_ms();
++
++	uint64_t	gpu_kv_bytes = 0, cpu_kv_bytes = 0;
++	for (int32_t i = 0; i < l.n_layer; i++)
++	{
++		uint64_t	b = layer_kv_bytes(&l, i);
++		if (layer_is_cpu_now(&l, i))
++			cpu_kv_bytes += b;
++		else
++			gpu_kv_bytes += b;
++	}
++
++	std::vector<llama_token>	gen;
++	double	t2 = now_ms();
++	for (int i = 0; i < n_decodes; i++)
++	{
++		llama_token	tok;
++		if (!decode_one_greedy(&l, &tok))
++		{
++			fprintf(stderr, "{\"error\":\"decode_failed\"}\n");
++			free_loaded(&l);
++			return (13);
++		}
++		gen.push_back(tok);
++	}
++	double	t3 = now_ms();
++
++	printf("{\"schema_version\":1,\"mode\":\"hotset\",\"split\":%d,"
++		"\"n_gpu_kv_layers\":%d,\"n_cpu_kv_layers\":%d,"
++		"\"gpu_kv_bytes\":%llu,\"cpu_kv_bytes\":%llu,"
++		"\"prompt_ms\":%.3f,\"n_decodes\":%d,\"decode_total_ms\":%.3f,"
++		"\"generation_tok_s\":%.4f,\"vram_used_mib\":%ld,\"rss_kb\":%llu,"
++		"\"generated_tokens\":[",
++		split, l.n_layer - split, split,
++		(unsigned long long)gpu_kv_bytes, (unsigned long long)cpu_kv_bytes,
++		t1 - t0, n_decodes, t3 - t2,
++		(double)n_decodes / ((t3 - t2) / 1000.0),
++		nvidia_smi_used_mib(), (unsigned long long)read_rss_kb());
++	for (size_t i = 0; i < gen.size(); i++)
++		printf("%s%d", i == 0 ? "" : ",", gen[i]);
++	printf("]}\n");
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: promo_group (Section 14) ---------- */
++
++static int	cmd_promo_group(const char *model, int32_t n_ctx, const char *kvt,
++				int32_t split, int group_size, int n_decodes)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++	if (!ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU))
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	std::vector<int32_t>	layers;
++	for (int i = 0; i < group_size && i < split; i++)
++		layers.push_back(i);
++
++	for (int i = 0; i < n_decodes / 2; i++)
++	{
++		llama_token	tok;
++		decode_one_greedy(&l, &tok);
++	}
++
++	long	vram_before = nvidia_smi_used_mib();
++	double	t0 = now_ms();
++	for (int32_t layer : layers)
++	{
++		llama_synchronize(l.ctx);
++		llama_kv_cache_relocate_layer(l.mem, layer,
++			ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU));
++	}
++	llama_invalidate_graph_cache(l.ctx);
++	double	t1 = now_ms();
++	long	vram_after_promote = nvidia_smi_used_mib();
++
++	llama_token	tok;
++	decode_one_greedy(&l, &tok);
++
++	double	t2 = now_ms();
++	for (int32_t layer : layers)
++	{
++		llama_synchronize(l.ctx);
++		llama_kv_cache_relocate_layer(l.mem, layer,
++			ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++	}
++	llama_invalidate_graph_cache(l.ctx);
++	double	t3 = now_ms();
++	long	vram_after_demote = nvidia_smi_used_mib();
++
++	decode_one_greedy(&l, &tok);
++
++	printf("{\"schema_version\":1,\"mode\":\"promo_group\",\"group_size\":%d,"
++		"\"promotion_ms\":%.3f,\"demotion_ms\":%.3f,"
++		"\"vram_before_mib\":%ld,\"vram_after_promote_mib\":%ld,"
++		"\"vram_after_demote_mib\":%ld,\"vram_delta_promote_mib\":%ld,"
++		"\"vram_reclaimed_mib\":%ld}\n",
++		group_size, t1 - t0, t3 - t2, vram_before, vram_after_promote,
++		vram_after_demote, vram_after_promote - vram_before,
++		vram_after_promote - vram_after_demote);
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: budget_test (Section 17/18) ---------- */
++
++static int	cmd_budget_test(const char *model, int32_t n_ctx, const char *kvt,
++				uint64_t reserve_mib, uint64_t margin_mib)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, 20, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++	if (!ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU))
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	struct s_membrane_tiering_action_entry	a;
++	a.layer = 0;
++	a.action = MEMBRANE_TIERING_ACTION_PROMOTE;
++	a.reason = MEMBRANE_TIERING_REASON_SCHEDULED_PROMOTION;
++
++	long	before = nvidia_smi_used_mib();
++	bool	ok = apply_action(&l, 0, &a, reserve_mib, margin_mib, stdout);
++	long	after = nvidia_smi_used_mib();
++	/* cb_eval capture only refreshes on a decode; run one so
++	 * layer_is_cpu_now reflects the post-relocate state rather than a
++	 * stale pointer from before the relocate (see Phase 12D/12E notes
++	 * on capture staleness). */
++	llama_token	refresh_tok;
++	decode_one_greedy(&l, &refresh_tok);
++	bool	layer_still_cpu = layer_is_cpu_now(&l, 0);
++
++	fprintf(stderr, "{\"schema_version\":1,\"mode\":\"budget_test\","
++		"\"reserve_mib\":%llu,\"margin_mib\":%llu,\"apply_ok\":%s,"
++		"\"vram_before_mib\":%ld,\"vram_after_mib\":%ld,"
++		"\"layer_still_cpu\":%s}\n",
++		(unsigned long long)reserve_mib, (unsigned long long)margin_mib,
++		ok ? "true" : "false", before, after,
++		layer_still_cpu ? "true" : "false");
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: determinism (Section 28) ---------- */
++
++static int	cmd_determinism(const char *model, int32_t n_ctx, const char *kvt,
++				int n_decodes)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, 20, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++
++	struct s_membrane_tiering_config	config = {};
++	config.n_total_layers = l.n_layer;
++	config.n_gpu_layers = 0;
++	for (int32_t i = 20; i < l.n_layer && i < 30; i++)
++		config.gpu_layers[config.n_gpu_layers++] = i;
++	config.n_promotion_groups = 1;
++	config.promotion_groups[0].decode_trigger = 5;
++	config.promotion_groups[0].n_layers = 4;
++	config.promotion_groups[0].layers[0] = 16;
++	config.promotion_groups[0].layers[1] = 17;
++	config.promotion_groups[0].layers[2] = 18;
++	config.promotion_groups[0].layers[3] = 19;
++	config.n_demotion_groups = 1;
++	config.demotion_groups[0].decode_trigger = 10;
++	config.demotion_groups[0].n_layers = 4;
++	config.demotion_groups[0].layers[0] = 16;
++	config.demotion_groups[0].layers[1] = 17;
++	config.demotion_groups[0].layers[2] = 18;
++	config.demotion_groups[0].layers[3] = 19;
++
++	std::vector<enum e_membrane_tiering_layer_state>	states(l.n_layer);
++	enum e_membrane_tiering_sched_state				sched;
++	membrane_tiering_init(&config, l.n_layer, states.data(), &sched);
++
++	std::string	trace1, trace2;
++	for (int run = 0; run < 2; run++)
++	{
++		std::vector<enum e_membrane_tiering_layer_state>	s2 = states;
++		std::string	*out = (run == 0) ? &trace1 : &trace2;
++		for (int decode_idx = 0; decode_idx < n_decodes; decode_idx++)
++		{
++			std::vector<struct s_membrane_tiering_action_entry>	actions(l.n_layer);
++			int32_t	n = membrane_tiering_plan(&config, decode_idx, s2.data(), actions.data());
++			for (int32_t i = 0; i < n; i++)
++			{
++				char	buf[128];
++				snprintf(buf, sizeof(buf), "%d:%d:%d:%d;", decode_idx,
++					actions[i].layer, (int)actions[i].action, (int)actions[i].reason);
++				*out += buf;
++				if (actions[i].action == MEMBRANE_TIERING_ACTION_PROMOTE)
++					s2[actions[i].layer] = MEMBRANE_TIERING_LAYER_GPU_RESIDENT;
++				else if (actions[i].action == MEMBRANE_TIERING_ACTION_DEMOTE)
++					s2[actions[i].layer] = MEMBRANE_TIERING_LAYER_CPU_RESIDENT;
++			}
++		}
++	}
++
++	printf("{\"schema_version\":1,\"mode\":\"determinism\",\"n_decodes\":%d,"
++		"\"identical\":%s,\"trace_len\":%zu}\n",
++		n_decodes, trace1 == trace2 ? "true" : "false", trace1.size());
++	free_loaded(&l);
++	return (trace1 == trace2 ? 0 : 1);
++}
++
++/* ---------- mode: freq_sweep (Section 15) ---------- */
++
++static int	cmd_freq_sweep(const char *model, int32_t n_ctx, const char *kvt,
++				int32_t split, int group_size, int interval, int n_cycles)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++	if (!ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU))
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	std::vector<int32_t>	layers;
++	for (int i = 0; i < group_size && i < split; i++)
++		layers.push_back(i);
++
++	double	total_reloc_ms = 0.0;
++	int		n_relocations = 0;
++	double	t_start = now_ms();
++	for (int cycle = 0; cycle < n_cycles; cycle++)
++	{
++		for (int d = 0; d < interval; d++)
++		{
++			llama_token	tok;
++			decode_one_greedy(&l, &tok);
++		}
++		double	t0 = now_ms();
++		for (int32_t layer : layers)
++		{
++			llama_synchronize(l.ctx);
++			llama_kv_cache_relocate_layer(l.mem, layer,
++				ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU));
++		}
++		for (int32_t layer : layers)
++		{
++			llama_synchronize(l.ctx);
++			llama_kv_cache_relocate_layer(l.mem, layer,
++				ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++		}
++		llama_invalidate_graph_cache(l.ctx);
++		double	t1 = now_ms();
++		total_reloc_ms += (t1 - t0);
++		n_relocations += (int)layers.size() * 2;
++	}
++	double	t_end = now_ms();
++
++	printf("{\"schema_version\":1,\"mode\":\"freq_sweep\",\"interval_decodes\":%d,"
++		"\"group_size\":%d,\"n_cycles\":%d,\"n_relocations\":%d,"
++		"\"total_wall_ms\":%.3f,\"total_relocation_ms\":%.3f,"
++		"\"relocation_overhead_pct\":%.4f,\"vram_used_mib\":%ld}\n",
++		interval, group_size, n_cycles, n_relocations,
++		t_end - t_start, total_reloc_ms,
++		100.0 * total_reloc_ms / (t_end - t_start), nvidia_smi_used_mib());
++	free_loaded(&l);
++	return (0);
++}
++
++int	main(int argc, char **argv)
++{
++	llama_backend_init();
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s <mode> ...\n", argv[0]);
++		llama_backend_free();
++		return (2);
++	}
++	std::string	mode = argv[1];
++	int	rc = 2;
++
++	if (mode == "schedule_demo" && argc >= 6)
++		rc = cmd_schedule_demo(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]));
++	else if (mode == "hotset" && argc >= 7)
++		rc = cmd_hotset(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]), atoi(argv[6]));
++	else if (mode == "promo_group" && argc >= 8)
++		rc = cmd_promo_group(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), atoi(argv[7]));
++	else if (mode == "budget_test" && argc >= 7)
++		rc = cmd_budget_test(argv[2], atoi(argv[3]), argv[4],
++			(uint64_t)strtoull(argv[5], nullptr, 10),
++			(uint64_t)strtoull(argv[6], nullptr, 10));
++	else if (mode == "determinism" && argc >= 6)
++		rc = cmd_determinism(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]));
++	else if (mode == "freq_sweep" && argc >= 9)
++		rc = cmd_freq_sweep(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), atoi(argv[7]), atoi(argv[8]));
++	else
++	{
++		fprintf(stderr, "unknown mode or missing args: %s\n", mode.c_str());
++		rc = 2;
++	}
++	llama_backend_free();
++	return (rc);
++}

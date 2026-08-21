@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 20,
+  "method": "membrane-kv-promotion-prefetch-probe 'cycle' mode: 50 repeated GPU scratch tensor alloc -> tensor_set(real bytes) -> tensor_get -> FNV-1a byte-equality check -> free cycles, single process, real Vulkan1 GPU buffer of size 835584 bytes (= one real SmolLM2-135M ctx=2048 Q8_0 KV layer's K+V bytes) each cycle.",
+  "n_cycles": 50,
+  "all_byte_identity_ok": true,
+  "all_alloc_ok": true,
+  "rss_kb": {
+    "first": 140028,
+    "last": 140940,
+    "min": 140028,
+    "max": 140940,
+    "growth_kb": 912
+  },
+  "vram_used_mib": {
+    "first": 6,
+    "last": 6,
+    "min": 6,
+    "max": 6
+  },
+  "memory_leak_detected": false,
+  "vram_creep_detected": false,
+  "crash": false,
+  "stale_tensor_references": "none observed -- every cycle allocates a fresh scratch context/buffer/tensor and frees all three before the next cycle begins",
+  "raw_data": "raw_cycle_stability.jsonl"
+}

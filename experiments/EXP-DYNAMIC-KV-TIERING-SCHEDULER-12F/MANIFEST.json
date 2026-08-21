@@ -1,0 +1,404 @@
+{
+  "experiment_id": "EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F",
+  "phase": "12F",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/dynamic-kv-tiering-scheduler",
+  "source_head_sha": "79588b607d06763eaf13da4357f0b6c679310592",
+  "parent_experiment": "EXP-KV-BUFFER-RETIREMENT-12E",
+  "parent_head_sha": "73ae8ba12b9ce477d33ca407b9923f5d826e20b1",
+  "base_sha": "73ae8ba12b9ce477d33ca407b9923f5d826e20b1",
+  "date": "2026-08-20",
+  "purpose": "Build a deterministic (non-adaptive, non-learned) KV tiering scheduler on top of the now-safe Phase 12B-12E relocate+retire primitives, and measure whether dynamic placement changes during live decode produce a real throughput advantage.",
+  "literal_verdict": "WORKS_BUT_NO_PERF_ADVANTAGE",
+  "verdict_summary": "The scheduler mechanism itself is fully validated: dynamic-schedule output is byte-identical to every static configuration tested at the same sequence positions; every requested transition in the first end-to-end schedule applied correctly via the established relocate_layer+invalidate_graph_cache primitives; two independent runs against identical state produce an identical decision trace (deterministic); 56 back-to-back relocations showed no VRAM growth; an intentionally-impossible budget correctly failed closed; the mechanism generalized across Q5_1, a second model, ctx=16384, and a memory-pressure regime. But the static hot-set sweep underlying this decision (0/8/15/22/30 of 30 layers on GPU) showed throughput varying only ~21.9-24.3 tok/s -- KV placement is not the bottleneck at this model/context scale, so the scheduler's correct, stable, deterministic transitions add measurable per-transition cost without a compensating throughput win. This directly echoes the project's own prior Phase 6.2 finding of no bytes/token win at tested scale.",
+  "verdict_source": "results/phase12/dynamic-tiering-scheduler/summary.json:decision_gate (literal source field, one of five predeclared allowed enum values; not synthesized or abbreviated -- the full literal string is exactly `WORKS_BUT_NO_PERF_ADVANTAGE`, shorter than the DYNAMIC_KV_TIERING_WORKS_BUT_NO_PERF_ADVANTAGE form referenced in the migration brief)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "productization_note": "Verified: `git grep` for scheduler_core / MEMBRANE_TIERING_ against product main returns no hits. This is a valuable negative result, not a claim that dynamic tiering is universally useless -- the finding is scoped explicitly to the tested model/context regime (SmolLM2-135M/360M, GTX 1650, contexts up to 65536). The scheduler's own next_step_recommendation explicitly says NOT to invest in policy sophistication until a regime where KV placement actually is the bottleneck is found -- which became Phase 12G's task.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM), Vulkan backend",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/patches/phase12f-dynamic-kv-tiering-scheduler.patch",
+      "source_path": "(derived) git diff 73ae8ba12b9ce477d33ca407b9923f5d826e20b1..79588b607d06763eaf13da4357f0b6c679310592 -- . ':(exclude)results/phase12/dynamic-tiering-scheduler/*'",
+      "source_sha256": "b5905ed43839eb0fbbe4ea728b4844e50060ca761c5fe16dca0a8699bdbd71f8",
+      "migrated_sha256": "b5905ed43839eb0fbbe4ea728b4844e50060ca761c5fe16dca0a8699bdbd71f8",
+      "size_bytes": 87409,
+      "category": "B_experiment_implementation"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/budget_guard.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/budget_guard.json",
+      "source_sha256": "84a7e53fbfdd9a09db9dad9629e8fe9beb87df0978a5907a662b214c8c4ad299",
+      "migrated_sha256": "84a7e53fbfdd9a09db9dad9629e8fe9beb87df0978a5907a662b214c8c4ad299",
+      "size_bytes": 1140,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/correctness.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/correctness.json",
+      "source_sha256": "015a1d0ee3acbdd43921038a0355c96c9af8a072967f70b6bd193e95629ad930",
+      "migrated_sha256": "015a1d0ee3acbdd43921038a0355c96c9af8a072967f70b6bd193e95629ad930",
+      "size_bytes": 1674,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/decision_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/decision_trace.jsonl",
+      "source_sha256": "74600a11662ff9ea3a6110ee073bd22783ecb89dfede797855a9f385045a4e69",
+      "migrated_sha256": "74600a11662ff9ea3a6110ee073bd22783ecb89dfede797855a9f385045a4e69",
+      "size_bytes": 1494,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/determinism.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/determinism.json",
+      "source_sha256": "d15237ff534a37b168ce0d6d908b8bba315aa12d374ec800cd597abbe968054f",
+      "migrated_sha256": "d15237ff534a37b168ce0d6d908b8bba315aa12d374ec800cd597abbe968054f",
+      "size_bytes": 89,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/failure_cases.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/failure_cases.json",
+      "source_sha256": "345246c3f7bdbbfdaa85762e0754169190c0fd732a43b9c42d8426cf52c81d07",
+      "migrated_sha256": "345246c3f7bdbbfdaa85762e0754169190c0fd732a43b9c42d8426cf52c81d07",
+      "size_bytes": 1307,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/first_schedule.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/first_schedule.json",
+      "source_sha256": "c598c903d3c3b13b91c10bfa130d99fe0b65e8878d8790c7b4d1dae6ce26e5dc",
+      "migrated_sha256": "c598c903d3c3b13b91c10bfa130d99fe0b65e8878d8790c7b4d1dae6ce26e5dc",
+      "size_bytes": 3157,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/frequency_sweep.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/frequency_sweep.json",
+      "source_sha256": "f426e4df6916e730128a6e3771749f58d80d71d177b45582edaead64e88b56fd",
+      "migrated_sha256": "f426e4df6916e730128a6e3771749f58d80d71d177b45582edaead64e88b56fd",
+      "size_bytes": 1265,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/hotset_sweep.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/hotset_sweep.json",
+      "source_sha256": "eb4c9d7ff5dea861bf4f324b00d526d6fac01fbea583c21b019c0320a6b35eaa",
+      "migrated_sha256": "eb4c9d7ff5dea861bf4f324b00d526d6fac01fbea583c21b019c0320a6b35eaa",
+      "size_bytes": 3417,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/long_context.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/long_context.json",
+      "source_sha256": "99684f5d85b306b9abd0f590768d804187cc94843abdf72751a97c6d07032cd5",
+      "migrated_sha256": "99684f5d85b306b9abd0f590768d804187cc94843abdf72751a97c6d07032cd5",
+      "size_bytes": 2340,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/manifest.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/manifest.json",
+      "source_sha256": "7e4c65d93c4809346a2f5c2f6d549d135956a2f3ff53aa7b8df064ef330ba758",
+      "migrated_sha256": "7e4c65d93c4809346a2f5c2f6d549d135956a2f3ff53aa7b8df064ef330ba758",
+      "size_bytes": 6235,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/pareto.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/pareto.json",
+      "source_sha256": "f5fd7abdb35c0cf54fc99d59bf2dcdefb8be3388c3a22f0dd2fcf5a3ab36860e",
+      "migrated_sha256": "f5fd7abdb35c0cf54fc99d59bf2dcdefb8be3388c3a22f0dd2fcf5a3ab36860e",
+      "size_bytes": 917,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/performance.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/performance.json",
+      "source_sha256": "007f39d397197f0bba9273bfed0e711226862fc5b8ba7ec71c9547a0f7d71ea5",
+      "migrated_sha256": "007f39d397197f0bba9273bfed0e711226862fc5b8ba7ec71c9547a0f7d71ea5",
+      "size_bytes": 301,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/policy_comparison.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/policy_comparison.json",
+      "source_sha256": "779758eae2a77d4488e908d627fca94d260341fa83cf31e04906febeca539d5c",
+      "migrated_sha256": "779758eae2a77d4488e908d627fca94d260341fa83cf31e04906febeca539d5c",
+      "size_bytes": 751,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/prefetch_feasibility.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/prefetch_feasibility.json",
+      "source_sha256": "2214e521e701fc0f4e6b6ee99dcd1a256745fbd7121332f30a663e69bfdcf3f6",
+      "migrated_sha256": "2214e521e701fc0f4e6b6ee99dcd1a256745fbd7121332f30a663e69bfdcf3f6",
+      "size_bytes": 1938,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/pressure_test.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/pressure_test.json",
+      "source_sha256": "d04d0654b7b95004f1efe2b00c74d17acd67208c55087fbc05ad2377bffe7b5f",
+      "migrated_sha256": "d04d0654b7b95004f1efe2b00c74d17acd67208c55087fbc05ad2377bffe7b5f",
+      "size_bytes": 3505,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/promotion_group_sweep.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/promotion_group_sweep.json",
+      "source_sha256": "100ee853fa367e2c70c2895da9010691d0b2301a5066863acf7d8ca97d06fe39",
+      "migrated_sha256": "100ee853fa367e2c70c2895da9010691d0b2301a5066863acf7d8ca97d06fe39",
+      "size_bytes": 1309,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/q5.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/q5.json",
+      "source_sha256": "8a72b9a38f8eedb6e57477f8ad12d948af575798c86b6dad6c21f7b7d1369f9c",
+      "migrated_sha256": "8a72b9a38f8eedb6e57477f8ad12d948af575798c86b6dad6c21f7b7d1369f9c",
+      "size_bytes": 2644,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_360m_stderr.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_360m_stderr.txt",
+      "source_sha256": "fc720687bca0632b0de22358f8c3cdb4e9a528d870633fe365208bf88fd2fea6",
+      "migrated_sha256": "fc720687bca0632b0de22358f8c3cdb4e9a528d870633fe365208bf88fd2fea6",
+      "size_bytes": 31393,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_360m_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_360m_trace.jsonl",
+      "source_sha256": "8eced2e2aa6961c5bd219563e6820a3fc7804eddf364a6b152c8b196a8eaa756",
+      "migrated_sha256": "8eced2e2aa6961c5bd219563e6820a3fc7804eddf364a6b152c8b196a8eaa756",
+      "size_bytes": 1368,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_budget_fail_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_budget_fail_trace.jsonl",
+      "source_sha256": "1565a2115a151760f4d1147c1bc3c04a0f0a2e48e2c350c067b2a8c366ff0aa2",
+      "migrated_sha256": "1565a2115a151760f4d1147c1bc3c04a0f0a2e48e2c350c067b2a8c366ff0aa2",
+      "size_bytes": 175,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_budget_fail.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_budget_fail.txt",
+      "source_sha256": "0bbbbe4d5498c64f9e41d5a74b237452451c03a9f7ef63bf78a31d0076644672",
+      "migrated_sha256": "0bbbbe4d5498c64f9e41d5a74b237452451c03a9f7ef63bf78a31d0076644672",
+      "size_bytes": 29245,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_budget_ok_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_budget_ok_trace.jsonl",
+      "source_sha256": "e339db37f369171257a50f0fe78f97cb6b0918b5eadb12cac869c605a70ac02c",
+      "migrated_sha256": "e339db37f369171257a50f0fe78f97cb6b0918b5eadb12cac869c605a70ac02c",
+      "size_bytes": 169,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_budget_ok.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_budget_ok.txt",
+      "source_sha256": "d4ba7bdd007025e9de8b48c474b60e636e7b581c5974e366a6e90f17a37008fb",
+      "migrated_sha256": "d4ba7bdd007025e9de8b48c474b60e636e7b581c5974e366a6e90f17a37008fb",
+      "size_bytes": 29232,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_first_schedule_stderr.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_first_schedule_stderr.txt",
+      "source_sha256": "806d20a013fb68a3871c48183c8e4bde31dcb49f4f78f79a4c290551ebafbf54",
+      "migrated_sha256": "806d20a013fb68a3871c48183c8e4bde31dcb49f4f78f79a4c290551ebafbf54",
+      "size_bytes": 30236,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_first_schedule_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_first_schedule_trace.jsonl",
+      "source_sha256": "322872a3db34a1a954aaeb635e73d15e9b8b68a1a47330faafe900064783ac2f",
+      "migrated_sha256": "322872a3db34a1a954aaeb635e73d15e9b8b68a1a47330faafe900064783ac2f",
+      "size_bytes": 1358,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_freq_sweep.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_freq_sweep.jsonl",
+      "source_sha256": "5aa3314566c2d57f8f17fd4f70005b14df5746d8b2a8dc6b28add0fe7d40613e",
+      "migrated_sha256": "5aa3314566c2d57f8f17fd4f70005b14df5746d8b2a8dc6b28add0fe7d40613e",
+      "size_bytes": 865,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_hotset_sweep.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_hotset_sweep.jsonl",
+      "source_sha256": "40f6f5263cda8321c7c3695c254523247676dcee4b2377cc88cd1204367336cd",
+      "migrated_sha256": "40f6f5263cda8321c7c3695c254523247676dcee4b2377cc88cd1204367336cd",
+      "size_bytes": 1833,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_longctx_stderr.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_longctx_stderr.txt",
+      "source_sha256": "ab0dd28da0e948c989368907490c52eece27e1a1f91b88af90ab5f567a1ab398",
+      "migrated_sha256": "ab0dd28da0e948c989368907490c52eece27e1a1f91b88af90ab5f567a1ab398",
+      "size_bytes": 30222,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_longctx_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_longctx_trace.jsonl",
+      "source_sha256": "1bd4f5ec9a519685744522cfceac702b4d939c1830c6cb8facb7ea393ec8bf08",
+      "migrated_sha256": "1bd4f5ec9a519685744522cfceac702b4d939c1830c6cb8facb7ea393ec8bf08",
+      "size_bytes": 1372,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_pressure_schedule_stderr.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_pressure_schedule_stderr.txt",
+      "source_sha256": "e7946211070ef1d1168e32de776f551230e3c85d6843fe86b6b2949225a202ff",
+      "migrated_sha256": "e7946211070ef1d1168e32de776f551230e3c85d6843fe86b6b2949225a202ff",
+      "size_bytes": 30222,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_pressure_schedule_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_pressure_schedule_trace.jsonl",
+      "source_sha256": "a715fa771aa79f80ead59f7fd622be09d2a9f8acd65146d08ad78de856ba7fe7",
+      "migrated_sha256": "a715fa771aa79f80ead59f7fd622be09d2a9f8acd65146d08ad78de856ba7fe7",
+      "size_bytes": 1384,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_pressure_split20.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_pressure_split20.jsonl",
+      "source_sha256": "635b57d81f0f66dba635eeec5bc3f86122474a6ec4a7c01e18fff2b246e35b4f",
+      "migrated_sha256": "635b57d81f0f66dba635eeec5bc3f86122474a6ec4a7c01e18fff2b246e35b4f",
+      "size_bytes": 295,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_pressure_split20.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_pressure_split20.txt",
+      "source_sha256": "78643d94aa605db2c64d29ba58035393d487e4a23e5073955ac295a5554d2318",
+      "migrated_sha256": "78643d94aa605db2c64d29ba58035393d487e4a23e5073955ac295a5554d2318",
+      "size_bytes": 29061,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_promo_group_sweep.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_promo_group_sweep.jsonl",
+      "source_sha256": "f543182d0dba66ebc816d9a52c4cc6c179fe6b1088d57a332372f9f5872ff6fb",
+      "migrated_sha256": "f543182d0dba66ebc816d9a52c4cc6c179fe6b1088d57a332372f9f5872ff6fb",
+      "size_bytes": 908,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_q5_promo_group.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_q5_promo_group.jsonl",
+      "source_sha256": "b2dfecb4525775dd3e2e43aa553ae1980ac2434ab4d453b6f84c930f4a185be5",
+      "migrated_sha256": "b2dfecb4525775dd3e2e43aa553ae1980ac2434ab4d453b6f84c930f4a185be5",
+      "size_bytes": 227,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_q5_stderr.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_q5_stderr.txt",
+      "source_sha256": "169f7462943b2585797c1c66ce93997fe7fae9f79b40cc98683e7743840c34e6",
+      "migrated_sha256": "169f7462943b2585797c1c66ce93997fe7fae9f79b40cc98683e7743840c34e6",
+      "size_bytes": 30236,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_q5_trace.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_q5_trace.jsonl",
+      "source_sha256": "46aaa8bbd17d2b7fea868fe51f6f08992d7f0dc93789d38107cd3a590074ff94",
+      "migrated_sha256": "46aaa8bbd17d2b7fea868fe51f6f08992d7f0dc93789d38107cd3a590074ff94",
+      "size_bytes": 1356,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_stability_50.jsonl",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_stability_50.jsonl",
+      "source_sha256": "e1c168baf2dab69fb3bbe62050aec777a9e823becab555bfe3013176ede3d606",
+      "migrated_sha256": "e1c168baf2dab69fb3bbe62050aec777a9e823becab555bfe3013176ede3d606",
+      "size_bytes": 215,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/raw_stability_50.txt",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/raw_stability_50.txt",
+      "source_sha256": "ecc39d74b1cadc201a605c3f4fad8b60246f73b8d786022ad9d412045629ced8",
+      "migrated_sha256": "ecc39d74b1cadc201a605c3f4fad8b60246f73b8d786022ad9d412045629ced8",
+      "size_bytes": 29094,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/scheduler_config.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/scheduler_config.json",
+      "source_sha256": "379a4fbe4bf488775c603d41080628bb045444095036e4cefc82c6aa485b5071",
+      "migrated_sha256": "379a4fbe4bf488775c603d41080628bb045444095036e4cefc82c6aa485b5071",
+      "size_bytes": 623,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/second_model.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/second_model.json",
+      "source_sha256": "14a2b6911405e95235ed76ec593670c47286d6de05fc2eaba18f2b4ca4f765b9",
+      "migrated_sha256": "14a2b6911405e95235ed76ec593670c47286d6de05fc2eaba18f2b4ca4f765b9",
+      "size_bytes": 2361,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/stability.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/stability.json",
+      "source_sha256": "5bf881a3b594f9b102f14a3938414cfe6e4c8b0d8dc5471dd8cd76e31bdd3907",
+      "migrated_sha256": "5bf881a3b594f9b102f14a3938414cfe6e4c8b0d8dc5471dd8cd76e31bdd3907",
+      "size_bytes": 484,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/state_machine.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/state_machine.json",
+      "source_sha256": "70cf9970ec92febd74ed994afc77a772ddd001cc6eaca5cff5866f68608ac44c",
+      "migrated_sha256": "70cf9970ec92febd74ed994afc77a772ddd001cc6eaca5cff5866f68608ac44c",
+      "size_bytes": 656,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/summary.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/summary.json",
+      "source_sha256": "f3cc6caf1d31b0f74017ed907e5182c5172a204d554fb2fb9f3e7f42a8cb607f",
+      "migrated_sha256": "f3cc6caf1d31b0f74017ed907e5182c5172a204d554fb2fb9f3e7f42a8cb607f",
+      "size_bytes": 3841,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/transition_latency.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/transition_latency.json",
+      "source_sha256": "b4e62758ac971254dd9b1ccc71fd60ac62222130656debc66ee810a4d38d5ce4",
+      "migrated_sha256": "b4e62758ac971254dd9b1ccc71fd60ac62222130656debc66ee810a4d38d5ce4",
+      "size_bytes": 607,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F/results/canonical/vram_timeseries.json",
+      "source_path": "results/phase12/dynamic-tiering-scheduler/vram_timeseries.json",
+      "source_sha256": "f1c5922ba087736e610466cd798510f948e3087da66f54719cbf2706136a80c3",
+      "migrated_sha256": "f1c5922ba087736e610466cd798510f948e3087da66f54719cbf2706136a80c3",
+      "size_bytes": 1952,
+      "category": "A_essential_evidence"
+    }
+  ],
+  "follow_up": "This phase's next_step_recommendation directly named Phase 12G's task: find a model/context/workload regime where KV placement actually is the throughput bottleneck before investing further in scheduler policy sophistication."
+}

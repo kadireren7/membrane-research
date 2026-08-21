@@ -1,0 +1,4 @@
+{"schema_version":1,"mode":"failure","case":"invalid_layer","relocate_returned_ok":false,"layer0_pointer_untouched":true,"decode_still_works":true}
+{"schema_version":1,"mode":"failure","case":"invalid_dev","relocate_returned_ok":false,"layer0_pointer_untouched":true,"decode_still_works":true}
+{"schema_version":1,"mode":"failure","case":"same_dev","relocate_returned_ok":true,"layer0_pointer_untouched":true,"decode_still_works":true}
+{"schema_version":1,"mode":"failure","case":"duplicate","relocate_returned_ok":true,"layer0_pointer_untouched":true,"decode_still_works":true}

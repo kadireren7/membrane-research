@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 8,
+  "method": "Predeclared deterministic schedule (no heuristics): initial split places layers [0,16) on CPU KV, [16,n_layer) on GPU KV. Manually promote group [12,13,14,15] first, then group [8,9,10,11] -- matches the Section 8 example exactly.",
+  "trials": {
+    "smollm2_135m_ctx2048_q8": {
+      "initial_split": 16,
+      "n_steps": 8,
+      "all_copies_ok": true,
+      "post_schedule_generation_ok": true,
+      "steps": [
+        {
+          "layer": 12,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.5341,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 13,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.724,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 14,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.5804,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 15,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.585,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 8,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.6107,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 9,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.5718,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 10,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.6215,
+          "vram_used_mib": 372
+        },
+        {
+          "layer": 11,
+          "k_bytes": 417792,
+          "v_bytes": 417792,
+          "copy_ok": true,
+          "copy_ms": 0.6357,
+          "vram_used_mib": 372
+        }
+      ]
+    },
+    "smollm2_360m_ctx2048_q8": {
+      "initial_split": 16,
+      "n_steps": 8,
+      "all_copies_ok": true,
+      "post_schedule_generation_ok": true
+    }
+  },
+  "raw_data": [
+    "raw_multi_schedule_135m.json",
+    "raw_multi_schedule_360m.json"
+  ]
+}

@@ -1,0 +1,292 @@
+{
+  "experiment_id": "EXP-KV-RUNTIME-RELOCATE-12D",
+  "phase": "12D",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/kv-runtime-relocate",
+  "source_head_sha": "9c99eead15492b9aed1e46bb9775c78728848e35",
+  "parent_experiment": "EXP-KV-PROMOTION-PREFETCH-12C",
+  "parent_head_sha": "73090efff08fa37627c1a5bf4e0be8480c700576",
+  "base_sha": "73090efff08fa37627c1a5bf4e0be8480c700576",
+  "date": "2026-08-18",
+  "purpose": "Build and validate the minimal runtime KV relocate/rebind primitive Phase 12C identified as missing: an actual llama.cpp method that reassigns a live llama_kv_cache layer's backing tensor after a real byte copy, so the NEXT decode call reads the relocated data (true runtime relocation, not just a copy).",
+  "literal_verdict": "RUNTIME_KV_RELOCATE_WORKS_BUT_LEAKS_BACKING",
+  "verdict_summary": "A small (173 insertion lines, 0 deletions, 4 files), additive llama.cpp patch adding llama_kv_cache::relocate_layer() makes runtime rebind real: ground-truth poison testing (not just code reading) proves decode consumes the newly-rebound backing, in both directions (CPU->GPU, GPU->CPU), repeatedly, for the same layer, across two models and two KV precisions. But the old backing cannot yet be safely freed: with the real default (release enabled), a SECOND relocation of the same layer reproducibly crashes the NEXT llama_decode() call (two observed signatures: SIGSEGV and GGML_ASSERT(buffer != nullptr) at ggml-vulkan.cpp:7815). This is disclosed as a genuine, unresolved negative finding, not softened -- old backing must be retained (leaked) to remain safe this phase.",
+  "verdict_source": "results/phase12/runtime-relocate/summary.json:decision_gate / decision_gate_meaning (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "productization_note": "Verified: `git grep` for relocate_layer / llama_kv_cache_relocate_layer against product main returns no hits. This mechanism, including its known crash, remains entirely research-only -- it was never a candidate for productization in its own right; it motivated Phase 12E's fix instead.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM), Vulkan backend",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/patches/phase12d-kv-runtime-relocate.patch",
+      "source_path": "(derived) git diff 73090efff08fa37627c1a5bf4e0be8480c700576..9c99eead15492b9aed1e46bb9775c78728848e35 -- . ':(exclude)results/phase12/runtime-relocate/*'",
+      "source_sha256": "413e6068c4efd35d732b7f4b0aa511ec215f9a1667000f990eac888bd54b519c",
+      "migrated_sha256": "413e6068c4efd35d732b7f4b0aa511ec215f9a1667000f990eac888bd54b519c",
+      "size_bytes": 79186,
+      "category": "B_experiment_implementation"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/architecture.json",
+      "source_path": "results/phase12/runtime-relocate/architecture.json",
+      "source_sha256": "b94374fcaf4e9a1a24f8719a9aeb4660d8dd6f88208f126fa543c0f986b4d3fc",
+      "migrated_sha256": "b94374fcaf4e9a1a24f8719a9aeb4660d8dd6f88208f126fa543c0f986b4d3fc",
+      "size_bytes": 6879,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/different_layer_control.json",
+      "source_path": "results/phase12/runtime-relocate/different_layer_control.json",
+      "source_sha256": "a32ad7468d559e4ee5be87dc94beba02dd0db0a8cd9eed74cb54e80ecbededd3",
+      "migrated_sha256": "a32ad7468d559e4ee5be87dc94beba02dd0db0a8cd9eed74cb54e80ecbededd3",
+      "size_bytes": 950,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/failure_atomicity.json",
+      "source_path": "results/phase12/runtime-relocate/failure_atomicity.json",
+      "source_sha256": "6f65196a0e35c79e96e1e3be2fb0826b28f4e5885cbe2e2d85f8b6b1c517a57a",
+      "migrated_sha256": "6f65196a0e35c79e96e1e3be2fb0826b28f4e5885cbe2e2d85f8b6b1c517a57a",
+      "size_bytes": 2270,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/maintenance.json",
+      "source_path": "results/phase12/runtime-relocate/maintenance.json",
+      "source_sha256": "f5d28ba9e05d9887a10973a4a316e7f19c4bdec68dfb995072a56347936c0b58",
+      "migrated_sha256": "f5d28ba9e05d9887a10973a4a316e7f19c4bdec68dfb995072a56347936c0b58",
+      "size_bytes": 3686,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/manifest.json",
+      "source_path": "results/phase12/runtime-relocate/manifest.json",
+      "source_sha256": "49aca30044a05357026a13e9aa457f158540bfc0a8f704126c03cf09cc16769f",
+      "migrated_sha256": "49aca30044a05357026a13e9aa457f158540bfc0a8f704126c03cf09cc16769f",
+      "size_bytes": 3425,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/patch_scope.json",
+      "source_path": "results/phase12/runtime-relocate/patch_scope.json",
+      "source_sha256": "0feabf6ef8e156aa09a4d8d5a27a5737232ac8e02b754921d2a7393799346d56",
+      "migrated_sha256": "0feabf6ef8e156aa09a4d8d5a27a5737232ac8e02b754921d2a7393799346d56",
+      "size_bytes": 1975,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/poison_test.json",
+      "source_path": "results/phase12/runtime-relocate/poison_test.json",
+      "source_sha256": "6f0a512300d89e1f062232c1515b72d82015983ec8378c3ae646e9c3841a2570",
+      "migrated_sha256": "6f0a512300d89e1f062232c1515b72d82015983ec8378c3ae646e9c3841a2570",
+      "size_bytes": 593,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/q5.json",
+      "source_path": "results/phase12/runtime-relocate/q5.json",
+      "source_sha256": "8d357cac2bf79b33a77c722064ac2072ed5730946b799f2a18c3871e59f9433c",
+      "migrated_sha256": "8d357cac2bf79b33a77c722064ac2072ed5730946b799f2a18c3871e59f9433c",
+      "size_bytes": 618,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_different_layer_control_135m.json",
+      "source_path": "results/phase12/runtime-relocate/raw_different_layer_control_135m.json",
+      "source_sha256": "b1f1e59c4b94881070494875f3dfd9eb25550f830687166c66f44bb4903c81e0",
+      "migrated_sha256": "b1f1e59c4b94881070494875f3dfd9eb25550f830687166c66f44bb4903c81e0",
+      "size_bytes": 329,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_failure_atomicity.jsonl",
+      "source_path": "results/phase12/runtime-relocate/raw_failure_atomicity.jsonl",
+      "source_sha256": "b71d2e638e5e180e31db45a03ccce797743faa09050f6814bf9480999c015093",
+      "migrated_sha256": "b71d2e638e5e180e31db45a03ccce797743faa09050f6814bf9480999c015093",
+      "size_bytes": 579,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_q5_relocate_135m_layer4.json",
+      "source_path": "results/phase12/runtime-relocate/raw_q5_relocate_135m_layer4.json",
+      "source_sha256": "7180e1b2af7272d62d137f6ce0488a25980ebcb2e3f643f25e40b161a251d196",
+      "migrated_sha256": "7180e1b2af7272d62d137f6ce0488a25980ebcb2e3f643f25e40b161a251d196",
+      "size_bytes": 815,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_release_failure_settle4_stderr.txt",
+      "source_path": "results/phase12/runtime-relocate/raw_release_failure_settle4_stderr.txt",
+      "source_sha256": "43b1ae4158c9fa8572cec4b09c20e66b46629a10230847c8b0583038e4ec9392",
+      "migrated_sha256": "43b1ae4158c9fa8572cec4b09c20e66b46629a10230847c8b0583038e4ec9392",
+      "size_bytes": 28961,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_release_failure_settle4_stdout_partial.txt",
+      "source_path": "results/phase12/runtime-relocate/raw_release_failure_settle4_stdout_partial.txt",
+      "source_sha256": "3b0b12586fc27c989a99b23728a33537a223d9a171773b4e97a8dd242bc926a5",
+      "migrated_sha256": "3b0b12586fc27c989a99b23728a33537a223d9a171773b4e97a8dd242bc926a5",
+      "size_bytes": 463,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_release_failure_stderr.txt",
+      "source_path": "results/phase12/runtime-relocate/raw_release_failure_stderr.txt",
+      "source_sha256": "da67b01ccfd790e3b19fee0e346de474325a137015b37dbad7c2378eae09e9fb",
+      "migrated_sha256": "da67b01ccfd790e3b19fee0e346de474325a137015b37dbad7c2378eae09e9fb",
+      "size_bytes": 28961,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_release_failure_stdout_partial.txt",
+      "source_path": "results/phase12/runtime-relocate/raw_release_failure_stdout_partial.txt",
+      "source_sha256": "16040c12008476f80928234106ca7d4880b5b25cebd637098ebac965d95fbdd5",
+      "migrated_sha256": "16040c12008476f80928234106ca7d4880b5b25cebd637098ebac965d95fbdd5",
+      "size_bytes": 444,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_relocate_135m_layer20_gpu_to_cpu.json",
+      "source_path": "results/phase12/runtime-relocate/raw_relocate_135m_layer20_gpu_to_cpu.json",
+      "source_sha256": "441bad98b272f733641d084bbc20eda5b3ff3399412565c0d1b9dc9e566f79e2",
+      "migrated_sha256": "441bad98b272f733641d084bbc20eda5b3ff3399412565c0d1b9dc9e566f79e2",
+      "size_bytes": 813,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_relocate_135m_layer4_cpu_to_gpu.json",
+      "source_path": "results/phase12/runtime-relocate/raw_relocate_135m_layer4_cpu_to_gpu.json",
+      "source_sha256": "a6ca5286c1af351c812eabb1a876979bc484675a8cc7045187765289686090c9",
+      "migrated_sha256": "a6ca5286c1af351c812eabb1a876979bc484675a8cc7045187765289686090c9",
+      "size_bytes": 816,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_repeated_same_layer_retained_135m_layer4.json",
+      "source_path": "results/phase12/runtime-relocate/raw_repeated_same_layer_retained_135m_layer4.json",
+      "source_sha256": "06c20ac20fcd9cb9b834a4abc47acfd30c064d59a2eba191c67df82644ec2895",
+      "migrated_sha256": "06c20ac20fcd9cb9b834a4abc47acfd30c064d59a2eba191c67df82644ec2895",
+      "size_bytes": 1299,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_roundtrip_135m_layer4_ctx16384.json",
+      "source_path": "results/phase12/runtime-relocate/raw_roundtrip_135m_layer4_ctx16384.json",
+      "source_sha256": "4522022f20f270a505ca2b5ae9ab42100d6e001e08ab4bc07d4f8af9c102cc47",
+      "migrated_sha256": "4522022f20f270a505ca2b5ae9ab42100d6e001e08ab4bc07d4f8af9c102cc47",
+      "size_bytes": 360,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_roundtrip_135m_layer4.json",
+      "source_path": "results/phase12/runtime-relocate/raw_roundtrip_135m_layer4.json",
+      "source_sha256": "31394eaa93a9df4678d86344ef219edc1e32659a5ac63707efa38cd57a13c544",
+      "migrated_sha256": "31394eaa93a9df4678d86344ef219edc1e32659a5ac63707efa38cd57a13c544",
+      "size_bytes": 359,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_second_model_360m_relocate_layer4.json",
+      "source_path": "results/phase12/runtime-relocate/raw_second_model_360m_relocate_layer4.json",
+      "source_sha256": "e065bcf3345f8164466f303b5177df5339c03bfc3c00cb0912b631cd74fd9a85",
+      "migrated_sha256": "e065bcf3345f8164466f303b5177df5339c03bfc3c00cb0912b631cd74fd9a85",
+      "size_bytes": 810,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_weights_table_135m_cpu_to_gpu.json",
+      "source_path": "results/phase12/runtime-relocate/raw_weights_table_135m_cpu_to_gpu.json",
+      "source_sha256": "b92a1469e541a0f90355cbd5d50c141a25a06b6035745b60cb524875ea084ff8",
+      "migrated_sha256": "b92a1469e541a0f90355cbd5d50c141a25a06b6035745b60cb524875ea084ff8",
+      "size_bytes": 2819,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/raw_weights_table_135m_gpu_to_cpu.json",
+      "source_path": "results/phase12/runtime-relocate/raw_weights_table_135m_gpu_to_cpu.json",
+      "source_sha256": "2d3cf95c38c490954ca6ee738ec56d6572d71362a82c426f036b4835c3ca1d3f",
+      "migrated_sha256": "2d3cf95c38c490954ca6ee738ec56d6572d71362a82c426f036b4835c3ca1d3f",
+      "size_bytes": 2820,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/regression.json",
+      "source_path": "results/phase12/runtime-relocate/regression.json",
+      "source_sha256": "d85d53ccb9e047f23f1bed5cb4b21ad4131e16f312c184a8eb2ef845ca18c10f",
+      "migrated_sha256": "d85d53ccb9e047f23f1bed5cb4b21ad4131e16f312c184a8eb2ef845ca18c10f",
+      "size_bytes": 2174,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/release_failure.json",
+      "source_path": "results/phase12/runtime-relocate/release_failure.json",
+      "source_sha256": "2639f9a460010ceff17f5457abb4c924d0efbcf7344b205b1b02f8a32d805111",
+      "migrated_sha256": "2639f9a460010ceff17f5457abb4c924d0efbcf7344b205b1b02f8a32d805111",
+      "size_bytes": 7034,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/repeated_same_layer_retained.json",
+      "source_path": "results/phase12/runtime-relocate/repeated_same_layer_retained.json",
+      "source_sha256": "cfe3e4a6fd33eb1feee594c039ea9ea86a67dbf37d2862ea809e9bea26cd6e38",
+      "migrated_sha256": "cfe3e4a6fd33eb1feee594c039ea9ea86a67dbf37d2862ea809e9bea26cd6e38",
+      "size_bytes": 2461,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/sanitizers.json",
+      "source_path": "results/phase12/runtime-relocate/sanitizers.json",
+      "source_sha256": "13984a7dbc3e13f968bb5d9d026b96a597fef2f893cc57a8b714fc022ce57d15",
+      "migrated_sha256": "13984a7dbc3e13f968bb5d9d026b96a597fef2f893cc57a8b714fc022ce57d15",
+      "size_bytes": 2004,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/second_model.json",
+      "source_path": "results/phase12/runtime-relocate/second_model.json",
+      "source_sha256": "62079f5260f536ef106b3522d097723a3e4b7e7bb158261ac445e27ab7478538",
+      "migrated_sha256": "62079f5260f536ef106b3522d097723a3e4b7e7bb158261ac445e27ab7478538",
+      "size_bytes": 549,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/single_cpu_gpu.json",
+      "source_path": "results/phase12/runtime-relocate/single_cpu_gpu.json",
+      "source_sha256": "c97d1d00ab15395fa612e8b24fb3ea0b90360b0e05072d6b5f825dcfdd3d6aa7",
+      "migrated_sha256": "c97d1d00ab15395fa612e8b24fb3ea0b90360b0e05072d6b5f825dcfdd3d6aa7",
+      "size_bytes": 1037,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/single_gpu_cpu.json",
+      "source_path": "results/phase12/runtime-relocate/single_gpu_cpu.json",
+      "source_sha256": "47a06c2dcdf4e6314fc63f602972b83cd3dbec22db6c6eed56678e62d68ff343",
+      "migrated_sha256": "47a06c2dcdf4e6314fc63f602972b83cd3dbec22db6c6eed56678e62d68ff343",
+      "size_bytes": 768,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/summary.json",
+      "source_path": "results/phase12/runtime-relocate/summary.json",
+      "source_sha256": "d8ffd5ef5d1b76d9a00b16ae385a4bc42b1caf31fac9fd556da62fb37d584143",
+      "migrated_sha256": "d8ffd5ef5d1b76d9a00b16ae385a4bc42b1caf31fac9fd556da62fb37d584143",
+      "size_bytes": 12089,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-RUNTIME-RELOCATE-12D/results/canonical/weights_unchanged.json",
+      "source_path": "results/phase12/runtime-relocate/weights_unchanged.json",
+      "source_sha256": "b00ba540fee7728b2081bead50963033df09eaafaa243e98f3b508023efe906c",
+      "migrated_sha256": "b00ba540fee7728b2081bead50963033df09eaafaa243e98f3b508023efe906c",
+      "size_bytes": 1440,
+      "category": "A_essential_evidence"
+    }
+  ],
+  "follow_up": "This phase's next_step_recommendation directly named Phase 12E's task: investigate and design safe backend-buffer retirement / lifetime ownership for relocated KV backing, since neither ggml_backend_sched nor the Vulkan backend's ggml_tensor::extra were confirmed as the stale-reference owner within this phase's scope."
+}

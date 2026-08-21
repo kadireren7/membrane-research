@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "n_relocations": 56,
+  "meets_50_transition_requirement": true,
+  "vram_used_mib_after": 371,
+  "vram_used_mib_steady_state_reference": 371,
+  "no_leak_detected": true,
+  "raw": {
+    "schema_version": 1,
+    "mode": "freq_sweep",
+    "interval_decodes": 2,
+    "group_size": 4,
+    "n_cycles": 7,
+    "n_relocations": 56,
+    "total_wall_ms": 613.494,
+    "total_relocation_ms": 22.631,
+    "relocation_overhead_pct": 3.6888,
+    "vram_used_mib": 371
+  }
+}

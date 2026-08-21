@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "static_all_gpu_tok_s": 23.5092,
+  "static_all_cpu_tok_s": 24.3441,
+  "static_split20_tok_s": 21.9443,
+  "dynamic_schedule_note": "dynamic schedule interleaves promote/demote overhead with decode; see transition_latency.json for the per-transition cost measured directly."
+}

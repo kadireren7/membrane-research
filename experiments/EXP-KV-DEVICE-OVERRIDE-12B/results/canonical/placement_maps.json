@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Sections 7/8/9: manual, deterministic KV placement proof, SmolLM2-135M (30 layers), Vulkan, ctx=2048, Q8_0, --gpu-layers all (mp.n_gpu_layers=-1, unaffected by kv_dev_override). Full per-layer table, cross-validated three independent ways.",
+  "target_config": "layers 0-14 -> CPU KV, layers 15-29 -> GPU KV, ALL weights GPU-resident throughout",
+  "proof_method_1_load_tensors_log": {
+    "description": "llama.cpp's own load_tensors debug log line, one per weight layer, real stderr capture",
+    "result": "31/31 lines (30 layers + 1 output layer) report 'assigned to device Vulkan1' -- zero non-Vulkan lines, confirming every weight layer stayed GPU-resident regardless of the KV split"
+  },
+  "proof_method_2_kv_cache_log": {
+    "description": "llama_kv_cache's own debug log line, one per KV layer, real stderr capture",
+    "result": "layers 0-14 report 'dev = CPU', layers 15-29 report 'dev = Vulkan1' -- exact match to the requested split, boundary confirmed precisely at layer 14/15"
+  },
+  "proof_method_3_direct_tensor_inspection": {
+    "description": "cb_eval + ggml_tensor::view_src (same public-API mechanism Phase 12A proved) directly reading each cache_k_lN/cache_v_lN leaf tensor's real ggml_backend_buffer_name()",
+    "result": "n_cpu_kv_layers=15, n_gpu_kv_layers=15, zero mismatches between requested and observed placement across all 30 layers, K and V agree (same buffer) for every layer"
+  },
+  "all_three_methods_agree": true,
+  "per_layer_table_boundary_excerpt": [
+    {"layer": 13, "weight_device": "Vulkan1", "kv_device_requested": "CPU", "k_buffer": "CPU", "v_buffer": "CPU"},
+    {"layer": 14, "weight_device": "Vulkan1", "kv_device_requested": "CPU", "k_buffer": "CPU", "v_buffer": "CPU"},
+    {"layer": 15, "weight_device": "Vulkan1", "kv_device_requested": "GPU", "k_buffer": "Vulkan1", "v_buffer": "Vulkan1"},
+    {"layer": 16, "weight_device": "Vulkan1", "kv_device_requested": "GPU", "k_buffer": "Vulkan1", "v_buffer": "Vulkan1"}
+  ],
+  "authoritative_placement_section9": {
+    "no_duplicate_gpu_kv_for_cpu_placed_layers": "confirmed by proof_method_3 -- each layer's cache_k_lN/cache_v_lN leaf tensor exists in EXACTLY ONE buffer (CPU or Vulkan1, never both; the tool reports each layer's single k_buffer/v_buffer, there is no second shadow allocation to check because llama_kv_cache never allocates a layer's KV tensors twice)",
+    "generation_succeeds": "confirmed -- 8 tokens generated successfully with the split active, no crash, no error (see roundtrip/correctness data)",
+    "attention_reads_correct_tensor": "confirmed indirectly -- generation produces token-identical output to the equivalent full-GPU-KV and aggressive-CPU-KV runs (see correctness.json), which would not hold if attention were reading stale, wrong, or uninitialized KV data for the CPU-placed layers"
+  }
+}

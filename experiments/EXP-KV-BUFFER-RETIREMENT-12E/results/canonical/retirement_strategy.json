@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": "9-13, 16, 22-23",
+  "reference_count_investigated": "Yes (Section 9) -- the real, natural reference-count source turned out to be structural, not a number: relocate_layer's existing scan ('does any OTHER layer's tensor still point at old_buf') IS the reference check, and it already correctly identifies safety for the PHYSICAL buffer. What was missing was not a buffer-level reference count at all, but a GRAPH-level one: llama_context's cached gf_res_prev implicitly holds a reference to whatever tensors were in the graph it was built from, with no counter and no invalidation hook exposed for external mutators. No fake/invented reference count was added -- the fix instead eliminates the stale reference outright (by discarding the cached graph).",
+  "tensor_metadata_invalidation_investigated": "Considered (Section 10) -- clearing tensor->buffer/->data on the old tensor, or detaching the stale view, would only patch ONE dangling pointer among however many the cached graph holds (K, V, and any downstream nodes reading them) and would require reaching into gf_res_prev's private tensor list from outside llama_context -- more invasive than resetting the whole cached result, which llama.cpp already does routinely for the same purpose. Not implemented, in favor of the smaller, already-precedented fix.",
+  "vulkan_tensor_extra_cleanup_investigated": "Not applicable -- see vulkan_extra_lifetime.json, Vulkan does not use tensor->extra for anything relevant here.",
+  "scheduler_recreate_diagnostic": {
+    "tested": false,
+    "reason": "Not needed as a diagnostic once the exact mechanism (llama_context's graph-reuse decision, entirely separate from ggml_backend_sched) was traced to source with high confidence (scheduler_lifetime.json) and the targeted fix (llama_invalidate_graph_cache) was validated directly. Recreating the whole scheduler would have been a much blunter, more expensive diagnostic that this investigation's source tracing made unnecessary."
+  },
+  "context_recreate_control": {
+    "tested": false,
+    "reason": "Same as above -- unnecessary once the exact mechanism was identified and the minimal fix validated directly."
+  },
+  "chosen_strategy": "D. scheduler/graph invalidation hook (Section 16's acceptable class D)",
+  "chosen_strategy_detail": "A new minimal public API, llama_invalidate_graph_cache(llama_context *ctx), wrapping llama_context::invalidate_graph_cache() -> gf_res_prev->reset(). Callers that mutate KV cache backend/buffer placement outside the normal memory-update path (i.e. relocate_layer()/retire_layer_backing()) must call this once before the next decode. This is NOT a generation-delay queue (Section 8) -- no bounded-lifetime tracking was needed because immediate retirement is already safe with this call in place.",
+  "ownership_model": {
+    "states": [
+      "ACTIVE",
+      "REBOUND_OLD_PENDING",
+      "SAFE_TO_RETIRE",
+      "RETIRED"
+    ],
+    "ACTIVE": "layer's K/V tensors point at their current, authoritative backing; no relocation in flight.",
+    "REBOUND_OLD_PENDING": "only reachable via relocate_layer(..., defer_retirement_for_research=true) -- the NEW backing is already authoritative (layers[ikv].k/.v switched), but the OLD backing is recorded in llama_kv_cache::pending_retirement[ikv] rather than freed immediately. RESEARCH ONLY -- the validated real-world fix does not need this state at all, since immediate retirement (skipping straight to RETIRED) is already safe.",
+    "SAFE_TO_RETIRE": "not a distinct tracked state -- determined on demand by the existing live-reference scan (does any layer's tensor still point at old_buf) inside both relocate_layer's immediate-free path and retire_layer_backing().",
+    "RETIRED": "old (ggml_context, ggml_backend_buffer) pair erased from ctxs_bufs and physically freed; pending_retirement entry (if any) cleared.",
+    "generation_ids": "not used -- see retirement_timing.json, no generation-count-based mechanism was needed.",
+    "reference_conditions": "structural, not counted -- \"is old_buf's pointer value found as any live layer's current .k->buffer or .v->buffer\", scanned fresh each time (relocate_layer and retire_layer_backing both re-derive this, never cached)."
+  }
+}

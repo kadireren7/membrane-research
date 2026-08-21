@@ -1,0 +1,1 @@
+{"schema_version":1,"mode":"multi_retire","n_layers":1,"promote_ok":true,"decode_after_promote_ok":true,"retire_ok":true,"decode_after_retire_ok":true,"vram_before_mib":3107,"vram_after_promote_mib":3237,"vram_after_retire_mib":3105,"vram_reclaimed_mib":132}

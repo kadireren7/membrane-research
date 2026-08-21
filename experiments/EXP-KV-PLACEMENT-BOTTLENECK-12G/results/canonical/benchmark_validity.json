@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "rule": {
+    "reject_if_mem_available_drop_pct_gt": 40.0,
+    "reject_if_swap_used_increase_mib_gt": 300.0,
+    "reject_if_load1_gt": 10.0,
+    "reject_if_mem_available_below_mib": 300.0,
+    "note": "Any one condition true over a batch (one model/context's full ratio sweep, host snapshot taken immediately before and after) marks every run in that batch host_noise_flagged=true. Flagged runs are still recorded (section 9: do not hide noisy runs) but excluded from bottleneck-regime claims (section 21)."
+  },
+  "note": "Section 9: every batch is recorded here, including invalid/noisy ones -- nothing is hidden. A batch's runs are still written to their raw JSONL either way; benchmark_validity.json is what downstream classification checks (verify-results.py) consult to decide whether a >=10%% claim is allowed to stand for that model (see bottleneck_map.json + summary.json). In this run, 1 of 16 batches were flagged invalid, and none of them back any MEANINGFUL/STRONG classification (there were none in this dataset) -- so no claim in this phase rests on a noisy batch.",
+  "n_batches": 16,
+  "n_invalid": 1,
+  "batches": [
+    {
+      "phase": "A",
+      "model": "135M",
+      "n_ctx": 2048,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2846.2,
+      "mem_available_after_mib": 2934.9,
+      "swap_used_before_mib": 4080.3,
+      "swap_used_after_mib": 4221.2,
+      "load1_after": 0.97
+    },
+    {
+      "phase": "A",
+      "model": "135M",
+      "n_ctx": 8192,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2928.1,
+      "mem_available_after_mib": 2867.0,
+      "swap_used_before_mib": 4221.2,
+      "swap_used_after_mib": 4154.8,
+      "load1_after": 1.04
+    },
+    {
+      "phase": "A",
+      "model": "135M",
+      "n_ctx": 16384,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2857.6,
+      "mem_available_after_mib": 2809.4,
+      "swap_used_before_mib": 4154.8,
+      "swap_used_after_mib": 4123.9,
+      "load1_after": 1.22
+    },
+    {
+      "phase": "A",
+      "model": "135M",
+      "n_ctx": 32768,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2808.2,
+      "mem_available_after_mib": 2717.6,
+      "swap_used_before_mib": 4123.9,
+      "swap_used_after_mib": 4064.7,
+      "load1_after": 1.07
+    },
+    {
+      "phase": "A",
+      "model": "135M",
+      "n_ctx": 65536,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2726.7,
+      "mem_available_after_mib": 2692.4,
+      "swap_used_before_mib": 4064.7,
+      "swap_used_after_mib": 3914.2,
+      "load1_after": 1.18
+    },
+    {
+      "phase": "A",
+      "model": "360M",
+      "n_ctx": 2048,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2692.7,
+      "mem_available_after_mib": 2642.2,
+      "swap_used_before_mib": 3914.2,
+      "swap_used_after_mib": 3908.3,
+      "load1_after": 1.17
+    },
+    {
+      "phase": "A",
+      "model": "360M",
+      "n_ctx": 8192,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2638.1,
+      "mem_available_after_mib": 2678.9,
+      "swap_used_before_mib": 3908.3,
+      "swap_used_after_mib": 3888.6,
+      "load1_after": 1.25
+    },
+    {
+      "phase": "A",
+      "model": "360M",
+      "n_ctx": 16384,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2677.5,
+      "mem_available_after_mib": 2637.3,
+      "swap_used_before_mib": 3888.6,
+      "swap_used_after_mib": 3879.3,
+      "load1_after": 1.11
+    },
+    {
+      "phase": "A",
+      "model": "360M",
+      "n_ctx": 32768,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2633.8,
+      "mem_available_after_mib": 2602.9,
+      "swap_used_before_mib": 3878.6,
+      "swap_used_after_mib": 3870.3,
+      "load1_after": 1.13
+    },
+    {
+      "phase": "A",
+      "model": "360M",
+      "n_ctx": 65536,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2598.6,
+      "mem_available_after_mib": 2957.2,
+      "swap_used_before_mib": 3870.3,
+      "swap_used_after_mib": 4129.4,
+      "load1_after": 1.3
+    },
+    {
+      "phase": "B",
+      "model": "360M",
+      "n_ctx": 32768,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 2967.2,
+      "mem_available_after_mib": 2759.5,
+      "swap_used_before_mib": 4128.8,
+      "swap_used_after_mib": 3952.2,
+      "load1_after": 1.33
+    },
+    {
+      "phase": "larger_model",
+      "model": "1.5B",
+      "n_ctx": 2048,
+      "valid": false,
+      "invalid_reasons": [
+        "swap_used_increase_mib=674.9"
+      ],
+      "mem_available_before_mib": 2748.1,
+      "mem_available_after_mib": 3261.0,
+      "swap_used_before_mib": 3952.2,
+      "swap_used_after_mib": 4627.0,
+      "load1_after": 2.44
+    },
+    {
+      "phase": "larger_model",
+      "model": "1.5B",
+      "n_ctx": 8192,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 3235.4,
+      "mem_available_after_mib": 3206.4,
+      "swap_used_before_mib": 4626.4,
+      "swap_used_after_mib": 4586.4,
+      "load1_after": 2.2
+    },
+    {
+      "phase": "larger_model",
+      "model": "1.5B",
+      "n_ctx": 16384,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 3190.3,
+      "mem_available_after_mib": 3310.9,
+      "swap_used_before_mib": 4585.8,
+      "swap_used_after_mib": 4654.8,
+      "load1_after": 2.15
+    },
+    {
+      "phase": "q5",
+      "model": "1.5B",
+      "n_ctx": 8192,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 3297.7,
+      "mem_available_after_mib": 3261.5,
+      "swap_used_before_mib": 4653.8,
+      "swap_used_after_mib": 4626.3,
+      "load1_after": 1.66
+    },
+    {
+      "phase": "reproducibility",
+      "model": "1.5B",
+      "n_ctx": 8192,
+      "valid": true,
+      "invalid_reasons": [],
+      "mem_available_before_mib": 3055.4,
+      "mem_available_after_mib": 3122.3,
+      "swap_used_before_mib": 4441.7,
+      "swap_used_after_mib": 4488.1,
+      "load1_after": 1.63
+    }
+  ]
+}

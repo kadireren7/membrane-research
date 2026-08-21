@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 14,
+  "vulkan_release_ctest": {
+    "result": "68/69, sometimes 69/69 -- test_relocate_state (the one new test) always passes; test_mem_guard flakes depending on real-time host swap pressure",
+    "note": "test_mem_guard's failure is confirmed via source read (tools/membrane-kv-exact-sim/mem_guard.cpp: swap_ratio > 0.60 triggers REDUCE_WORKERS, which the test does not expect) to be caused by real host-wide swap pressure on this machine, shared across multiple concurrent sessions -- observed fluctuating between 60% and 68% swap used across repeated runs in this session, sometimes dropping below the 0.60 threshold (69/69) and sometimes not (68/69). This is unrelated to any Phase 12D change: mem_guard.cpp and tools/membrane-kv-exact-sim were never touched (git diff confirms), and every OTHER test including the new test_relocate_state passes consistently regardless of swap pressure. At the exact moment of the Phase 12D commit, swap pressure was sustained above the threshold, so the pre-commit ctest run was 68/69 with only this pre-existing, unrelated, environment-caused test failing."
+  },
+  "product_cli_unmodified": true,
+  "product_cli_check": "git diff --stat tools/membrane-run/ shows no changes this phase.",
+  "kv_modes_unchanged": {
+    "native": "unchanged (test_product_cli passes)",
+    "q8": "unchanged (test_product_cli, test_adaptive_kv_policy pass)",
+    "q5": "unchanged (test_product_cli, test_adaptive_kv_policy pass)",
+    "adaptive": "unchanged (test_adaptive_kv_policy passes)",
+    "compare": "unchanged (no relevant test regression)",
+    "gpu-bench": "unchanged (test_gpu_policy passes)",
+    "auto": "unchanged (test_gpu_policy passes)",
+    "guard": "unchanged (test_mem_guard passes once swap pressure eased -- see above)"
+  },
+  "no_public_cli_addition": true,
+  "files_touched_this_phase": [
+    "CMakeLists.txt",
+    "tools/membrane-kv-runtime-relocate/ (new directory)",
+    "third_party/llama.cpp/include/llama.h",
+    "third_party/llama.cpp/src/llama-kv-cache.h",
+    "third_party/llama.cpp/src/llama-kv-cache.cpp",
+    "third_party/llama.cpp/src/llama-context.cpp"
+  ]
+}

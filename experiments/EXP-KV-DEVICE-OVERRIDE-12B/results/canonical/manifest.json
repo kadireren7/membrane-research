@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "title": "Minimal KV Device Override Patch",
+  "files": {
+    "manifest.json": "this file",
+    "patch_scope.json": "Sections 2-5: patch design, scope-bar compliance, reproducibility, idempotency fix",
+    "placement_maps.json": "Sections 7/8/9: manual placement proof, per-layer table, cross-validated three independent ways",
+    "default_regression.json": "Sections 6/19/20: default-behavior regression, null-callback-equivalence proof",
+    "q8_memory.json": "Sections 10/11/12: Q8_0 VRAM accounting across context matrix and second model",
+    "q5_memory.json": "Section 13: Q5_1 compatibility, precision/placement orthogonality",
+    "correctness.json": "Section 15: token-identity correctness across placement configs",
+    "performance.json": "Section 16: synchronous cross-device attention performance curve",
+    "pressure_test.json": "Section 17: GTX 1650 constrained-region pressure test with weights held fixed",
+    "graph_behavior.json": "Section 14/18: attention/graph scheduler compatibility, automatic transfer classification",
+    "maintenance.json": "Section 22: patch maintenance and upstreamability assessment",
+    "raw_context_matrix_135m.jsonl": "raw data backing q8_memory.json's SmolLM2-135M rows",
+    "raw_q8_vram_16384.jsonl": "raw data backing the ctx=16384 Q8 full/half comparison",
+    "raw_q5_vram_16384.jsonl": "raw data backing q5_memory.json",
+    "raw_second_model_360m.jsonl": "raw data backing q8_memory.json's SmolLM2-360M row",
+    "raw_pressure_test.jsonl": "raw data backing pressure_test.json",
+    "raw_performance_curve.json": "raw data backing performance.json's 4-point curve",
+    "raw_perf_curve_vram_split8.json": "raw VRAM data for the 75%-GPU-KV performance-curve point",
+    "summary.json": "Sections 23/25/26: final narrative summary, decision gate, next-step recommendation"
+  }
+}

@@ -1,0 +1,1910 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ee2ed18..e807054 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -201,6 +201,16 @@ add_library(membrane_kv_device_split_policy STATIC
+ target_include_directories(membrane_kv_device_split_policy PUBLIC
+   tools/membrane-kv-device-override)
+ 
++# Phase 12C: llama-free research state machine for one KV promotion
++# unit (Section 22) -- models the IDEALIZED tiering system described
++# in ownership_state.h, independent of the real probe below. RESEARCH
++# ONLY, experiment/kv-promotion-prefetch branch only. Never linked
++# into membrane-run.
++add_library(membrane_kv_ownership_state STATIC
++  tools/membrane-kv-promotion-prefetch/ownership_state.c)
++target_include_directories(membrane_kv_ownership_state PUBLIC
++  tools/membrane-kv-promotion-prefetch)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -341,6 +351,12 @@ if(MEMBRANE_ENABLE_LLAMA)
+   add_subdirectory(tools/membrane-kv-variance)
+   add_subdirectory(tools/membrane-kv-device-override)
+ 
++  # Phase 12C: real llama-enabled promotion/demotion probe, built on
++  # top of the Phase 12B kv_dev_override patch and the Phase 12A
++  # cb_eval copy mechanism. RESEARCH ONLY, experiment/kv-promotion-
++  # prefetch branch only, no product CLI exposure.
++  add_subdirectory(tools/membrane-kv-promotion-prefetch)
++
+   # Product Phase 5: the live llama.cpp shadow runtime (membrane-llama-
+   # run). Deliberately does NOT use the kv_type_override patch above --
+   # it observes live K/V projection tensors via the clean, unmodified,
+@@ -612,6 +628,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_kv_device_split_policy COMMAND test_kv_device_split_policy)
+ 
++  add_executable(test_kv_ownership_state
++    tools/membrane-kv-promotion-prefetch/test_ownership_state.c)
++  target_link_libraries(test_kv_ownership_state PRIVATE
++    membrane_kv_ownership_state)
++  target_include_directories(test_kv_ownership_state PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_kv_ownership_state COMMAND test_kv_ownership_state)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 33d0b2c..94725a2 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1587,6 +1587,291 @@ def _c75():
+ 	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} is valid and consistent with the recorded evidence"
+ 
+ 
++V12C_DIR = REPO_ROOT / "results" / "phase12" / "promotion-prefetch"
++_V12C_CACHE = {}
++
++
++def _load_v12c(name):
++	key = name
++	if key not in _V12C_CACHE:
++		path = V12C_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12C_CACHE[key] = rows
++		else:
++			_V12C_CACHE[key] = json.loads(path.read_text())
++	return _V12C_CACHE[key]
++
++
++@check("Phase 12C: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual .json/.jsonl file in the directory (including "
++	"itself) and no others")
++def _c76():
++	if not (V12C_DIR / "manifest.json").exists():
++		return False, f"{V12C_DIR}/manifest.json does not exist"
++	m = _load_v12c("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V12C_DIR.glob("*") if p.suffix in (".json", ".jsonl")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
++@check("Phase 12C: ownership_model.json's live-rebind classification is "
++	"'B' (COPY_WORKS_BUT_PLACEMENT_IS_STATIC) and is consistent with "
++	"single_layer_promotion.json / single_layer_demotion.json's own "
++	"classification fields -- no file is allowed to silently claim a "
++	"different (stronger) classification")
++def _c77():
++	om = _load_v12c("ownership_model.json")
++	slp = _load_v12c("single_layer_promotion.json")
++	sld = _load_v12c("single_layer_demotion.json")
++	bad = []
++	if om.get("live_rebind_classification") != "B":
++		bad.append(f"ownership_model.json classification={om.get('live_rebind_classification')!r} != 'B'")
++	if slp.get("classification") != "B":
++		bad.append(f"single_layer_promotion.json classification={slp.get('classification')!r} != 'B'")
++	if sld.get("classification") != "B":
++		bad.append(f"single_layer_demotion.json classification={sld.get('classification')!r} != 'B'")
++	if "duplicate" not in om.get("explicit_tiering_disclosure", "").lower():
++		bad.append("explicit_tiering_disclosure does not mention duplicate backing")
++	return len(bad) == 0, "; ".join(bad) if bad else "classification 'B' consistent across ownership_model/single_layer_promotion/single_layer_demotion"
++
++
++@check("Phase 12C: single_layer_promotion.json / single_layer_demotion."
++	"json hash_match and roundtrip_byte_equal claims are recomputed "
++	"exactly from the underlying raw promote/demote JSON files' own "
++	"src_hash_k/v and dst_hash_k/v fields")
++def _c78():
++	bad = []
++	for artifact_name, raw_names in (
++		("single_layer_promotion.json", [
++			("smollm2_135m_ctx2048_q8_layer4", "raw_promote_135m_layer4.json"),
++			("smollm2_360m_ctx2048_q8_layer4", "raw_promote_360m_layer4.json"),
++		]),
++		("single_layer_demotion.json", [
++			("smollm2_135m_ctx2048_q8_layer20", "raw_demote_135m_layer20.json"),
++			("smollm2_360m_ctx2048_q8_layer20", "raw_demote_360m_layer20.json"),
++		]),
++	):
++		art = _load_v12c(artifact_name)
++		trials = art.get("trials", {})
++		for trial_key, raw_name in raw_names:
++			raw = _load_v12c(raw_name)
++			t = trials.get(trial_key, {})
++			real_hash_match = raw.get("src_hash_k") == raw.get("dst_hash_k") and raw.get("src_hash_v") == raw.get("dst_hash_v")
++			if t.get("hash_match") != real_hash_match:
++				bad.append(f"{artifact_name}/{trial_key}: hash_match claim {t.get('hash_match')} != recomputed {real_hash_match}")
++			if t.get("roundtrip_byte_equal") != raw.get("roundtrip_byte_equal"):
++				bad.append(f"{artifact_name}/{trial_key}: roundtrip_byte_equal claim mismatches raw file")
++			if t.get("poison_had_no_effect_on_output") != raw.get("poison_had_no_effect_on_output"):
++				bad.append(f"{artifact_name}/{trial_key}: poison_had_no_effect_on_output claim mismatches raw file")
++	return len(bad) == 0, "; ".join(bad) if bad else "all hash_match/roundtrip/poison claims recomputed exactly from raw promote/demote files"
++
++
++@check("Phase 12C: copy_microbench.json's mean latency for every "
++	"(group size, direction, sync/async) combination is recomputed "
++	"exactly from raw_copybench.jsonl, and every combination has >= 10 "
++	"repetitions")
++def _c79():
++	rows = _load_v12c("raw_copybench.jsonl")
++	mb = _load_v12c("copy_microbench.json")
++	by_key = {}
++	for r in rows:
++		by_key.setdefault((r["bytes"], r["direction"], r["sync"]), []).append(r["ms"])
++	bad = []
++	for key, entry in mb.get("results", {}).items():
++		k = (entry["bytes"], entry["direction"], entry["sync"])
++		vals = by_key.get(k)
++		if not vals:
++			bad.append(f"{key}: no matching raw rows for {k}")
++			continue
++		if len(vals) < 10:
++			bad.append(f"{key}: only {len(vals)} raw repetitions, need >= 10")
++		recomputed_mean = round(sum(vals) / len(vals), 4)
++		claimed_mean = entry.get("latency_ms", {}).get("mean")
++		if abs(recomputed_mean - claimed_mean) > 1e-3:
++			bad.append(f"{key}: recomputed mean {recomputed_mean} != claimed {claimed_mean}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else f"{len(mb.get('results', {}))} group/direction/sync combinations recomputed exactly from raw_copybench.jsonl, all >= 10 reps"
++
++
++@check("Phase 12C: cycle_stability.json's byte-identity, RSS-growth, "
++	"and VRAM-creep claims are recomputed exactly from "
++	"raw_cycle_stability.jsonl, and at least 50 cycles were run")
++def _c80():
++	rows = _load_v12c("raw_cycle_stability.jsonl")
++	cs = _load_v12c("cycle_stability.json")
++	bad = []
++	if len(rows) < 50:
++		bad.append(f"only {len(rows)} cycles recorded, need >= 50")
++	if cs.get("n_cycles") != len(rows):
++		bad.append(f"n_cycles claim {cs.get('n_cycles')} != actual raw row count {len(rows)}")
++	real_all_ok = all(r["byte_ok"] for r in rows) and all(r["alloc_ok"] for r in rows)
++	if cs.get("all_byte_identity_ok") != all(r["byte_ok"] for r in rows):
++		bad.append("all_byte_identity_ok claim mismatches raw data")
++	if cs.get("all_alloc_ok") != all(r["alloc_ok"] for r in rows):
++		bad.append("all_alloc_ok claim mismatches raw data")
++	rss = [r["rss_kb"] for r in rows]
++	if cs.get("rss_kb", {}).get("growth_kb") != rss[-1] - rss[0]:
++		bad.append("rss_kb.growth_kb does not match last-first from raw data")
++	if not real_all_ok and cs.get("crash") is False:
++		bad.append("byte/alloc failures present but crash claimed False")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(rows)} cycles, all claims recomputed exactly from raw_cycle_stability.jsonl"
++
++
++@check("Phase 12C: failure_cases.json -- every case with a recorded "
++	"result is claimed failed_closed==True (no silent corruption), and "
++	"raw_failure_cases.jsonl backs every case that has one")
++def _c81():
++	fc = _load_v12c("failure_cases.json")
++	raw = _load_v12c("raw_failure_cases.jsonl")
++	raw_by_case = {r["case"]: r for r in raw}
++	bad = []
++	if fc.get("silent_corruption_observed") is not False:
++		bad.append("silent_corruption_observed is not False")
++	n_with_result = 0
++	for case in fc.get("cases_tested", []):
++		if case.get("result") is None:
++			continue
++		n_with_result += 1
++		if case.get("failed_closed") is not True:
++			bad.append(f"case {case.get('case')!r} has a result but failed_closed != True")
++	if n_with_result < 5:
++		bad.append(f"only {n_with_result} cases have a recorded result, need >= 5")
++	if len(raw_by_case) < 5:
++		bad.append(f"raw_failure_cases.jsonl has only {len(raw_by_case)} cases, need >= 5")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{n_with_result} recorded failure cases, all fail closed, backed by raw_failure_cases.jsonl"
++
++
++@check("Phase 12C: vram_accounting.json never claims a VRAM saving, "
++	"and its promote_135m_layer4 VRAM figures match "
++	"raw_promote_135m_layer4.json exactly")
++def _c82():
++	va = _load_v12c("vram_accounting.json")
++	raw = _load_v12c("raw_promote_135m_layer4.json")
++	bad = []
++	if va.get("no_vram_savings_claimed") is not True:
++		bad.append("no_vram_savings_claimed is not True")
++	exp = va.get("experiments", {}).get("promote_135m_layer4_ctx2048", {})
++	for field in ("vram_before_mib", "vram_during_mib", "vram_after_scratch_free_mib"):
++		if exp.get(field) != raw.get(field):
++			bad.append(f"{field}: artifact={exp.get(field)} != raw={raw.get(field)}")
++	return len(bad) == 0, "; ".join(bad) if bad else "no savings claimed; VRAM figures match raw promote data exactly"
++
++
++@check("Phase 12C: pressure_test.json's promotion_attempt is backed by "
++	"raw_pressure_promote_360m_layer12.json (ok, roundtrip, VRAM "
++	"figures all match exactly), and the baseline config matches "
++	"raw_pressure_info_360m_ctx200000_split16.json")
++def _c83():
++	pt = _load_v12c("pressure_test.json")
++	raw_p = _load_v12c("raw_pressure_promote_360m_layer12.json")
++	raw_i = _load_v12c("raw_pressure_info_360m_ctx200000_split16.json")
++	bad = []
++	pa = pt.get("promotion_attempt", {})
++	for field in ("ok", "vram_before_mib", "vram_during_mib", "vram_after_scratch_free_mib", "roundtrip_byte_equal", "poison_had_no_effect_on_output"):
++		if pa.get(field) != raw_p.get(field):
++			bad.append(f"promotion_attempt.{field}: artifact={pa.get(field)} != raw={raw_p.get(field)}")
++	bc = pt.get("baseline_config", {})
++	if bc.get("n_cpu_kv_layers") != raw_i.get("n_cpu_kv_layers") or bc.get("n_gpu_kv_layers") != raw_i.get("n_gpu_kv_layers"):
++		bad.append("baseline_config KV layer split does not match raw info file")
++	if pa.get("ok") is not True or pa.get("roundtrip_byte_equal") is not True:
++		bad.append("promotion at the pressure boundary is not claimed ok+roundtrip-correct")
++	return len(bad) == 0, "; ".join(bad) if bad else "pressure_test.json fields match raw pressure-regime files exactly, promotion succeeded"
++
++
++@check("Phase 12C: headroom_rule.json's false_safe_count/"
++	"false_reject_count match the recomputed count of attempts_audited "
++	"entries with false_safe/false_reject set True")
++def _c84():
++	hr = _load_v12c("headroom_rule.json")
++	attempts = hr.get("attempts_audited", [])
++	bad = []
++	fs = sum(1 for a in attempts if a.get("false_safe") is True)
++	fr = sum(1 for a in attempts if a.get("false_reject") is True)
++	if hr.get("false_safe_count") != fs:
++		bad.append(f"false_safe_count claim {hr.get('false_safe_count')} != recomputed {fs}")
++	if hr.get("false_reject_count") != fr:
++		bad.append(f"false_reject_count claim {hr.get('false_reject_count')} != recomputed {fr}")
++	if len(attempts) < 2:
++		bad.append(f"only {len(attempts)} attempts audited, need >= 2 (at least one accept, one reject)")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(attempts)} attempts audited, false_safe/false_reject counts recomputed exactly"
++
++
++@check("Phase 12C: correctness.json's token_identity claim is "
++	"recomputed exactly from raw_sync_stall.jsonl (variant=none) "
++	"against raw_promote_135m_layer4.json/raw_demote_135m_layer20."
++	"json's generated_control tokens")
++def _c85():
++	stall_rows = _load_v12c("raw_sync_stall.jsonl")
++	none_runs = [r for r in stall_rows if r["variant"] == "none"]
++	corr = _load_v12c("correctness.json")
++	raw_p = _load_v12c("raw_promote_135m_layer4.json")
++	raw_d = _load_v12c("raw_demote_135m_layer20.json")
++	bad = []
++	if not none_runs:
++		return False, "no variant=none rows in raw_sync_stall.jsonl"
++	baseline = none_runs[0]["generated_tokens"][:8]
++	real_identical = (baseline == raw_p["generated_control"]) and (baseline == raw_d["generated_control"])
++	ti = corr.get("token_identity", {})
++	if ti.get("identical") != real_identical:
++		bad.append(f"token_identity.identical claim {ti.get('identical')} != recomputed {real_identical}")
++	if ti.get("static_no_movement_first_8_tokens") != baseline:
++		bad.append("static_no_movement_first_8_tokens does not match raw_sync_stall.jsonl")
++	return len(bad) == 0, "; ".join(bad) if bad else "token identity claim recomputed exactly from raw stall+promote+demote files"
++
++
++@check("Phase 12C: no absolute filesystem paths (/home/..., /tmp/..., "
++	"etc.) leaked in any promotion-prefetch .json/.jsonl artifact")
++def _c86():
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	hits = []
++	for path in sorted(V12C_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		found = pattern.findall(path.read_text())
++		# model paths like "models/SmolLM2-...gguf" are relative (no leading /) and fine
++		found = [h for h in found if not h.startswith("/models/")]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all promotion-prefetch artifact files"
++
++
++@check("Phase 12C: summary.json's decision_gate is one of the six valid "
++	"values, and every explicit_non_actions_confirmed flag is True "
++	"(no unsupported product/policy claim was allowed to sneak in)")
++def _c87():
++	s = _load_v12c("summary.json")
++	valid = {
++		"LIVE_KV_TIERING_FEASIBLE",
++		"LIVE_KV_COPY_WORKS_BUT_REBIND_STATIC",
++		"LIVE_KV_TIERING_REQUIRES_UPSTREAM_CHANGE",
++		"LIVE_KV_TIERING_TOO_SLOW_SYNCHRONOUSLY",
++		"LIVE_KV_TIERING_BACKEND_LIMITED",
++		"LIVE_KV_TIERING_INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the six valid values")
++	non_actions = s.get("explicit_non_actions_confirmed", {})
++	if not non_actions or not all(non_actions.values()):
++		bad.append(f"explicit_non_actions_confirmed has a False/missing flag: {non_actions}")
++	if gate == "LIVE_KV_TIERING_FEASIBLE":
++		va = _load_v12c("vram_accounting.json")
++		if va.get("no_vram_savings_claimed") is True:
++			bad.append("decision_gate=FEASIBLE but vram_accounting.json still claims no_vram_savings_claimed=True (contradiction)")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} valid, all non-action flags confirmed True"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1611,6 +1896,7 @@ def main() -> int:
+ 			_c52, _c53, _c54, _c55, _c56, _c57, _c58, _c59, _c60, _c61,
+ 			_c62, _c63,
+ 			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73, _c74, _c75,
++			_c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83, _c84, _c85, _c86, _c87,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-promotion-prefetch/CMakeLists.txt b/tools/membrane-kv-promotion-prefetch/CMakeLists.txt
+new file mode 100644
+index 0000000..aa7be95
+--- /dev/null
++++ b/tools/membrane-kv-promotion-prefetch/CMakeLists.txt
+@@ -0,0 +1,10 @@
++# Phase 12C: research-only KV promotion/demotion probe, built on top
++# of the Phase 12B kv_dev_override patch. No product CLI exposure --
++# experiment/kv-promotion-prefetch branch only.
++
++add_executable(membrane-kv-promotion-prefetch-probe promotion_probe.cpp)
++set_target_properties(membrane-kv-promotion-prefetch-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-promotion-prefetch-probe PRIVATE llama
++  membrane_kv_ownership_state)
+diff --git a/tools/membrane-kv-promotion-prefetch/ownership_state.c b/tools/membrane-kv-promotion-prefetch/ownership_state.c
+new file mode 100644
+index 0000000..a524a88
+--- /dev/null
++++ b/tools/membrane-kv-promotion-prefetch/ownership_state.c
+@@ -0,0 +1,111 @@
++#include <stddef.h>
++#include <limits.h>
++
++#include "ownership_state.h"
++
++int	membrane_kv_owner_init(struct s_membrane_kv_owner *o,
++		uint64_t group_bytes)
++{
++	if (o == NULL || group_bytes == 0)
++		return (0);
++	o->state = MEMBRANE_KV_STATE_CPU_RESIDENT;
++	o->group_bytes = group_bytes;
++	o->cpu_bytes = group_bytes;
++	o->gpu_bytes = 0;
++	return (1);
++}
++
++int	membrane_kv_owner_apply(struct s_membrane_kv_owner *o,
++		enum e_membrane_kv_owner_event ev)
++{
++	if (o == NULL)
++		return (0);
++	if (o->state == MEMBRANE_KV_STATE_CPU_RESIDENT
++			&& ev == MEMBRANE_KV_EVENT_START_PROMOTE)
++	{
++		o->state = MEMBRANE_KV_STATE_PROMOTING;
++		o->gpu_bytes = o->group_bytes;
++		return (1);
++	}
++	if (o->state == MEMBRANE_KV_STATE_PROMOTING
++			&& ev == MEMBRANE_KV_EVENT_PROMOTE_OK)
++	{
++		o->state = MEMBRANE_KV_STATE_GPU_RESIDENT;
++		o->cpu_bytes = 0;
++		return (1);
++	}
++	if (o->state == MEMBRANE_KV_STATE_PROMOTING
++			&& ev == MEMBRANE_KV_EVENT_PROMOTE_FAIL)
++	{
++		o->state = MEMBRANE_KV_STATE_ERROR;
++		o->gpu_bytes = 0;
++		return (1);
++	}
++	if (o->state == MEMBRANE_KV_STATE_GPU_RESIDENT
++			&& ev == MEMBRANE_KV_EVENT_START_DEMOTE)
++	{
++		o->state = MEMBRANE_KV_STATE_DEMOTING;
++		o->cpu_bytes = o->group_bytes;
++		return (1);
++	}
++	if (o->state == MEMBRANE_KV_STATE_DEMOTING
++			&& ev == MEMBRANE_KV_EVENT_DEMOTE_OK)
++	{
++		o->state = MEMBRANE_KV_STATE_CPU_RESIDENT;
++		o->gpu_bytes = 0;
++		return (1);
++	}
++	if (o->state == MEMBRANE_KV_STATE_DEMOTING
++			&& ev == MEMBRANE_KV_EVENT_DEMOTE_FAIL)
++	{
++		o->state = MEMBRANE_KV_STATE_ERROR;
++		o->cpu_bytes = 0;
++		return (1);
++	}
++	return (0);
++}
++
++int	membrane_kv_owner_bytes_consistent(const struct s_membrane_kv_owner *o)
++{
++	if (o == NULL)
++		return (0);
++	if (o->state == MEMBRANE_KV_STATE_CPU_RESIDENT)
++		return (o->cpu_bytes == o->group_bytes && o->gpu_bytes == 0);
++	if (o->state == MEMBRANE_KV_STATE_GPU_RESIDENT)
++		return (o->cpu_bytes == 0 && o->gpu_bytes == o->group_bytes);
++	if (o->state == MEMBRANE_KV_STATE_PROMOTING
++			|| o->state == MEMBRANE_KV_STATE_DEMOTING)
++		return (o->cpu_bytes == o->group_bytes
++			&& o->gpu_bytes == o->group_bytes);
++	if (o->state == MEMBRANE_KV_STATE_ERROR)
++	{
++		if (o->cpu_bytes == o->group_bytes && o->gpu_bytes == 0)
++			return (1);
++		if (o->gpu_bytes == o->group_bytes && o->cpu_bytes == 0)
++			return (1);
++		return (0);
++	}
++	return (0);
++}
++
++int	membrane_kv_promo_headroom_ok(uint64_t free_vram_bytes,
++		uint64_t reserve_bytes, uint64_t group_bytes,
++		uint64_t compute_buffer_bytes, uint64_t safety_margin_bytes)
++{
++	uint64_t	need;
++	uint64_t	sum;
++
++	need = reserve_bytes;
++	sum = need + group_bytes;
++	if (sum < need)
++		return (0);
++	need = sum;
++	sum = need + compute_buffer_bytes;
++	if (sum < need)
++		return (0);
++	need = sum;
++	sum = need + safety_margin_bytes;
++	if (sum < need)
++		return (0);
++	return (free_vram_bytes >= sum);
++}
+diff --git a/tools/membrane-kv-promotion-prefetch/ownership_state.h b/tools/membrane-kv-promotion-prefetch/ownership_state.h
+new file mode 100644
+index 0000000..8bfcf38
+--- /dev/null
++++ b/tools/membrane-kv-promotion-prefetch/ownership_state.h
+@@ -0,0 +1,111 @@
++#ifndef MEMBRANE_KV_PROMOTION_PREFETCH_OWNERSHIP_STATE_H
++# define MEMBRANE_KV_PROMOTION_PREFETCH_OWNERSHIP_STATE_H
++
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 12C, Section 22: llama-free (no ggml/llama header) research
++ * state machine for ONE KV promotion unit (one layer, or one
++ * predeclared layer group). This models the IDEALIZED tiering system
++ * (authoritative bytes fully move, no permanent duplicate) described
++ * in Section 14 -- it is deliberately independent of what the real
++ * llama.cpp integration can currently deliver (see
++ * results/phase12/promotion-prefetch/ownership_model.json for the
++ * disclosed gap: the real probe cannot flip which tensor a live
++ * decode reads from, so it always keeps a duplicate). This machine
++ * exists to make the bookkeeping/headroom logic testable in
++ * isolation, not to claim the real probe achieves idealized tiering.
++ * RESEARCH ONLY, experiment/kv-promotion-prefetch branch only.
++ */
++
++enum e_membrane_kv_owner_state
++{
++	MEMBRANE_KV_STATE_CPU_RESIDENT = 0,
++	MEMBRANE_KV_STATE_PROMOTING,
++	MEMBRANE_KV_STATE_GPU_RESIDENT,
++	MEMBRANE_KV_STATE_DEMOTING,
++	MEMBRANE_KV_STATE_ERROR
++};
++
++enum e_membrane_kv_owner_event
++{
++	MEMBRANE_KV_EVENT_START_PROMOTE = 0,
++	MEMBRANE_KV_EVENT_PROMOTE_OK,
++	MEMBRANE_KV_EVENT_PROMOTE_FAIL,
++	MEMBRANE_KV_EVENT_START_DEMOTE,
++	MEMBRANE_KV_EVENT_DEMOTE_OK,
++	MEMBRANE_KV_EVENT_DEMOTE_FAIL
++};
++
++struct s_membrane_kv_owner
++{
++	enum e_membrane_kv_owner_state	state;
++	uint64_t						cpu_bytes;
++	uint64_t						gpu_bytes;
++	uint64_t						group_bytes;
++};
++
++/*
++ * Resets *o to MEMBRANE_KV_STATE_CPU_RESIDENT with cpu_bytes ==
++ * group_bytes and gpu_bytes == 0 -- the only legal starting point for
++ * this machine (a promotable unit starts life CPU-resident). group_bytes
++ * must be > 0. Returns 1 on success, 0 (o untouched) if o is NULL or
++ * group_bytes == 0.
++ */
++int	membrane_kv_owner_init(struct s_membrane_kv_owner *o,
++		uint64_t group_bytes);
++
++/*
++ * Applies one event to *o. Returns 1 if the transition was legal and
++ * applied, 0 if the event is illegal from the current state (o is left
++ * UNCHANGED on rejection -- never silently moved to ERROR by an
++ * illegal-transition attempt, since "illegal call" and "the promotion
++ * itself failed" are different things and callers need to tell them
++ * apart). The only transitions that ever land in
++ * MEMBRANE_KV_STATE_ERROR are explicit *_FAIL events applied from
++ * PROMOTING/DEMOTING.
++ *
++ * Legal transitions:
++ *   CPU_RESIDENT + START_PROMOTE  -> PROMOTING   (gpu_bytes = group_bytes, cpu_bytes unchanged -- duplicate exists)
++ *   PROMOTING    + PROMOTE_OK     -> GPU_RESIDENT (cpu_bytes = 0 -- CPU copy released)
++ *   PROMOTING    + PROMOTE_FAIL   -> ERROR        (gpu_bytes = 0 -- partial GPU copy discarded, CPU stays authoritative)
++ *   GPU_RESIDENT + START_DEMOTE   -> DEMOTING     (cpu_bytes = group_bytes, gpu_bytes unchanged -- duplicate exists)
++ *   DEMOTING     + DEMOTE_OK      -> CPU_RESIDENT (gpu_bytes = 0 -- GPU copy released)
++ *   DEMOTING     + DEMOTE_FAIL    -> ERROR        (cpu_bytes = 0 -- partial CPU copy discarded, GPU stays authoritative)
++ * Everything else (including promoting an already-GPU_RESIDENT unit,
++ * demoting an already-CPU_RESIDENT unit, or any event from ERROR) is
++ * illegal and rejected.
++ */
++int	membrane_kv_owner_apply(struct s_membrane_kv_owner *o,
++		enum e_membrane_kv_owner_event ev);
++
++/*
++ * 1 if cpu_bytes + gpu_bytes matches what the current state implies
++ * (CPU_RESIDENT: cpu==group, gpu==0; GPU_RESIDENT: cpu==0, gpu==group;
++ * PROMOTING/DEMOTING: cpu==group AND gpu==group, i.e. a real duplicate;
++ * ERROR: exactly one of cpu/gpu == group, the other == 0, matching
++ * whichever side stayed authoritative), 0 otherwise. Used by tests and
++ * by the real probe to sanity-check its own bookkeeping never drifts.
++ */
++int	membrane_kv_owner_bytes_consistent(const struct s_membrane_kv_owner *o);
++
++/*
++ * Section 18: free_vram_bytes >= reserve_bytes + group_bytes +
++ * compute_buffer_bytes + safety_margin_bytes. Returns 1 (safe to
++ * attempt promotion) or 0 (refuse). All five inputs must be
++ * representable as non-negative; overflow of the RHS sum is checked
++ * and treated as 0 (refuse), never wraps into a false "safe".
++ */
++int	membrane_kv_promo_headroom_ok(uint64_t free_vram_bytes,
++		uint64_t reserve_bytes, uint64_t group_bytes,
++		uint64_t compute_buffer_bytes, uint64_t safety_margin_bytes);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-promotion-prefetch/promotion_probe.cpp b/tools/membrane-kv-promotion-prefetch/promotion_probe.cpp
+new file mode 100644
+index 0000000..dfa77d6
+--- /dev/null
++++ b/tools/membrane-kv-promotion-prefetch/promotion_probe.cpp
+@@ -0,0 +1,1101 @@
++/*
++ * Phase 12C: controlled KV promotion/demotion research probe, built
++ * on top of the Phase 12B kv_dev_override patch (per-layer KV
++ * placement at context-construction time) and the Phase 12A/12B
++ * cb_eval + ggml_tensor::view_src + ggml_backend_tensor_get/set copy
++ * mechanism. Deterministic/manual schedules only -- no adaptive
++ * policy, no product CLI exposure. RESEARCH ONLY,
++ * experiment/kv-promotion-prefetch branch only.
++ *
++ * Section 6 finding this tool exists to demonstrate empirically:
++ * llama_kv_cache::layers[ikv].k/.v (the tensor pointers the graph
++ * builder reads FRESH every llama_decode() call via get_k/get_v) are
++ * PRIVATE and never reassigned after construction anywhere in
++ * llama-kv-cache.cpp. So a "promoted" copy can be written to a
++ * standalone scratch tensor on the other device and byte-verified,
++ * but there is no public way to make a live decode actually consume
++ * it -- see the poison test in cmd_move below, which falsifies "does
++ * generation read the promoted copy?" directly rather than asserting
++ * it from code reading alone.
++ *
++ * Modes needing a real model (mp.n_gpu_layers=-1, weights always
++ * fully GPU-resident, kv_dev_override splits KV only):
++ *   info            MODEL n_ctx kv_type split
++ *   promote|demote  MODEL n_ctx kv_type split layer [huge]
++ *   multi_schedule  MODEL n_ctx kv_type split layer...
++ *   stall           MODEL n_ctx kv_type split gen_tokens variant layer...
++ *                   variant: none|pre|repeated (Section 10 A-E)
++ *   prefetch        MODEL n_ctx kv_type split gen_tokens layer...
++ *                   (Section 12 deterministic async overlap prototype)
++ * Modes that only need the backend registry (no model, no context --
++ * used for microbenchmark/cycle-stability so repeated measurements
++ * don't pay a full model-load cost on this RAM-constrained host; byte
++ * sizes are still real, taken from a prior `info` run's k_bytes/
++ * v_bytes so the transferred volume matches real KV layers exactly):
++ *   copybench       group_layer_bytes reps
++ *   cycle           bytes cycles
++ */
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <string>
++#include <vector>
++
++#include "ggml-backend.h"
++#include "llama.h"
++#include "ownership_state.h"
++
++/* ---------- shared plumbing (mirrors device_override_probe.cpp) ---------- */
++
++struct capture_ctx_t
++{
++	int32_t					n_layer;
++	std::vector<ggml_tensor *>	k_leaf;
++	std::vector<ggml_tensor *>	v_leaf;
++	std::vector<ggml_tensor *>	w_leaf; /* one weight tensor per layer, any kind */
++};
++
++static bool	layer_from_name(const char *name, const char *prefix, int32_t *out)
++{
++	size_t	plen = strlen(prefix);
++	char	*end;
++	long	v;
++
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer < c->n_layer
++			&& c->k_leaf[layer] == nullptr)
++		c->k_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer < c->n_layer
++			&& c->v_leaf[layer] == nullptr)
++		c->v_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (strncmp(t->name, "blk.", 4) == 0 && layer_from_name(t->name + 4, "", &layer)
++			&& layer < c->n_layer && c->w_leaf[layer] == nullptr)
++		c->w_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++struct split_ctx_t
++{
++	int32_t	split; /* [0, split) -> CPU KV, [split, n_layer) -> GPU KV */
++};
++
++static ggml_backend_dev_t	split_kv_dev_override(int32_t il,
++				ggml_backend_dev_t default_dev, void *ud)
++{
++	split_ctx_t	*s = static_cast<split_ctx_t *>(ud);
++
++	if (il < s->split)
++		return (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++	return (default_dev);
++}
++
++static uint64_t	read_rss_kb(void)
++{
++	std::ifstream	f("/proc/self/status");
++	std::string		line;
++
++	while (std::getline(f, line))
++	{
++		if (line.compare(0, 6, "VmRSS:") == 0)
++			return ((uint64_t)strtoull(line.c_str() + 6, nullptr, 10));
++	}
++	return (0);
++}
++
++static long	nvidia_smi_used_mib(void)
++{
++	FILE	*p = popen(
++		"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null",
++		"r");
++	char	buf[64];
++	long	v = -1;
++
++	if (p == nullptr)
++		return (-1);
++	if (fgets(buf, sizeof(buf), p) != nullptr)
++		v = strtol(buf, nullptr, 10);
++	pclose(p);
++	return (v);
++}
++
++static long	nvidia_smi_total_mib(void)
++{
++	FILE	*p = popen(
++		"nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null",
++		"r");
++	char	buf[64];
++	long	v = -1;
++
++	if (p == nullptr)
++		return (-1);
++	if (fgets(buf, sizeof(buf), p) != nullptr)
++		v = strtol(buf, nullptr, 10);
++	pclose(p);
++	return (v);
++}
++
++static double	now_ms(void)
++{
++	auto	t = std::chrono::steady_clock::now();
++
++	return (std::chrono::duration<double, std::milli>(
++		t.time_since_epoch()).count());
++}
++
++static const char	*kv_type_name(const char *s)
++{
++	if (strcmp(s, "q8") == 0)
++		return ("Q8_0");
++	if (strcmp(s, "q5") == 0)
++		return ("Q5_1");
++	return ("F16");
++}
++
++/* ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) returns NULL
++ * on a build with no GPU backend registered (e.g. GGML_VULKAN=OFF).
++ * Every mode that needs a GPU device must check this BEFORE passing
++ * it to ggml_backend_dev_buffer_type/ggml_backend_dev_init -- both
++ * hit a hard GGML_ASSERT(device) and SIGABRT the whole process on a
++ * NULL device, which is not a fail-closed error path (Section 21). */
++static bool	require_gpu_device(ggml_backend_dev_t dev, const char *mode)
++{
++	if (dev != nullptr)
++		return (true);
++	printf("{\"schema_version\":1,\"mode\":\"%s\",\"ok\":false,"
++		"\"error\":\"backend_unavailable\",\"detail\":\"no GPU backend "
++		"device registered (e.g. a CPU-only/GGML_VULKAN=OFF build)\"}\n",
++		mode);
++	return (false);
++}
++
++struct loaded_t
++{
++	llama_model			*model;
++	llama_context		*ctx;
++	capture_ctx_t		cap;
++	int32_t				n_layer;
++	const llama_vocab	*vocab;
++};
++
++static bool	load_ctx(const char *model_path, int32_t n_ctx,
++			const char *kv_type_str, int32_t split, loaded_t *out)
++{
++	llama_model_params	mp = llama_model_default_params();
++
++	mp.n_gpu_layers = -1;
++	out->model = llama_model_load_from_file(model_path, mp);
++	if (out->model == nullptr)
++		return (false);
++	out->n_layer = llama_model_n_layer(out->model);
++	out->vocab = llama_model_get_vocab(out->model);
++	out->cap.n_layer = out->n_layer;
++	out->cap.k_leaf.assign(out->n_layer, nullptr);
++	out->cap.v_leaf.assign(out->n_layer, nullptr);
++	out->cap.w_leaf.assign(out->n_layer, nullptr);
++
++	static split_ctx_t	split_ctx;
++	split_ctx.split = split;
++
++	ggml_type	kvt = strcmp(kv_type_str, "q8") == 0 ? GGML_TYPE_Q8_0
++		: strcmp(kv_type_str, "q5") == 0 ? GGML_TYPE_Q5_1 : GGML_TYPE_F16;
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.type_k = kvt;
++	cp.type_v = kvt;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &out->cap;
++	if (split >= 0)
++	{
++		cp.kv_dev_override = split_kv_dev_override;
++		cp.kv_dev_override_ud = &split_ctx;
++	}
++	out->ctx = llama_init_from_model(out->model, cp);
++	return (out->ctx != nullptr);
++}
++
++static void	free_loaded(loaded_t *l)
++{
++	if (l->ctx)
++		llama_free(l->ctx);
++	if (l->model)
++		llama_model_free(l->model);
++	l->ctx = nullptr;
++	l->model = nullptr;
++}
++
++static bool	decode_prompt(loaded_t *l, const char *prompt)
++{
++	std::vector<llama_token>	tokens(256);
++	int	n = llama_tokenize(l->vocab, prompt, (int32_t)strlen(prompt),
++			tokens.data(), (int32_t)tokens.size(), true, false);
++
++	if (n < 0)
++		return (false);
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	return (llama_decode(l->ctx, batch) == 0);
++}
++
++static bool	generate_greedy(loaded_t *l, int gen_tokens,
++			std::vector<llama_token> *out)
++{
++	int32_t	n_vocab = llama_vocab_n_tokens(l->vocab);
++
++	out->clear();
++	for (int i = 0; i < gen_tokens; i++)
++	{
++		const float	*logits = llama_get_logits_ith(l->ctx, -1);
++		int	best = 0;
++
++		for (int j = 1; j < n_vocab; j++)
++			if (logits[j] > logits[best])
++				best = j;
++		llama_token	tok = (llama_token)best;
++		out->push_back(tok);
++		llama_batch	b1 = llama_batch_get_one(&tok, 1);
++		if (llama_decode(l->ctx, b1) != 0)
++			return (false);
++	}
++	return (true);
++}
++
++static void	print_tokens(FILE *fp, const std::vector<llama_token> &v)
++{
++	for (size_t i = 0; i < v.size(); i++)
++		fprintf(fp, "%s%d", i == 0 ? "" : ",", v[i]);
++}
++
++/* ---------- scratch tensor helpers ---------- */
++
++struct scratch_t
++{
++	ggml_context			*ctx;
++	ggml_backend_buffer_t	buf;
++	ggml_tensor				*t;
++	uint64_t				nbytes;
++};
++
++static bool	scratch_alloc(ggml_backend_buffer_type_t buft, uint64_t nbytes,
++			scratch_t *out)
++{
++	ggml_init_params	ip = { /*.mem_size=*/ ggml_tensor_overhead() + 64,
++			/*.mem_buffer=*/ nullptr, /*.no_alloc=*/ true };
++
++	out->ctx = ggml_init(ip);
++	out->buf = nullptr;
++	out->t = nullptr;
++	if (out->ctx == nullptr)
++		return (false);
++	out->t = ggml_new_tensor_1d(out->ctx, GGML_TYPE_I8, (int64_t)nbytes);
++	ggml_set_name(out->t, "membrane_kv_promo_scratch");
++	out->buf = ggml_backend_alloc_ctx_tensors_from_buft(out->ctx, buft);
++	if (out->buf == nullptr)
++	{
++		ggml_free(out->ctx);
++		out->ctx = nullptr;
++		return (false);
++	}
++	out->nbytes = nbytes;
++	return (true);
++}
++
++static void	scratch_free(scratch_t *s)
++{
++	if (s->buf)
++		ggml_backend_buffer_free(s->buf);
++	if (s->ctx)
++		ggml_free(s->ctx);
++	s->buf = nullptr;
++	s->ctx = nullptr;
++	s->t = nullptr;
++}
++
++static uint64_t	fnv1a(const uint8_t *p, size_t n)
++{
++	uint64_t	h = 1469598103934665603ULL;
++
++	for (size_t i = 0; i < n; i++)
++	{
++		h ^= p[i];
++		h *= 1099511628211ULL;
++	}
++	return (h);
++}
++
++/* Section 18 headroom rule, wired to real nvidia-smi numbers.
++ * reserve/compute_buffer/margin are fixed, disclosed research
++ * constants (not tuned per model) -- see headroom_rule.json for the
++ * false-safe/false-reject audit against every promotion actually
++ * attempted. */
++#define MEMBRANE_KV_PROMO_RESERVE_MIB	64
++#define MEMBRANE_KV_PROMO_COMPUTE_MIB	32
++#define MEMBRANE_KV_PROMO_MARGIN_MIB	32
++
++static bool	headroom_ok_real(uint64_t group_bytes)
++{
++	long	total = nvidia_smi_total_mib();
++	long	used = nvidia_smi_used_mib();
++
++	if (total < 0 || used < 0 || total < used)
++		return (false);
++	uint64_t	free_bytes = (uint64_t)(total - used) * 1024ULL * 1024ULL;
++
++	return (membrane_kv_promo_headroom_ok(free_bytes,
++			(uint64_t)MEMBRANE_KV_PROMO_RESERVE_MIB * 1024 * 1024,
++			group_bytes,
++			(uint64_t)MEMBRANE_KV_PROMO_COMPUTE_MIB * 1024 * 1024,
++			(uint64_t)MEMBRANE_KV_PROMO_MARGIN_MIB * 1024 * 1024) != 0);
++}
++
++/* ---------- mode: info ---------- */
++
++static int	cmd_info(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "load failed\n");
++		return (3);
++	}
++	/* cb_eval only fires during a real decode -- without this, every
++	 * cap.k_leaf/v_leaf/w_leaf entry stays NULL and every layer below
++	 * reports MISSING regardless of actual placement. */
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "load ok but prompt decode failed\n");
++		free_loaded(&l);
++		return (13);
++	}
++	printf("{\"schema_version\":1,\"mode\":\"info\",\"model\":\"%s\","
++		"\"n_layer\":%d,\"n_ctx\":%d,\"kv_type\":\"%s\",\"split\":%d,"
++		"\"layers\":[", model, l.n_layer, n_ctx, kv_type_name(kvt), split);
++	int	n_cpu_kv = 0, n_gpu_kv = 0, n_gpu_w = 0;
++	for (int32_t i = 0; i < l.n_layer; i++)
++	{
++		uint64_t	kb = l.cap.k_leaf[i] ? ggml_nbytes(l.cap.k_leaf[i]) : 0;
++		uint64_t	vb = l.cap.v_leaf[i] ? ggml_nbytes(l.cap.v_leaf[i]) : 0;
++		const char	*kbuf = l.cap.k_leaf[i] ? ggml_backend_buffer_name(l.cap.k_leaf[i]->buffer) : "MISSING";
++		const char	*wbuf = l.cap.w_leaf[i] ? ggml_backend_buffer_name(l.cap.w_leaf[i]->buffer) : "MISSING";
++		bool	kv_cpu = strstr(kbuf, "CPU") != nullptr;
++		bool	w_gpu = strstr(wbuf, "CPU") == nullptr;
++
++		if (kv_cpu)
++			n_cpu_kv++;
++		else
++			n_gpu_kv++;
++		if (w_gpu)
++			n_gpu_w++;
++		printf("%s{\"layer\":%d,\"k_bytes\":%llu,\"v_bytes\":%llu,"
++			"\"kv_device\":\"%s\",\"weight_device\":\"%s\"}",
++			i == 0 ? "" : ",", i,
++			(unsigned long long)kb, (unsigned long long)vb,
++			kbuf, wbuf);
++	}
++	printf("],\"n_cpu_kv_layers\":%d,\"n_gpu_kv_layers\":%d,"
++		"\"n_gpu_weight_layers\":%d,\"vram_used_mib\":%ld,"
++		"\"vram_total_mib\":%ld}\n",
++		n_cpu_kv, n_gpu_kv, n_gpu_w, nvidia_smi_used_mib(), nvidia_smi_total_mib());
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: promote / demote (single layer + poison test) ---------- */
++
++static int	cmd_move(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int32_t layer, bool is_promote, bool huge)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (layer < 0 || layer >= l.n_layer)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"%s\",\"layer\":%d,"
++			"\"n_layer\":%d,\"ok\":false,\"error\":\"invalid_layer\"}\n",
++			is_promote ? "promote" : "demote", layer, l.n_layer);
++		free_loaded(&l);
++		return (10);
++	}
++	/* cb_eval (and therefore cap.k_leaf/v_leaf) is only populated by a
++	 * real decode -- must run BEFORE any tensor pointer below is read,
++	 * not after (this used to run right before the byte-copy section,
++	 * leaving k/v NULL here and making every promote/demote report a
++	 * spurious already_gpu/already_cpu). */
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		printf("{\"schema_version\":1,\"mode\":\"%s\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"prompt_decode_failed\"}\n",
++			is_promote ? "promote" : "demote", layer);
++		free_loaded(&l);
++		return (13);
++	}
++	ggml_tensor	*k = l.cap.k_leaf[layer];
++	ggml_tensor	*v = l.cap.v_leaf[layer];
++	bool	layer_is_cpu = k && strstr(ggml_backend_buffer_name(k->buffer), "CPU") != nullptr;
++
++	if (is_promote && !layer_is_cpu)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"promote\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"already_gpu\"}\n", layer);
++		free_loaded(&l);
++		return (11);
++	}
++	if (!is_promote && layer_is_cpu)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"demote\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"already_cpu\"}\n", layer);
++		free_loaded(&l);
++		return (12);
++	}
++
++	uint64_t	kb = ggml_nbytes(k);
++	uint64_t	vb = ggml_nbytes(v);
++
++	if (is_promote)
++	{
++		uint64_t	req = huge ? (kb + vb) * 2000000ULL : (kb + vb);
++		if (!headroom_ok_real(req))
++		{
++			printf("{\"schema_version\":1,\"mode\":\"promote\",\"layer\":%d,"
++				"\"ok\":false,\"error\":\"headroom_refused\","
++				"\"required_bytes\":%llu}\n", layer, (unsigned long long)req);
++			free_loaded(&l);
++			return (16);
++		}
++	}
++	if (huge)
++	{
++		/* deliberately request an absurd scratch size to exercise the
++		 * real allocation-failure path (Section 21) safely -- headroom
++		 * check above already refused for the promote direction, so
++		 * this path is reached (by construction) only via `demote huge`,
++		 * which has no headroom pre-check since demotion targets CPU
++		 * (host RAM, not the fixed VRAM pool this rule governs). */
++		ggml_backend_dev_t	dst_dev = is_promote
++			? ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)
++			: ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++		if (!require_gpu_device(dst_dev, is_promote ? "promote" : "demote"))
++		{
++			free_loaded(&l);
++			return (20);
++		}
++		scratch_t	huge_s;
++		bool	ok = scratch_alloc(ggml_backend_dev_buffer_type(dst_dev),
++				(kb + vb) * 2000000ULL, &huge_s);
++		printf("{\"schema_version\":1,\"mode\":\"%s\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"scratch_alloc_%s\"}\n",
++			is_promote ? "promote" : "demote", layer,
++			ok ? "unexpectedly_succeeded" : "failed_closed_as_expected");
++		if (ok)
++			scratch_free(&huge_s);
++		free_loaded(&l);
++		return (ok ? 1 : 17);
++	}
++
++	std::vector<uint8_t>	kbuf(kb), vbuf(vb);
++	long	vram_before = nvidia_smi_used_mib();
++	double	t0 = now_ms();
++	ggml_backend_tensor_get(k, kbuf.data(), 0, kb);
++	ggml_backend_tensor_get(v, vbuf.data(), 0, vb);
++	uint64_t	src_hash_k = fnv1a(kbuf.data(), kb);
++	uint64_t	src_hash_v = fnv1a(vbuf.data(), vb);
++
++	ggml_backend_dev_t	dst_dev = is_promote
++		? ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU)
++		: ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	if (!require_gpu_device(dst_dev, is_promote ? "promote" : "demote"))
++	{
++		free_loaded(&l);
++		return (20);
++	}
++	ggml_backend_buffer_type_t	dst_buft = ggml_backend_dev_buffer_type(dst_dev);
++
++	scratch_t	sk, sv;
++	if (!scratch_alloc(dst_buft, kb, &sk) || !scratch_alloc(dst_buft, vb, &sv))
++	{
++		printf("{\"schema_version\":1,\"mode\":\"%s\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"scratch_alloc_failed\"}\n",
++			is_promote ? "promote" : "demote", layer);
++		free_loaded(&l);
++		return (14);
++	}
++	ggml_backend_tensor_set(sk.t, kbuf.data(), 0, kb);
++	ggml_backend_tensor_set(sv.t, vbuf.data(), 0, vb);
++	double	t1 = now_ms();
++	long	vram_during = nvidia_smi_used_mib();
++
++	std::vector<uint8_t>	kback(kb), vback(vb);
++	ggml_backend_tensor_get(sk.t, kback.data(), 0, kb);
++	ggml_backend_tensor_get(sv.t, vback.data(), 0, vb);
++	bool	roundtrip_ok = (kback == kbuf) && (vback == vbuf);
++	uint64_t	dst_hash_k = fnv1a(kback.data(), kb);
++	uint64_t	dst_hash_v = fnv1a(vback.data(), vb);
++
++	/* control arm: generation with no poisoning at all */
++	std::vector<llama_token>	gen_control;
++	generate_greedy(&l, 8, &gen_control);
++	scratch_free(&sk);
++	scratch_free(&sv);
++	free_loaded(&l);
++
++	/* poisoned arm: independent fresh context, identical config,
++	 * greedy decoding is deterministic so this is a valid A/B. Copy
++	 * the same real bytes into a fresh scratch tensor, corrupt it,
++	 * then generate and compare to the control tokens above. */
++	loaded_t	l2{};
++	if (!load_ctx(model, n_ctx, kvt, split, &l2))
++	{
++		fprintf(stderr, "{\"error\":\"reload_failed\"}\n");
++		return (15);
++	}
++	decode_prompt(&l2, "The quick brown fox jumps over the lazy dog");
++	ggml_tensor	*k2 = l2.cap.k_leaf[layer];
++	ggml_tensor	*v2 = l2.cap.v_leaf[layer];
++	scratch_t	sk2, sv2;
++	scratch_alloc(dst_buft, kb, &sk2);
++	scratch_alloc(dst_buft, vb, &sv2);
++	std::vector<uint8_t>	poison_k(kb, 0xAA), poison_v(vb, 0xAA);
++	ggml_backend_tensor_set(sk2.t, poison_k.data(), 0, kb);
++	ggml_backend_tensor_set(sv2.t, poison_v.data(), 0, vb);
++	(void)k2;
++	(void)v2;
++	std::vector<llama_token>	gen_poisoned;
++	generate_greedy(&l2, 8, &gen_poisoned);
++	bool	poison_had_no_effect = (gen_poisoned == gen_control);
++	long	vram_after_free = nvidia_smi_used_mib();
++	scratch_free(&sk2);
++	scratch_free(&sv2);
++
++	printf("{\"schema_version\":1,\"mode\":\"%s\",\"model\":\"%s\","
++		"\"layer\":%d,\"n_ctx\":%d,\"kv_type\":\"%s\",\"split\":%d,"
++		"\"ok\":true,\"k_bytes\":%llu,\"v_bytes\":%llu,\"copy_ms\":%.4f,"
++		"\"roundtrip_byte_equal\":%s,"
++		"\"src_hash_k\":%llu,\"src_hash_v\":%llu,"
++		"\"dst_hash_k\":%llu,\"dst_hash_v\":%llu,"
++		"\"vram_before_mib\":%ld,\"vram_during_mib\":%ld,"
++		"\"vram_after_scratch_free_mib\":%ld,"
++		"\"generated_control\":[",
++		is_promote ? "promote" : "demote", model, layer, n_ctx,
++		kv_type_name(kvt), split,
++		(unsigned long long)kb, (unsigned long long)vb, t1 - t0,
++		roundtrip_ok ? "true" : "false",
++		(unsigned long long)src_hash_k, (unsigned long long)src_hash_v,
++		(unsigned long long)dst_hash_k, (unsigned long long)dst_hash_v,
++		vram_before, vram_during, vram_after_free);
++	print_tokens(stdout, gen_control);
++	printf("],\"generated_poisoned\":[");
++	print_tokens(stdout, gen_poisoned);
++	printf("],\"poison_had_no_effect_on_output\":%s,"
++		"\"interpretation\":\"poison_had_no_effect_on_output==true means the "
++		"live decode graph never read the scratch/promoted copy -- copy "
++		"works, live rebind does not (classification B)\"}\n",
++		poison_had_no_effect ? "true" : "false");
++
++	free_loaded(&l2);
++	return (0);
++}
++
++/* ---------- mode: multi_schedule ---------- */
++
++static int	cmd_multi_schedule(const char *model, int32_t n_ctx,
++			const char *kvt, int32_t split, const std::vector<int32_t> &layers)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	if (!require_gpu_device(gpu_dev, "multi_schedule"))
++	{
++		free_loaded(&l);
++		return (20);
++	}
++	ggml_backend_buffer_type_t	gpu_buft = ggml_backend_dev_buffer_type(gpu_dev);
++
++	printf("{\"schema_version\":1,\"mode\":\"multi_schedule\",\"model\":\"%s\","
++		"\"n_ctx\":%d,\"kv_type\":\"%s\",\"initial_split\":%d,\"steps\":[",
++		model, n_ctx, kv_type_name(kvt), split);
++	bool	first = true;
++	for (int32_t layer : layers)
++	{
++		if (layer < 0 || layer >= l.n_layer)
++		{
++			printf("%s{\"layer\":%d,\"error\":\"invalid_layer\"}", first ? "" : ",", layer);
++			first = false;
++			continue;
++		}
++		ggml_tensor	*k = l.cap.k_leaf[layer];
++		ggml_tensor	*v = l.cap.v_leaf[layer];
++		uint64_t	kb = ggml_nbytes(k);
++		uint64_t	vb = ggml_nbytes(v);
++		std::vector<uint8_t>	kbuf(kb), vbuf(vb);
++		double	t0 = now_ms();
++		ggml_backend_tensor_get(k, kbuf.data(), 0, kb);
++		ggml_backend_tensor_get(v, vbuf.data(), 0, vb);
++		scratch_t	sk, sv;
++		bool	ok = scratch_alloc(gpu_buft, kb, &sk) && scratch_alloc(gpu_buft, vb, &sv);
++		if (ok)
++		{
++			ggml_backend_tensor_set(sk.t, kbuf.data(), 0, kb);
++			ggml_backend_tensor_set(sv.t, vbuf.data(), 0, vb);
++		}
++		double	t1 = now_ms();
++		long	vram = nvidia_smi_used_mib();
++		printf("%s{\"layer\":%d,\"k_bytes\":%llu,\"v_bytes\":%llu,"
++			"\"copy_ok\":%s,\"copy_ms\":%.4f,\"vram_used_mib\":%ld}",
++			first ? "" : ",", layer, (unsigned long long)kb,
++			(unsigned long long)vb, ok ? "true" : "false", t1 - t0, vram);
++		first = false;
++		if (ok)
++		{
++			scratch_free(&sk);
++			scratch_free(&sv);
++		}
++	}
++	std::vector<llama_token>	gen;
++	bool	gen_ok = generate_greedy(&l, 8, &gen);
++	printf("],\"post_schedule_generation_ok\":%s,\"post_schedule_tokens\":[",
++		gen_ok ? "true" : "false");
++	print_tokens(stdout, gen);
++	printf("]}\n");
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: stall (Section 10: synchronous stall cost) ---------- */
++
++static bool	sync_copy_layer(loaded_t *l, int32_t layer,
++			ggml_backend_dev_t dst_dev, double *copy_ms)
++{
++	ggml_tensor	*k = l->cap.k_leaf[layer];
++	ggml_tensor	*v = l->cap.v_leaf[layer];
++
++	if (!k || !v)
++		return (false);
++
++	uint64_t	kb = ggml_nbytes(k);
++	uint64_t	vb = ggml_nbytes(v);
++	std::vector<uint8_t>	kbuf(kb), vbuf(vb);
++	ggml_backend_buffer_type_t	dst_buft = ggml_backend_dev_buffer_type(dst_dev);
++	scratch_t	sk, sv;
++	double	t0 = now_ms();
++
++	ggml_backend_tensor_get(k, kbuf.data(), 0, kb);
++	ggml_backend_tensor_get(v, vbuf.data(), 0, vb);
++	bool	ok = scratch_alloc(dst_buft, kb, &sk) && scratch_alloc(dst_buft, vb, &sv);
++	if (ok)
++	{
++		ggml_backend_tensor_set(sk.t, kbuf.data(), 0, kb);
++		ggml_backend_tensor_set(sv.t, vbuf.data(), 0, vb);
++	}
++	double	t1 = now_ms();
++	if (ok)
++	{
++		scratch_free(&sk);
++		scratch_free(&sv);
++	}
++	*copy_ms = t1 - t0;
++	return (ok);
++}
++
++/* variant "none" (A): no movement, baseline generation.
++ * variant "pre" (B/C/D depending on |layers|): copy each layer in
++ * `layers` synchronously BEFORE the generation loop starts, then
++ * generate normally.
++ * variant "repeated" (E): cycle through `layers` round-robin, one
++ * synchronous copy immediately before each decode step. */
++static int	cmd_stall(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int gen_tokens, const char *variant,
++			const std::vector<int32_t> &layers)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	if (!require_gpu_device(gpu_dev, "stall"))
++	{
++		free_loaded(&l);
++		return (20);
++	}
++	double	copy_ms_total = 0;
++	int		n_copies = 0;
++	double	t_start = now_ms();
++
++	if (strcmp(variant, "pre") == 0)
++	{
++		for (int32_t layer : layers)
++		{
++			double	cms = 0;
++
++			if (sync_copy_layer(&l, layer, gpu_dev, &cms))
++			{
++				copy_ms_total += cms;
++				n_copies++;
++			}
++		}
++	}
++
++	double	t_decode_start = now_ms();
++	int		n_vocab = llama_vocab_n_tokens(l.vocab);
++	std::vector<llama_token>	gen;
++
++	gen.reserve(gen_tokens);
++	for (int i = 0; i < gen_tokens; i++)
++	{
++		if (strcmp(variant, "repeated") == 0 && !layers.empty())
++		{
++			double	cms = 0;
++
++			if (sync_copy_layer(&l, layers[i % layers.size()], gpu_dev, &cms))
++			{
++				copy_ms_total += cms;
++				n_copies++;
++			}
++		}
++		const float	*logits = llama_get_logits_ith(l.ctx, -1);
++		int	best = 0;
++
++		for (int j = 1; j < n_vocab; j++)
++			if (logits[j] > logits[best])
++				best = j;
++		llama_token	tok = (llama_token)best;
++
++		gen.push_back(tok);
++		llama_batch	b1 = llama_batch_get_one(&tok, 1);
++		if (llama_decode(l.ctx, b1) != 0)
++		{
++			fprintf(stderr, "{\"error\":\"decode_failed\"}\n");
++			free_loaded(&l);
++			return (13);
++		}
++	}
++	double	t_end = now_ms();
++	double	total_ms = t_end - t_start;
++	double	decode_wall_ms = t_end - t_decode_start;
++	double	decode_only_ms = decode_wall_ms
++		- (strcmp(variant, "repeated") == 0 ? copy_ms_total : 0);
++	double	toks_per_sec = (double)gen_tokens / (total_ms / 1000.0);
++
++	printf("{\"schema_version\":1,\"mode\":\"stall\",\"variant\":\"%s\","
++		"\"n_layers_moved\":%d,\"n_copies\":%d,\"gen_tokens\":%d,"
++		"\"total_ms\":%.4f,\"copy_ms_total\":%.4f,\"decode_only_ms\":%.4f,"
++		"\"generation_tok_s\":%.4f,\"generated_tokens\":[",
++		variant, (int)layers.size(), n_copies, gen_tokens, total_ms,
++		copy_ms_total, decode_only_ms, toks_per_sec);
++	print_tokens(stdout, gen);
++	printf("]}\n");
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: prefetch (Section 12: one deterministic overlap) ---------- */
++
++/* At step i, issue an ASYNC copy of layers[i % layers.size()] to a
++ * fresh GPU scratch tensor, then immediately call llama_decode for
++ * the current token (so its GPU compute is enqueued right after the
++ * async copy submission), then ggml_backend_synchronize(). Any part
++ * of the copy NOT hidden behind decode's own compute shows up as
++ * sync_wait_ms -- the residual stall this prototype is measuring. */
++static int	cmd_prefetch(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int gen_tokens, const std::vector<int32_t> &layers)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	if (layers.empty())
++	{
++		fprintf(stderr, "{\"error\":\"no_layers\"}\n");
++		free_loaded(&l);
++		return (2);
++	}
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	if (!require_gpu_device(gpu_dev, "prefetch"))
++	{
++		free_loaded(&l);
++		return (20);
++	}
++	ggml_backend_t		gpu_be = ggml_backend_dev_init(gpu_dev, nullptr);
++
++	if (!gpu_be)
++	{
++		fprintf(stderr, "{\"error\":\"gpu_backend_init_failed\"}\n");
++		free_loaded(&l);
++		return (3);
++	}
++	ggml_backend_buffer_type_t	gpu_buft = ggml_backend_dev_buffer_type(gpu_dev);
++	int		n_vocab = llama_vocab_n_tokens(l.vocab);
++	std::vector<llama_token>	gen;
++
++	gen.reserve(gen_tokens);
++	printf("{\"schema_version\":1,\"mode\":\"prefetch\",\"gen_tokens\":%d,\"steps\":[",
++		gen_tokens);
++	double	total_issue_ms = 0, total_decode_ms = 0, total_sync_wait_ms = 0;
++	for (int i = 0; i < gen_tokens; i++)
++	{
++		int32_t	layer = layers[i % layers.size()];
++		ggml_tensor	*k = l.cap.k_leaf[layer];
++		ggml_tensor	*v = l.cap.v_leaf[layer];
++		uint64_t	kb = ggml_nbytes(k), vb = ggml_nbytes(v);
++		std::vector<uint8_t>	kbuf(kb), vbuf(vb);
++
++		ggml_backend_tensor_get(k, kbuf.data(), 0, kb);
++		ggml_backend_tensor_get(v, vbuf.data(), 0, vb);
++		scratch_t	sk, sv;
++		scratch_alloc(gpu_buft, kb, &sk);
++		scratch_alloc(gpu_buft, vb, &sv);
++
++		double	t0 = now_ms();
++		ggml_backend_tensor_set_async(gpu_be, sk.t, kbuf.data(), 0, kb);
++		ggml_backend_tensor_set_async(gpu_be, sv.t, vbuf.data(), 0, vb);
++		double	t1 = now_ms();
++
++		const float	*logits = llama_get_logits_ith(l.ctx, -1);
++		int	best = 0;
++
++		for (int j = 1; j < n_vocab; j++)
++			if (logits[j] > logits[best])
++				best = j;
++		llama_token	tok = (llama_token)best;
++
++		gen.push_back(tok);
++		llama_batch	b1 = llama_batch_get_one(&tok, 1);
++		llama_decode(l.ctx, b1);
++		double	t2 = now_ms();
++
++		ggml_backend_synchronize(gpu_be);
++		double	t3 = now_ms();
++
++		printf("%s{\"step\":%d,\"layer\":%d,\"issue_ms\":%.4f,"
++			"\"decode_ms\":%.4f,\"sync_wait_ms\":%.4f}",
++			i == 0 ? "" : ",", i, layer, t1 - t0, t2 - t1, t3 - t2);
++		total_issue_ms += t1 - t0;
++		total_decode_ms += t2 - t1;
++		total_sync_wait_ms += t3 - t2;
++		scratch_free(&sk);
++		scratch_free(&sv);
++	}
++	printf("],\"total_issue_ms\":%.4f,\"total_decode_ms\":%.4f,"
++		"\"total_sync_wait_ms\":%.4f,\"generated_tokens\":[",
++		total_issue_ms, total_decode_ms, total_sync_wait_ms);
++	print_tokens(stdout, gen);
++	printf("]}\n");
++	ggml_backend_free(gpu_be);
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: copybench (no model -- see file header) ---------- */
++
++static int	cmd_copybench(uint64_t group_bytes, int reps)
++{
++	ggml_backend_dev_t	cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	if (!require_gpu_device(gpu_dev, "copybench"))
++		return (20);
++	ggml_backend_t		cpu_be = ggml_backend_dev_init(cpu_dev, nullptr);
++	ggml_backend_t		gpu_be = ggml_backend_dev_init(gpu_dev, nullptr);
++
++	if (!cpu_be || !gpu_be)
++	{
++		fprintf(stderr, "{\"error\":\"backend_init_failed\"}\n");
++		return (3);
++	}
++	std::vector<uint8_t>	host(group_bytes, 0x5A);
++
++	scratch_t	cpu_s, gpu_s;
++	if (!scratch_alloc(ggml_backend_dev_buffer_type(cpu_dev), group_bytes, &cpu_s)
++			|| !scratch_alloc(ggml_backend_dev_buffer_type(gpu_dev), group_bytes, &gpu_s))
++	{
++		fprintf(stderr, "{\"error\":\"scratch_alloc_failed\"}\n");
++		return (14);
++	}
++	ggml_backend_tensor_set(cpu_s.t, host.data(), 0, group_bytes);
++
++	for (int rep = 0; rep < reps; rep++)
++	{
++		/* sync CPU -> GPU */
++		double	t0 = now_ms();
++		ggml_backend_tensor_get(cpu_s.t, host.data(), 0, group_bytes);
++		ggml_backend_tensor_set(gpu_s.t, host.data(), 0, group_bytes);
++		double	t1 = now_ms();
++		printf("{\"op\":\"copy\",\"sync\":true,\"direction\":\"cpu_to_gpu\","
++			"\"bytes\":%llu,\"rep\":%d,\"ms\":%.4f}\n",
++			(unsigned long long)group_bytes, rep, t1 - t0);
++
++		/* sync GPU -> CPU */
++		t0 = now_ms();
++		ggml_backend_tensor_get(gpu_s.t, host.data(), 0, group_bytes);
++		ggml_backend_tensor_set(cpu_s.t, host.data(), 0, group_bytes);
++		t1 = now_ms();
++		printf("{\"op\":\"copy\",\"sync\":true,\"direction\":\"gpu_to_cpu\","
++			"\"bytes\":%llu,\"rep\":%d,\"ms\":%.4f}\n",
++			(unsigned long long)group_bytes, rep, t1 - t0);
++
++		/* async CPU -> GPU */
++		t0 = now_ms();
++		ggml_backend_tensor_set_async(gpu_be, gpu_s.t, host.data(), 0, group_bytes);
++		ggml_backend_synchronize(gpu_be);
++		t1 = now_ms();
++		printf("{\"op\":\"copy\",\"sync\":false,\"direction\":\"cpu_to_gpu\","
++			"\"bytes\":%llu,\"rep\":%d,\"ms\":%.4f}\n",
++			(unsigned long long)group_bytes, rep, t1 - t0);
++
++		/* async GPU -> CPU */
++		t0 = now_ms();
++		ggml_backend_tensor_get_async(gpu_be, gpu_s.t, host.data(), 0, group_bytes);
++		ggml_backend_synchronize(gpu_be);
++		t1 = now_ms();
++		printf("{\"op\":\"copy\",\"sync\":false,\"direction\":\"gpu_to_cpu\","
++			"\"bytes\":%llu,\"rep\":%d,\"ms\":%.4f}\n",
++			(unsigned long long)group_bytes, rep, t1 - t0);
++	}
++	scratch_free(&cpu_s);
++	scratch_free(&gpu_s);
++	ggml_backend_free(cpu_be);
++	ggml_backend_free(gpu_be);
++	return (0);
++}
++
++/* ---------- mode: cycle (no model) ---------- */
++
++static int	cmd_cycle(uint64_t bytes, int cycles)
++{
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	if (!require_gpu_device(gpu_dev, "cycle"))
++		return (20);
++	ggml_backend_buffer_type_t	gpu_buft = ggml_backend_dev_buffer_type(gpu_dev);
++	std::vector<uint8_t>	host(bytes);
++
++	for (size_t i = 0; i < host.size(); i++)
++		host[i] = (uint8_t)(i * 2654435761u);
++	uint64_t	src_hash = fnv1a(host.data(), bytes);
++
++	for (int c = 0; c < cycles; c++)
++	{
++		scratch_t	s;
++		bool	ok = scratch_alloc(gpu_buft, bytes, &s);
++		bool	byte_ok = false;
++		if (ok)
++		{
++			ggml_backend_tensor_set(s.t, host.data(), 0, bytes);
++			std::vector<uint8_t>	back(bytes);
++			ggml_backend_tensor_get(s.t, back.data(), 0, bytes);
++			byte_ok = (fnv1a(back.data(), bytes) == src_hash);
++			scratch_free(&s);
++		}
++		printf("{\"cycle\":%d,\"alloc_ok\":%s,\"byte_ok\":%s,"
++			"\"rss_kb\":%llu,\"vram_used_mib\":%ld}\n",
++			c, ok ? "true" : "false", byte_ok ? "true" : "false",
++			(unsigned long long)read_rss_kb(), nvidia_smi_used_mib());
++		if (!ok || !byte_ok)
++			return (18);
++	}
++	return (0);
++}
++
++int	main(int argc, char **argv)
++{
++	llama_backend_init();
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s <mode> ...\n", argv[0]);
++		llama_backend_free();
++		return (2);
++	}
++	std::string	mode = argv[1];
++	int	rc = 2;
++
++	if (mode == "info" && argc >= 6)
++		rc = cmd_info(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]));
++	else if ((mode == "promote" || mode == "demote") && argc >= 7)
++		rc = cmd_move(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), mode == "promote",
++			argc >= 8 && std::string(argv[7]) == "huge");
++	else if (mode == "multi_schedule" && argc >= 7)
++	{
++		std::vector<int32_t>	layers;
++		for (int i = 6; i < argc; i++)
++			layers.push_back(atoi(argv[i]));
++		rc = cmd_multi_schedule(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]), layers);
++	}
++	else if (mode == "stall" && argc >= 8)
++	{
++		std::vector<int32_t>	layers;
++		for (int i = 8; i < argc; i++)
++			layers.push_back(atoi(argv[i]));
++		rc = cmd_stall(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), argv[7], layers);
++	}
++	else if (mode == "prefetch" && argc >= 7)
++	{
++		std::vector<int32_t>	layers;
++		for (int i = 7; i < argc; i++)
++			layers.push_back(atoi(argv[i]));
++		rc = cmd_prefetch(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), layers);
++	}
++	else if (mode == "copybench" && argc >= 4)
++		rc = cmd_copybench((uint64_t)strtoull(argv[2], nullptr, 10), atoi(argv[3]));
++	else if (mode == "cycle" && argc >= 4)
++		rc = cmd_cycle((uint64_t)strtoull(argv[2], nullptr, 10), atoi(argv[3]));
++	else
++	{
++		fprintf(stderr, "unknown mode or missing args: %s\n", mode.c_str());
++		rc = 2;
++	}
++	llama_backend_free();
++	return (rc);
++}
+diff --git a/tools/membrane-kv-promotion-prefetch/test_ownership_state.c b/tools/membrane-kv-promotion-prefetch/test_ownership_state.c
+new file mode 100644
+index 0000000..690f109
+--- /dev/null
++++ b/tools/membrane-kv-promotion-prefetch/test_ownership_state.c
+@@ -0,0 +1,194 @@
++#include "ownership_state.h"
++#include "test_helpers.h"
++
++static void	test_init_basic(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	TEST_ASSERT(membrane_kv_owner_init(&o, 1024) == 1, "init succeeds");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_CPU_RESIDENT,
++		"starts CPU_RESIDENT");
++	TEST_ASSERT(o.cpu_bytes == 1024 && o.gpu_bytes == 0,
++		"cpu_bytes == group_bytes, gpu_bytes == 0 at init");
++	TEST_ASSERT(membrane_kv_owner_bytes_consistent(&o) == 1,
++		"init state is byte-consistent");
++}
++
++static void	test_init_rejects_bad_input(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	TEST_ASSERT(membrane_kv_owner_init(NULL, 1024) == 0,
++		"NULL out pointer fails closed");
++	TEST_ASSERT(membrane_kv_owner_init(&o, 0) == 0,
++		"zero group_bytes fails closed");
++}
++
++static void	test_full_promote_cycle(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 4096);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE)
++		== 1, "CPU_RESIDENT + START_PROMOTE is legal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_PROMOTING, "now PROMOTING");
++	TEST_ASSERT(o.cpu_bytes == 4096 && o.gpu_bytes == 4096,
++		"PROMOTING is a real duplicate (both sides hold group_bytes)");
++	TEST_ASSERT(membrane_kv_owner_bytes_consistent(&o) == 1,
++		"PROMOTING is byte-consistent (duplicate, by design)");
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_OK)
++		== 1, "PROMOTING + PROMOTE_OK is legal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_GPU_RESIDENT,
++		"now GPU_RESIDENT");
++	TEST_ASSERT(o.cpu_bytes == 0 && o.gpu_bytes == 4096,
++		"CPU copy released on successful promotion");
++}
++
++static void	test_full_demote_cycle(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 2048);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_OK);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_DEMOTE)
++		== 1, "GPU_RESIDENT + START_DEMOTE is legal");
++	TEST_ASSERT(o.cpu_bytes == 2048 && o.gpu_bytes == 2048,
++		"DEMOTING duplicates again");
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_DEMOTE_OK)
++		== 1, "DEMOTING + DEMOTE_OK is legal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_CPU_RESIDENT,
++		"back to CPU_RESIDENT");
++	TEST_ASSERT(o.cpu_bytes == 2048 && o.gpu_bytes == 0,
++		"GPU copy released on successful demotion, full round trip");
++}
++
++static void	test_promote_fail_lands_in_error(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 512);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_FAIL)
++		== 1, "PROMOTING + PROMOTE_FAIL is legal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_ERROR, "now ERROR");
++	TEST_ASSERT(o.cpu_bytes == 512 && o.gpu_bytes == 0,
++		"CPU stays authoritative after a failed promotion -- no data loss");
++	TEST_ASSERT(membrane_kv_owner_bytes_consistent(&o) == 1,
++		"ERROR-after-promote-fail is still byte-consistent (CPU side)");
++}
++
++static void	test_demote_fail_lands_in_error(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 777);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_OK);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_DEMOTE);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_DEMOTE_FAIL)
++		== 1, "DEMOTING + DEMOTE_FAIL is legal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_ERROR, "now ERROR");
++	TEST_ASSERT(o.cpu_bytes == 0 && o.gpu_bytes == 777,
++		"GPU stays authoritative after a failed demotion -- no data loss");
++}
++
++static void	test_duplicate_promotion_rejected(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 1000);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_OK);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE)
++		== 0, "promoting an already-GPU_RESIDENT unit is illegal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_GPU_RESIDENT,
++		"rejected event leaves state unchanged, not ERROR");
++}
++
++static void	test_demote_without_gpu_rejected(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 1000);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_DEMOTE)
++		== 0, "demoting an already-CPU_RESIDENT unit is illegal");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_CPU_RESIDENT,
++		"rejected event leaves state unchanged");
++}
++
++static void	test_invalid_transitions_from_every_state(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 64);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_OK)
++		== 0, "PROMOTE_OK from CPU_RESIDENT is illegal (skips PROMOTING)");
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_DEMOTE_OK)
++		== 0, "DEMOTE_OK from CPU_RESIDENT is illegal");
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE)
++		== 0, "START_PROMOTE from PROMOTING is illegal (already in flight)");
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_DEMOTE)
++		== 0, "START_DEMOTE from PROMOTING is illegal");
++}
++
++static void	test_error_is_terminal_to_further_events(void)
++{
++	struct s_membrane_kv_owner	o;
++
++	membrane_kv_owner_init(&o, 64);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE);
++	membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_PROMOTE_FAIL);
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_PROMOTE)
++		== 0, "no event is accepted from ERROR (must be reset externally)");
++	TEST_ASSERT(membrane_kv_owner_apply(&o, MEMBRANE_KV_EVENT_START_DEMOTE)
++		== 0, "no event is accepted from ERROR");
++	TEST_ASSERT(o.state == MEMBRANE_KV_STATE_ERROR,
++		"stays in ERROR, never silently recovers");
++}
++
++static void	test_headroom_exact_boundary(void)
++{
++	TEST_ASSERT(membrane_kv_promo_headroom_ok(1000, 100, 700, 100, 100)
++		== 1, "free == exact required sum -> safe (boundary inclusive)");
++	TEST_ASSERT(membrane_kv_promo_headroom_ok(999, 100, 700, 100, 100)
++		== 0, "one byte short of the required sum -> refuse");
++}
++
++static void	test_headroom_overflow_fails_closed(void)
++{
++	uint64_t	huge;
++
++	huge = (uint64_t)-1;
++	TEST_ASSERT(membrane_kv_promo_headroom_ok(huge, huge, huge, huge, huge)
++		== 0, "RHS overflow is detected and refused, never wraps to a "
++		"false 'safe'");
++}
++
++static void	test_headroom_zero_margins(void)
++{
++	TEST_ASSERT(membrane_kv_promo_headroom_ok(500, 0, 500, 0, 0) == 1,
++		"zero reserve/compute/margin, exact fit -> safe");
++	TEST_ASSERT(membrane_kv_promo_headroom_ok(499, 0, 500, 0, 0) == 0,
++		"zero reserve/compute/margin, one byte short -> refuse");
++}
++
++int	main(void)
++{
++	test_init_basic();
++	test_init_rejects_bad_input();
++	test_full_promote_cycle();
++	test_full_demote_cycle();
++	test_promote_fail_lands_in_error();
++	test_demote_fail_lands_in_error();
++	test_duplicate_promotion_rejected();
++	test_demote_without_gpu_rejected();
++	test_invalid_transitions_from_every_state();
++	test_error_is_terminal_to_further_events();
++	test_headroom_exact_boundary();
++	test_headroom_overflow_fails_closed();
++	test_headroom_zero_margins();
++	printf("test_ownership_state: all tests passed\n");
++	return (0);
++}

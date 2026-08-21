@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 15,
+  "method": "50-cycle (layer 4, starts CPU) and 20-cycle (layer 20, starts GPU) CPU<->GPU round trips, real free + invalidate every cycle, both directions exercised every cycle (each cycle toggles direction).",
+  "cpu_start_layer4_50_cycles": {
+    "all_ok": true,
+    "n_cycles": 50
+  },
+  "gpu_start_layer20_20_cycles": {
+    "all_ok": true,
+    "n_cycles": 20
+  },
+  "release_failure_occurs_in": "BOTH directions before the fix -- Phase 12D's own crash evidence included both a CPU-start (layer 4) and reasoning that applies symmetrically to GPU-start layers, and the root cause (llama_context's backend-agnostic graph-reuse decision) has nothing to do with which physical device is involved.",
+  "is_it_vulkan_specific": "The CRASH MANIFESTATION observed in this investigation is Vulkan-specific (the specific assert/segfault signatures came from ggml-vulkan.cpp reading a dangling tensor->buffer), but the ROOT CAUSE (llama_context reusing a stale graph across an out-of-band KV backend change) is generic to any two-backend relocation, confirmed via source (llama-context.cpp/llama-graph.cpp's reuse logic has no backend-specific code at all). See cpu_control.json for why a live CPU-only crash reproduction was not attempted.",
+  "raw_data": [
+    "raw_cycle_stability_50x.jsonl",
+    "raw_cycle_stability_gpu_start_layer20.jsonl"
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 11,
+  "method": "Inspected ggml-backend.h public API (ggml_backend_tensor_set_async, ggml_backend_tensor_get_async, ggml_backend_synchronize) and the Vulkan backend implementation (ggml-vulkan.cpp): ggml_backend_vk_interface registers real set_tensor_async/get_tensor_async/cpy_tensor_async function pointers (not NULL fallbacks to the sync path) that submit to a Vulkan compute/transfer queue and return without waiting; ggml_backend_vk_synchronize is a real vkQueueWaitIdle-class call, gated by device->support_async (false only on old Intel HW per an in-source comment -- irrelevant to the tested NVIDIA GTX 1650). Empirically confirmed via copybench (sync vs async issue latency) and the prefetch mode (Section 12: measured residual sync_wait_ms after overlapping async copy with a real llama_decode call).",
+  "source_evidence": {
+    "ggml_backend_h_public_symbols": [
+      "ggml_backend_tensor_set_async",
+      "ggml_backend_tensor_get_async"
+    ],
+    "vulkan_backend_registers_real_async_impls": true,
+    "vulkan_backend_todo_comment_present": true,
+    "vulkan_backend_todo_comment_text": "// TODO: enable async and synchronize (directly above the ggml_backend_vk_interface struct definition)",
+    "vulkan_backend_todo_comment_interpretation": "Disclosed as-is: llama.cpp upstream itself flags this area with a TODO, even though the async function pointers ARE wired up and DO produce real overlap in our measurements below. Treat the mechanism as functional-but-flagged-unfinished upstream, not as a fully hardened public contract."
+  },
+  "measured_sync_vs_async_issue_latency": {
+    "835584_cpu_to_gpu": {
+      "bytes": 835584,
+      "direction": "cpu_to_gpu",
+      "sync_ms_mean": 0.1678,
+      "async_issue_ms_mean": 0.25
+    },
+    "835584_gpu_to_cpu": {
+      "bytes": 835584,
+      "direction": "gpu_to_cpu",
+      "sync_ms_mean": 0.3243,
+      "async_issue_ms_mean": 0.1832
+    },
+    "1671168_cpu_to_gpu": {
+      "bytes": 1671168,
+      "direction": "cpu_to_gpu",
+      "sync_ms_mean": 0.3329,
+      "async_issue_ms_mean": 0.3999
+    },
+    "1671168_gpu_to_cpu": {
+      "bytes": 1671168,
+      "direction": "gpu_to_cpu",
+      "sync_ms_mean": 0.508,
+      "async_issue_ms_mean": 0.3511
+    },
+    "3342336_cpu_to_gpu": {
+      "bytes": 3342336,
+      "direction": "cpu_to_gpu",
+      "sync_ms_mean": 0.6982,
+      "async_issue_ms_mean": 0.8217
+    },
+    "3342336_gpu_to_cpu": {
+      "bytes": 3342336,
+      "direction": "gpu_to_cpu",
+      "sync_ms_mean": 0.958,
+      "async_issue_ms_mean": 0.7174
+    },
+    "6684672_cpu_to_gpu": {
+      "bytes": 6684672,
+      "direction": "cpu_to_gpu",
+      "sync_ms_mean": 1.7275,
+      "async_issue_ms_mean": 2.6487
+    },
+    "6684672_gpu_to_cpu": {
+      "bytes": 6684672,
+      "direction": "gpu_to_cpu",
+      "sync_ms_mean": 2.823,
+      "async_issue_ms_mean": 1.7134
+    }
+  },
+  "classification": "ASYNC_PREFETCH_PUBLIC_API_EXISTS",
+  "classification_basis": "ggml_backend_tensor_set_async/get_tensor_async are public ggml-backend.h symbols, the Vulkan backend implements real (non-NULL, non-fallback) async paths, and the prefetch prototype (prefetch_result.json) measured near-zero residual sync_wait_ms when the async copy is issued immediately before a real llama_decode call -- i.e. genuine overlap with GPU decode compute was observed, not just a fast-returning call that still serializes internally."
+}

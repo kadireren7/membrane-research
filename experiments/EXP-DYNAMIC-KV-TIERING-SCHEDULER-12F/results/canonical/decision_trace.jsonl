@@ -1,0 +1,8 @@
+{"decode_idx": 5, "layer": 16, "action": "PROMOTE", "reason": "SCHEDULED_PROMOTION", "bytes": 835584, "before_device": "CPU", "after_device": "GPU", "duration_us": 624.5, "result": "ok"}
+{"decode_idx": 5, "layer": 17, "action": "PROMOTE", "reason": "SCHEDULED_PROMOTION", "bytes": 835584, "before_device": "CPU", "after_device": "GPU", "duration_us": 464.5, "result": "ok"}
+{"decode_idx": 5, "layer": 18, "action": "PROMOTE", "reason": "SCHEDULED_PROMOTION", "bytes": 835584, "before_device": "CPU", "after_device": "GPU", "duration_us": 525.1, "result": "ok"}
+{"decode_idx": 5, "layer": 19, "action": "PROMOTE", "reason": "SCHEDULED_PROMOTION", "bytes": 835584, "before_device": "CPU", "after_device": "GPU", "duration_us": 641.4, "result": "ok"}
+{"decode_idx": 10, "layer": 16, "action": "DEMOTE", "reason": "SCHEDULED_DEMOTION", "bytes": 835584, "before_device": "GPU", "after_device": "CPU", "duration_us": 1197.8, "result": "ok"}
+{"decode_idx": 10, "layer": 17, "action": "DEMOTE", "reason": "SCHEDULED_DEMOTION", "bytes": 835584, "before_device": "GPU", "after_device": "CPU", "duration_us": 901.6, "result": "ok"}
+{"decode_idx": 10, "layer": 18, "action": "DEMOTE", "reason": "SCHEDULED_DEMOTION", "bytes": 835584, "before_device": "GPU", "after_device": "CPU", "duration_us": 1059.3, "result": "ok"}
+{"decode_idx": 10, "layer": 19, "action": "DEMOTE", "reason": "SCHEDULED_DEMOTION", "bytes": 835584, "before_device": "GPU", "after_device": "CPU", "duration_us": 991.4, "result": "ok"}

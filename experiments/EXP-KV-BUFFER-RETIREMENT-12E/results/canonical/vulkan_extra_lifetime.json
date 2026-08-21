@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 5,
+  "method": "grep across third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp for every use of ggml_tensor::extra.",
+  "finding": "The Vulkan backend does NOT use ggml_tensor::extra for anything relevant to tensor/buffer identity. Only ONE reference exists in the entire ~18000-line file (a debug print at line ~18408 checking `tensor->extra != nullptr` purely for a boolean debug flag), unlike e.g. the CUDA backend which attaches a real per-tensor extra struct. Instead, Vulkan resolves a tensor's real GPU buffer entirely through tensor->buffer->context (cast to ggml_backend_vk_buffer_context*) at USE time (ggml_vk_tensor_subbuffer), not through any cached extra metadata attached at allocation time.",
+  "tensor_extra_creation": "not applicable -- Vulkan backend does not allocate a per-tensor extra struct.",
+  "tensor_extra_destruction": "not applicable.",
+  "subbuffer_caching": "none found -- ggml_vk_tensor_subbuffer recomputes the subbuffer descriptor fresh from tensor->buffer on every call, no caching layer.",
+  "buffer_ownership": "owned entirely by the ggml_backend_buffer_t struct itself (specifically its ->context, a ggml_backend_vk_buffer_context* holding the real vk_buffer shared_ptr) -- freeing the ggml_backend_buffer_t (via ggml_backend_buffer_free, which calls the backend's free_buffer callback then `delete buffer`) is the single point of truth for Vulkan buffer lifetime.",
+  "does_relocated_tensor_leave_backend_specific_metadata_alive": false,
+  "conclusion": "The Vulkan tensor-extra hypothesis (Section 5's suggested candidate) is RULED OUT as the mechanism -- the real mechanism is one level higher, at the llama_context graph-reuse layer (see scheduler_lifetime.json), not inside the Vulkan backend at all."
+}

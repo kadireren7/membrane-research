@@ -7,7 +7,12 @@ system RAM and GPU VRAM using only the mechanisms available at the time
 **decision-point** result, not a failed project — it identified exactly
 what was and wasn't possible with existing public mechanisms, and its
 own `next_step_recommendation` directly named the fix that Phase 12B
-(`EXP-KV-DEVICE-OVERRIDE-12B`, not yet migrated) went on to build.
+([`EXP-KV-DEVICE-OVERRIDE-12B`](../EXP-KV-DEVICE-OVERRIDE-12B/README.md))
+went on to build — the first phase of the Phase 12B–12G KV residency
+chain (see [`experiments/README.md`](../README.md)'s "Phase 12
+progression" table for the full chain through productization).
+
+**Next:** [EXP-KV-DEVICE-OVERRIDE-12B](../EXP-KV-DEVICE-OVERRIDE-12B/README.md) (not an ancestor branch — a motivated, independent follow-on)
 
 ## Question
 
@@ -116,7 +121,7 @@ states, verbatim:
 
 The subsequent research branch, `experiment/kv-device-override`
 (source HEAD `a1ebd9e285bd763cfb448c8d8202536802783bb9`, Phase 12B —
-**not yet migrated into this repository**, see the Pass 2A audit),
+[`EXP-KV-DEVICE-OVERRIDE-12B`](../EXP-KV-DEVICE-OVERRIDE-12B/README.md)),
 built exactly this: a minimal `kv_dev_override` callback patch to
 llama.cpp, closing the gap this phase identified. Phase 12B and the
 Phase 12B–12G research chain it started ultimately informed the static

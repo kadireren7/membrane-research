@@ -1,0 +1,244 @@
+{
+  "experiment_id": "EXP-KV-BUFFER-RETIREMENT-12E",
+  "phase": "12E",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/kv-buffer-retirement",
+  "source_head_sha": "73ae8ba12b9ce477d33ca407b9923f5d826e20b1",
+  "parent_experiment": "EXP-KV-RUNTIME-RELOCATE-12D",
+  "parent_head_sha": "9c99eead15492b9aed1e46bb9775c78728848e35",
+  "base_sha": "9c99eead15492b9aed1e46bb9775c78728848e35",
+  "date": "2026-08-19",
+  "purpose": "Find the exact root cause of Phase 12D's release-crash and the minimal safe rule for freeing a relocated KV layer's old backing, so that runtime relocation can be paired with real memory reclamation instead of a permanent leak.",
+  "literal_verdict": "KV_BUFFER_RETIREMENT_VIABLE",
+  "verdict_summary": "Root cause identified by source trace, not guesswork: the crash was never in ggml_backend_sched or in Vulkan's tensor metadata (both ruled out directly) -- it is llama_context::gf_res_prev, a cached llm_graph_result from the PREVIOUS decode call that llama_context transparently RE-EXECUTES unchanged whenever res->can_reuse(gparams) returns true (llama-context.cpp:1336), which happens on essentially every same-shape autoregressive step. That reuse path skips the cpy_v/get_v calls that would re-read the relocated layer's new backing, so it keeps executing stale views over backing that relocate_layer's cleanup has since freed. The fix (llama_invalidate_graph_cache(), 145 insertions/6 deletions, 5 files) forces a rebuild after any relocation; with it, IMMEDIATE retirement is safe -- no delay or generation-counting needed. 50/50 and 20/20 repeated cycles showed zero VRAM/RSS creep, and real memory reclamation was proven up to the ctx=200000/360M GTX-1650 pressure boundary (3107 -> 3237 -> 3105 MiB, promote then retire returns to baseline).",
+  "verdict_source": "results/phase12/buffer-retirement/summary.json:decision_gate / decision_gate_meaning (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "productization_note": "Verified: `git grep` for llama_invalidate_graph_cache / retire_layer_backing against product main returns no hits. This remains research-only. This phase completed the technical proof that dynamic KV movement CAN be made memory-safe -- but Phase 12F/12G's findings are what determined it was not worth shipping (no measured performance win at tested scale).",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM), Vulkan backend",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/patches/phase12e-kv-buffer-retirement.patch",
+      "source_path": "(derived) git diff 9c99eead15492b9aed1e46bb9775c78728848e35..73ae8ba12b9ce477d33ca407b9923f5d826e20b1 -- . ':(exclude)results/phase12/buffer-retirement/*'",
+      "source_sha256": "eb78a1ee9e4f8e2636108860a9d26483eddab2d9ffe0a9e13962c85786ec298f",
+      "migrated_sha256": "eb78a1ee9e4f8e2636108860a9d26483eddab2d9ffe0a9e13962c85786ec298f",
+      "size_bytes": 35024,
+      "category": "B_experiment_implementation"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/backend_direction.json",
+      "source_path": "results/phase12/buffer-retirement/backend_direction.json",
+      "source_sha256": "886be1d20a62bef3c9dddd759046f557cb34fb24d68ec6f0201af49877a09af9",
+      "migrated_sha256": "886be1d20a62bef3c9dddd759046f557cb34fb24d68ec6f0201af49877a09af9",
+      "size_bytes": 1404,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/cpu_control.json",
+      "source_path": "results/phase12/buffer-retirement/cpu_control.json",
+      "source_sha256": "9bf9c4628e41dfdda75325113494faa8039f7772be8c359df1e918b445c0ec6c",
+      "migrated_sha256": "9bf9c4628e41dfdda75325113494faa8039f7772be8c359df1e918b445c0ec6c",
+      "size_bytes": 1651,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/cycle_stability.json",
+      "source_path": "results/phase12/buffer-retirement/cycle_stability.json",
+      "source_sha256": "677a44e33dc12f250513bf8d6d70a8b5e8b6796302e9e98db98ee8923aafa92c",
+      "migrated_sha256": "677a44e33dc12f250513bf8d6d70a8b5e8b6796302e9e98db98ee8923aafa92c",
+      "size_bytes": 2618,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/failing_tensor_trace.json",
+      "source_path": "results/phase12/buffer-retirement/failing_tensor_trace.json",
+      "source_sha256": "4ad52857432fa43a8ce907077948f5d4503599032865636c064a2524d7c7d714",
+      "migrated_sha256": "4ad52857432fa43a8ce907077948f5d4503599032865636c064a2524d7c7d714",
+      "size_bytes": 2628,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/failure_atomicity.json",
+      "source_path": "results/phase12/buffer-retirement/failure_atomicity.json",
+      "source_sha256": "e16a93c557fba8a5727feecdb172a574147efa813b861428b3026d0626298a93",
+      "migrated_sha256": "e16a93c557fba8a5727feecdb172a574147efa813b861428b3026d0626298a93",
+      "size_bytes": 3499,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/maintenance.json",
+      "source_path": "results/phase12/buffer-retirement/maintenance.json",
+      "source_sha256": "bd5b97c691c6dbc285e2d23809881cea60a0dc7fe7e9477b12d267b085f3cc55",
+      "migrated_sha256": "bd5b97c691c6dbc285e2d23809881cea60a0dc7fe7e9477b12d267b085f3cc55",
+      "size_bytes": 2490,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/manifest.json",
+      "source_path": "results/phase12/buffer-retirement/manifest.json",
+      "source_sha256": "77d85e0956ef8a07eba9cc0d1a854fe903de9fff4c554a2581589750b7b18ec4",
+      "migrated_sha256": "77d85e0956ef8a07eba9cc0d1a854fe903de9fff4c554a2581589750b7b18ec4",
+      "size_bytes": 2988,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/memory_reclamation.json",
+      "source_path": "results/phase12/buffer-retirement/memory_reclamation.json",
+      "source_sha256": "1bb7f013a807b79edab2c8440124b5ed292ca33842b9a57273e8d7466788eed6",
+      "migrated_sha256": "1bb7f013a807b79edab2c8440124b5ed292ca33842b9a57273e8d7466788eed6",
+      "size_bytes": 2014,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/minimal_repro.json",
+      "source_path": "results/phase12/buffer-retirement/minimal_repro.json",
+      "source_sha256": "1749d2fa4937803d2b0616b48f6abfbc63331005a58cc0da2b09151d8704c4cf",
+      "migrated_sha256": "1749d2fa4937803d2b0616b48f6abfbc63331005a58cc0da2b09151d8704c4cf",
+      "size_bytes": 2660,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/multi_layer.json",
+      "source_path": "results/phase12/buffer-retirement/multi_layer.json",
+      "source_sha256": "30d5577a74eb03e9e74a089935cda55171002490172aa35a6c2da7d041b8688f",
+      "migrated_sha256": "30d5577a74eb03e9e74a089935cda55171002490172aa35a6c2da7d041b8688f",
+      "size_bytes": 1686,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/pressure_test.json",
+      "source_path": "results/phase12/buffer-retirement/pressure_test.json",
+      "source_sha256": "a5c25320b5f9458c79fea6578def8cc64eb8b850909cd240d80d551526bd74bc",
+      "migrated_sha256": "a5c25320b5f9458c79fea6578def8cc64eb8b850909cd240d80d551526bd74bc",
+      "size_bytes": 1809,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_cpy_get_v_trace.txt",
+      "source_path": "results/phase12/buffer-retirement/raw_cpy_get_v_trace.txt",
+      "source_sha256": "6db66c92b88fdf46413f3914c1c95ac40164ab0bbd3711924399360545d8fb2b",
+      "migrated_sha256": "6db66c92b88fdf46413f3914c1c95ac40164ab0bbd3711924399360545d8fb2b",
+      "size_bytes": 2514,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_cycle_stability_50x.jsonl",
+      "source_path": "results/phase12/buffer-retirement/raw_cycle_stability_50x.jsonl",
+      "source_sha256": "f3d84f774e6297d37b9cbedd8b17d34ef2c9202c603f2c86d29ee03c78e9736e",
+      "migrated_sha256": "f3d84f774e6297d37b9cbedd8b17d34ef2c9202c603f2c86d29ee03c78e9736e",
+      "size_bytes": 7240,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_cycle_stability_gpu_start_layer20.jsonl",
+      "source_path": "results/phase12/buffer-retirement/raw_cycle_stability_gpu_start_layer20.jsonl",
+      "source_sha256": "b235e6c705b1ff14cb98a3dfd1c8ca0fed27524c5e7dc271df2e5e8be673e90f",
+      "migrated_sha256": "b235e6c705b1ff14cb98a3dfd1c8ca0fed27524c5e7dc271df2e5e8be673e90f",
+      "size_bytes": 2890,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_failing_tensor_trace_excerpt.txt",
+      "source_path": "results/phase12/buffer-retirement/raw_failing_tensor_trace_excerpt.txt",
+      "source_sha256": "9820f897f72be15b0f053161bae3a86831067b6fed12387c9402bf3a2da52ce6",
+      "migrated_sha256": "9820f897f72be15b0f053161bae3a86831067b6fed12387c9402bf3a2da52ce6",
+      "size_bytes": 3159,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_failure_atomicity.jsonl",
+      "source_path": "results/phase12/buffer-retirement/raw_failure_atomicity.jsonl",
+      "source_sha256": "d5d6d995e4b4b289a21fe9b8290d9ad09e10e37f9c6fe716a0275702ac1645b0",
+      "migrated_sha256": "d5d6d995e4b4b289a21fe9b8290d9ad09e10e37f9c6fe716a0275702ac1645b0",
+      "size_bytes": 1049,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_multi_layer_retirement.jsonl",
+      "source_path": "results/phase12/buffer-retirement/raw_multi_layer_retirement.jsonl",
+      "source_sha256": "661866ea4e0861f672d46b56c1f04d405fa905945faa6cf58a804216f4974ce7",
+      "migrated_sha256": "661866ea4e0861f672d46b56c1f04d405fa905945faa6cf58a804216f4974ce7",
+      "size_bytes": 1018,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_pressure_retirement_360m_ctx200000.jsonl",
+      "source_path": "results/phase12/buffer-retirement/raw_pressure_retirement_360m_ctx200000.jsonl",
+      "source_sha256": "d5dace6d20574e5d280acde1bd8611cdc34f460ce05a9e5008e4bd65dc9df415",
+      "migrated_sha256": "d5dace6d20574e5d280acde1bd8611cdc34f460ce05a9e5008e4bd65dc9df415",
+      "size_bytes": 259,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_weights_table_cpu_to_gpu.json",
+      "source_path": "results/phase12/buffer-retirement/raw_weights_table_cpu_to_gpu.json",
+      "source_sha256": "b92a1469e541a0f90355cbd5d50c141a25a06b6035745b60cb524875ea084ff8",
+      "migrated_sha256": "b92a1469e541a0f90355cbd5d50c141a25a06b6035745b60cb524875ea084ff8",
+      "size_bytes": 2819,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/raw_weights_table_gpu_to_cpu.json",
+      "source_path": "results/phase12/buffer-retirement/raw_weights_table_gpu_to_cpu.json",
+      "source_sha256": "2d3cf95c38c490954ca6ee738ec56d6572d71362a82c426f036b4835c3ca1d3f",
+      "migrated_sha256": "2d3cf95c38c490954ca6ee738ec56d6572d71362a82c426f036b4835c3ca1d3f",
+      "size_bytes": 2820,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/retirement_strategy.json",
+      "source_path": "results/phase12/buffer-retirement/retirement_strategy.json",
+      "source_sha256": "56a19fa661dcfc764d5408dbf4f0d8929d8b284b45781b398dc9ba692c040eff",
+      "migrated_sha256": "56a19fa661dcfc764d5408dbf4f0d8929d8b284b45781b398dc9ba692c040eff",
+      "size_bytes": 4277,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/retirement_timing.json",
+      "source_path": "results/phase12/buffer-retirement/retirement_timing.json",
+      "source_sha256": "79b7dee85df5051e3aff233c2cd49c61b223f464b1e59dd39286516ff0b4849b",
+      "migrated_sha256": "79b7dee85df5051e3aff233c2cd49c61b223f464b1e59dd39286516ff0b4849b",
+      "size_bytes": 2972,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/scheduler_lifetime.json",
+      "source_path": "results/phase12/buffer-retirement/scheduler_lifetime.json",
+      "source_sha256": "6497fe94cf4040d205bb5f2e6282d6145c311147909015bedad03511f71e9176",
+      "migrated_sha256": "6497fe94cf4040d205bb5f2e6282d6145c311147909015bedad03511f71e9176",
+      "size_bytes": 3871,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/summary.json",
+      "source_path": "results/phase12/buffer-retirement/summary.json",
+      "source_sha256": "942464ab4e15f8ea1d9a0f593f3ee75a5747b2e7e4e8b9dc608244e0cea848db",
+      "migrated_sha256": "942464ab4e15f8ea1d9a0f593f3ee75a5747b2e7e4e8b9dc608244e0cea848db",
+      "size_bytes": 9004,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/view_lifetime.json",
+      "source_path": "results/phase12/buffer-retirement/view_lifetime.json",
+      "source_sha256": "7e1612664861c02f9aa202ae1258309224f2693385dec46ae4f14aa36ff25887",
+      "migrated_sha256": "7e1612664861c02f9aa202ae1258309224f2693385dec46ae4f14aa36ff25887",
+      "size_bytes": 2758,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-BUFFER-RETIREMENT-12E/results/canonical/vulkan_extra_lifetime.json",
+      "source_path": "results/phase12/buffer-retirement/vulkan_extra_lifetime.json",
+      "source_sha256": "39cec0afdd6e0af28c91a777e0f858e9388386f34dcbd63df877d611d817d6a9",
+      "migrated_sha256": "39cec0afdd6e0af28c91a777e0f858e9388386f34dcbd63df877d611d817d6a9",
+      "size_bytes": 1811,
+      "category": "A_essential_evidence"
+    }
+  ],
+  "follow_up": "This phase's next_step_recommendation directly named Phase 12F's task: build a deterministic dynamic tiering scheduler using the relocation + safe retirement primitive established across Phases 12B-12E."
+}

@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "executed": false,
+  "reason": "No reproducible >=10% KV-placement-bottleneck regime was confirmed under section 21's criteria (strongest observed slowdown=-0.512263961383347% at 1.5B ctx=8192 gpu_kv_pct=50, cv_pct=0.808721851392873, host_valid=False, secondary_present=False). Section 22 says dynamic re-entry runs ONLY if a valid bottleneck regime is found. Section 29: this is a valid result, not manufactured or hidden."
+}

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 17,
+  "method": "membrane-kv-runtime-relocate-probe 'cycle' mode with 'invalidate' flag set -- every cycle: llama_synchronize -> relocate_layer(retain=false, i.e. real free attempted) -> llama_invalidate_graph_cache -> decode. Both directions exercised every cycle (toggles CPU<->GPU). ctx=8192 (large enough for the per-cycle VRAM delta to be clearly visible above nvidia-smi's 1 MiB measurement granularity).",
+  "cpu_start_layer4_135m": {
+    "label": "layer 4 (starts CPU), 50 cycles",
+    "n_cycles": 50,
+    "all_ok": true,
+    "all_decode_ok": true,
+    "all_correct_side": true,
+    "vram_mib": {
+      "min": 429,
+      "max": 435,
+      "first": 435,
+      "last": 429
+    },
+    "rss_kb": {
+      "min": 311068,
+      "max": 314336,
+      "first": 311068,
+      "last": 314332,
+      "growth_kb": 3264
+    },
+    "crash": false,
+    "assertion": false
+  },
+  "gpu_start_layer20_135m": {
+    "label": "layer 20 (starts GPU), 20 cycles",
+    "n_cycles": 20,
+    "all_ok": true,
+    "all_decode_ok": true,
+    "all_correct_side": true,
+    "vram_mib": {
+      "min": 429,
+      "max": 435,
+      "first": 431,
+      "last": 433
+    },
+    "rss_kb": {
+      "min": 311472,
+      "max": 314740,
+      "first": 314740,
+      "last": 314736,
+      "growth_kb": -4
+    },
+    "crash": false,
+    "assertion": false
+  },
+  "no_vram_creep": "confirmed -- VRAM oscillates cleanly between the two placements' expected values every cycle, no monotonic drift across 50 cycles",
+  "no_rss_creep": "confirmed -- RSS growth over 50 cycles is a few KB (well within allocator/process bookkeeping noise), not a leak trend",
+  "poison_tests_still_prove_latest_backing_authoritative": "Not re-run per-cycle in this mode (retain=false means old backing is genuinely freed each cycle, so there is nothing left to poison by design -- poisoning would itself be a use-after-free). The authoritative-backing claim for THIS exact fixed configuration was instead proven once, directly, via repro2's ground-truth poison test with retain_old_backing_for_research=true + invalidate_cache=true (see minimal_repro.json / results/phase12/runtime-relocate/repeated_same_layer_retained.json's methodology, reused here): decode output after 2 relocations matches an independent clean reference exactly, and the diagnostic tensor/buffer capture correctly shows the NEW placement (unlike the pre-fix run), confirming the graph is genuinely rebuilt and reading the current backing.",
+  "raw_data": [
+    "raw_cycle_stability_50x.jsonl",
+    "raw_cycle_stability_gpu_start_layer20.jsonl"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "phase": "12F",
+  "title": "Deterministic Dynamic KV Tiering Scheduler",
+  "decision_gate": "WORKS_BUT_NO_PERF_ADVANTAGE",
+  "decision_gate_allowed_values": [
+    "DYNAMIC_KV_TIERING_VIABLE",
+    "WORKS_BUT_NO_PERF_ADVANTAGE",
+    "TOO_SLOW",
+    "BACKEND_LIMITED",
+    "INCONCLUSIVE"
+  ],
+  "why_this_gate": [
+    "Correctness: dynamic schedule output is byte-identical to static full-GPU, static full-CPU, and every static mixed split tested, at the exact same sequence positions (correctness.json).",
+    "Mechanism: every requested transition in the first end-to-end schedule occurred, was correctly applied via the established relocate_layer+invalidate_graph_cache primitives, and decode continued without error (first_schedule.json).",
+    "Determinism: two independent runs of the planner against identical state produce an identical decision trace (determinism.json).",
+    "Stability: 56 back-to-back relocations (>50 required) show no VRAM growth (stability.json).",
+    "Fail-closed: an intentionally impossible budget correctly skips the promotion rather than attempting it (budget_guard.json).",
+    "Generality: same schedule mechanism verified at Q5_1 precision, on a second model (SmolLM2-360M), at ctx=16384, and under a memory-pressure regime (q5.json, second_model.json, long_context.json, pressure_test.json).",
+    "But: throughput across the static hot-set sweep (0/8/15/22/30 of 30 layers on GPU) varies only ~21.9-24.3 tok/s -- KV placement is not the bottleneck at this model/context scale (hotset_sweep.json, pareto.json), so the dynamic scheduler's correct, stable, deterministic transitions add measurable per-transition cost (transition_latency.json, frequency_sweep.json) without a compensating throughput win. This directly matches Phase 6.2's prior finding of no bytes/token win at tested scale."
+  ],
+  "known_deviations_from_spec": [
+    "Section 16 pressure-regime test used ctx=65536 instead of the suggested ~200000: at test time the shared host had only ~214 MiB free RAM and 4.9/9.6 GiB swap already in use from unrelated concurrent processes; running the full 200000 test risked OOM-killing unrelated work. journalctl showed no OOM either before or after the scaled-down runs. Documented in pressure_test.json.",
+    "Section 23 prefetch was analyzed but NOT attempted: no async variant of relocate_layer exists in the established primitive chain, so a prefetch scheduler would need new backend machinery, which is out of this phase's scope. Documented in prefetch_feasibility.json.",
+    "Sanitizer matrix section 31: Vulkan+ASan was not attempted (not established safe in any prior phase); llama-enabled CPU-backend ASan build has no GPU device so it validated the load/decode/capture path only, not cross-device relocate under ASan directly -- that primitive is unchanged from Phase 12D/12E where it was already ASan-validated. Documented in manifest.json sanitizer_matrix."
+  ],
+  "explicit_non_goals_respected": [
+    "no ML/adaptive/learned-hotness policy",
+    "no token/block paging",
+    "no CUDA backend work",
+    "no public product CLI or automatic production integration",
+    "no llama.cpp source changes in this phase (scheduler_core is pure, llama-free; tiering_probe.cpp only calls existing public llama.h primitives)"
+  ],
+  "next_step_recommendation": "Do not proceed to an adaptive/learned hotness policy. The deterministic scheduler mechanism itself is validated and safe to keep as a research primitive, but the next useful phase is finding a model/context/workload regime where KV placement actually IS the throughput bottleneck (e.g. much larger models or much longer contexts than tested here) before investing further in policy sophistication -- otherwise any smarter policy is optimizing a dimension that doesn't move the needle at this scale."
+}

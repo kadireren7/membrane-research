@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "first_schedule_promote_us": [
+    624.5,
+    464.5,
+    525.1,
+    641.4
+  ],
+  "first_schedule_demote_us": [
+    1197.8,
+    901.6,
+    1059.3,
+    991.4
+  ],
+  "promo_group_sweep_ms_by_group_size": {
+    "1": 0.611,
+    "2": 0.874,
+    "4": 1.692,
+    "8": 2.673
+  },
+  "demo_group_sweep_ms_by_group_size": {
+    "1": 1.098,
+    "2": 1.724,
+    "4": 3.389,
+    "8": 6.466
+  },
+  "note": "demotion is consistently more expensive than promotion for the same group size (established in Phase 12E as the immediate-retirement path doing extra live-reference bookkeeping on free)."
+}

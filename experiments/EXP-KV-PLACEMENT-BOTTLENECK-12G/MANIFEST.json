@@ -1,0 +1,245 @@
+{
+  "experiment_id": "EXP-KV-PLACEMENT-BOTTLENECK-12G",
+  "phase": "12G",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/kv-placement-bottleneck-discovery",
+  "source_head_sha": "e91923a2e4ea8fb28d4d27bea91d604ffb6bda27",
+  "parent_experiment": "EXP-DYNAMIC-KV-TIERING-SCHEDULER-12F",
+  "parent_head_sha": "79588b607d06763eaf13da4357f0b6c679310592",
+  "base_sha": "79588b607d06763eaf13da4357f0b6c679310592",
+  "date": "2026-08-21",
+  "purpose": "Systematically map, across models (135M/360M/1.5B), contexts (2048-32768, one pressure point at 200000-equivalent scale), and CPU/GPU KV split ratios, whether ANY tested regime shows KV placement as a real performance bottleneck (>=10% slowdown, predeclared threshold) -- to decide whether further investment in dynamic tiering scheduler sophistication (Phase 12F) is justified, or whether the demonstrated value of the Phase 12B-12E mechanism is elsewhere.",
+  "literal_verdict": "KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME",
+  "verdict_summary": "Across 16 benchmark batches spanning 135M/360M/1.5B models, contexts from 2048 to 32768, Q8_0 and Q5_1, and CPU/GPU KV split ratios from 0% to 100% GPU-resident, zero tested points cleared the predeclared >=10% slowdown threshold for a MEANINGFUL/STRONG bottleneck classification -- every point classified NO_BOTTLENECK. The single worst-case point across the entire sweep (1.5B, ctx=8192, 50% GPU-KV) was actually a 0.51% SPEEDUP relative to 100%-GPU-KV, not a slowdown. Pareto analysis at 135M/ctx=2048 shows the 0%-GPU-KV (all-CPU) point as the Pareto-optimal one (lowest VRAM, highest tok/s) among the tested ratios. CPU-resident KV was therefore at parity or faster than GPU-resident KV at every valid tested point -- the demonstrated product value of KV placement in this tested regime is VRAM capacity (freeing headroom for larger context), not throughput. A performance-driven dynamic policy was explicitly stopped based on this data.",
+  "verdict_source": "results/phase12/kv-placement-bottleneck/summary.json:decision_gate (literal source field, one of five predeclared allowed enum values; not synthesized)",
+  "productized": true,
+  "product_pr": 21,
+  "product_commit": "8287e8c14f1b5af2e9e17fa95e85663e94697d85",
+  "productization_note": "This phase's capacity-only finding, together with Phase 12B's minimal device-override mechanism, is the direct research input to PR #21's static `--kv-placement` planner. PR #21's own description cites this phase's literal verdict string (KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME) and its own measured central result (a real Vulkan OOM at ctx=28500 with default placement, avoided by `auto`/`cpu`, a ~6.4% measured context uplift at that ONE configuration, explicitly disclosed as narrow) is consistent with -- but is the product team's OWN separate measurement, not a copy of this phase's sweep data. No code from this phase's tools/membrane-kv-bottleneck-analysis/ exists on product main (verified via git grep) -- only the FINDING was productized, not the analysis code itself.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM), Vulkan backend",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct",
+    "qwen2.5-1.5b-instruct-fp16"
+  ],
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/patches/phase12g-kv-placement-bottleneck.patch",
+      "source_path": "(derived) git diff 79588b607d06763eaf13da4357f0b6c679310592..e91923a2e4ea8fb28d4d27bea91d604ffb6bda27 -- . ':(exclude)results/phase12/kv-placement-bottleneck/*'",
+      "source_sha256": "eb98b1a40b3ab752bb0bde033e1be4a743bdee967f9fd1c6b9eb67c9295fdb91",
+      "migrated_sha256": "eb98b1a40b3ab752bb0bde033e1be4a743bdee967f9fd1c6b9eb67c9295fdb91",
+      "size_bytes": 95608,
+      "category": "B_experiment_implementation"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/benchmark_validity.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/benchmark_validity.json",
+      "source_sha256": "da6d8d81bce36fcaf72c3f314cff1196c99815fdd7dcce742e35552a61875547",
+      "migrated_sha256": "da6d8d81bce36fcaf72c3f314cff1196c99815fdd7dcce742e35552a61875547",
+      "size_bytes": 6242,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/bottleneck_map.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/bottleneck_map.json",
+      "source_sha256": "8871536ccc49e71bcec555bad417205cec1222f223ab0b69cd0dd21b057b1848",
+      "migrated_sha256": "8871536ccc49e71bcec555bad417205cec1222f223ab0b69cd0dd21b057b1848",
+      "size_bytes": 16829,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/break_even.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/break_even.json",
+      "source_sha256": "260e3c6aea0465e59612c8a432965466eae58628f47983abfd97853e9a5ff22b",
+      "migrated_sha256": "260e3c6aea0465e59612c8a432965466eae58628f47983abfd97853e9a5ff22b",
+      "size_bytes": 685,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/context_scaling.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/context_scaling.json",
+      "source_sha256": "d032bc7813f604db565ad735b66ee42897b7d4b91d1fccb4ab2e5e2556693b4b",
+      "migrated_sha256": "d032bc7813f604db565ad735b66ee42897b7d4b91d1fccb4ab2e5e2556693b4b",
+      "size_bytes": 1913,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/dynamic_reentry.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/dynamic_reentry.json",
+      "source_sha256": "f1df7b0d1d7ae87cb94963580c9e853a19e2bb2cb3046a33b4897f602c0949a3",
+      "migrated_sha256": "f1df7b0d1d7ae87cb94963580c9e853a19e2bb2cb3046a33b4897f602c0949a3",
+      "size_bytes": 453,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/graph_splits.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/graph_splits.json",
+      "source_sha256": "08c8c1a61b428806923b020275becc77750f964fe470832c1ac80614acd95178",
+      "migrated_sha256": "08c8c1a61b428806923b020275becc77750f964fe470832c1ac80614acd95178",
+      "size_bytes": 13054,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/host_baseline.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/host_baseline.json",
+      "source_sha256": "1188c167c0834fccc4526be2a9e35a21555438d0216e7625533fa77d9368105d",
+      "migrated_sha256": "1188c167c0834fccc4526be2a9e35a21555438d0216e7625533fa77d9368105d",
+      "size_bytes": 15291,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/larger_model.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/larger_model.json",
+      "source_sha256": "9f1479596f87d6856d0e25d20520c9054500ade8e6b3df91b2197449513e523c",
+      "migrated_sha256": "9f1479596f87d6856d0e25d20520c9054500ade8e6b3df91b2197449513e523c",
+      "size_bytes": 7872,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/manifest.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/manifest.json",
+      "source_sha256": "a5bb68b32ff029f76297dada8d79bdd95a19ca36b7a77c978e1b2c3e9bfd88b4",
+      "migrated_sha256": "a5bb68b32ff029f76297dada8d79bdd95a19ca36b7a77c978e1b2c3e9bfd88b4",
+      "size_bytes": 1131,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/model_scaling.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/model_scaling.json",
+      "source_sha256": "e930f3c306ee69b2248555ecaabd030072998d855cb8f1c3f37d38cdf4a2f17b",
+      "migrated_sha256": "e930f3c306ee69b2248555ecaabd030072998d855cb8f1c3f37d38cdf4a2f17b",
+      "size_bytes": 11379,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/pareto.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/pareto.json",
+      "source_sha256": "ef3500ac088323c2f7d68a12692bfd838f15f8b3a7ceda632c9e572971c02551",
+      "migrated_sha256": "ef3500ac088323c2f7d68a12692bfd838f15f8b3a7ceda632c9e572971c02551",
+      "size_bytes": 11112,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/q5_comparison.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/q5_comparison.json",
+      "source_sha256": "3f6f5324f16e26cf45095f60857a781e420ee60fd2c6fee723d739c94a499f3f",
+      "migrated_sha256": "3f6f5324f16e26cf45095f60857a781e420ee60fd2c6fee723d739c94a499f3f",
+      "size_bytes": 1991,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/raw_larger_model.jsonl",
+      "source_path": "results/phase12/kv-placement-bottleneck/raw_larger_model.jsonl",
+      "source_sha256": "3d57ee5bf3258125f1f3c6867039302925dd7c26bd3d707e62d617911a4c3418",
+      "migrated_sha256": "3d57ee5bf3258125f1f3c6867039302925dd7c26bd3d707e62d617911a4c3418",
+      "size_bytes": 30156,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/raw_phase_a.jsonl",
+      "source_path": "results/phase12/kv-placement-bottleneck/raw_phase_a.jsonl",
+      "source_sha256": "ec0157b3b0c7c922de3a3009fc8c5e64b2b810315f3d3765669045374b92c6fa",
+      "migrated_sha256": "ec0157b3b0c7c922de3a3009fc8c5e64b2b810315f3d3765669045374b92c6fa",
+      "size_bytes": 99793,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/raw_phase_b.jsonl",
+      "source_path": "results/phase12/kv-placement-bottleneck/raw_phase_b.jsonl",
+      "source_sha256": "158c0f7ceb1c99cfcafd141e810caa407a7a013ebcff86d9df78393b6a800d1a",
+      "migrated_sha256": "158c0f7ceb1c99cfcafd141e810caa407a7a013ebcff86d9df78393b6a800d1a",
+      "size_bytes": 9433,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/raw_q5.jsonl",
+      "source_path": "results/phase12/kv-placement-bottleneck/raw_q5.jsonl",
+      "source_sha256": "4d96017e61ad60ab7f9a0600b08d7bdedd5d1a59d75017e7bab879c7057b8801",
+      "migrated_sha256": "4d96017e61ad60ab7f9a0600b08d7bdedd5d1a59d75017e7bab879c7057b8801",
+      "size_bytes": 9462,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/raw_reproducibility.jsonl",
+      "source_path": "results/phase12/kv-placement-bottleneck/raw_reproducibility.jsonl",
+      "source_sha256": "337e78bf0a4a7bc4dd91f68a2018ecd80dd897809373aa38b45ca0cdde1a6c74",
+      "migrated_sha256": "337e78bf0a4a7bc4dd91f68a2018ecd80dd897809373aa38b45ca0cdde1a6c74",
+      "size_bytes": 9537,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/raw_weight_control.jsonl",
+      "source_path": "results/phase12/kv-placement-bottleneck/raw_weight_control.jsonl",
+      "source_sha256": "7463ea82cd6b2585087532bbf35360c8ec24b91ad83016b625264368062ba12c",
+      "migrated_sha256": "7463ea82cd6b2585087532bbf35360c8ec24b91ad83016b625264368062ba12c",
+      "size_bytes": 6800,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/reproducibility.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/reproducibility.json",
+      "source_sha256": "7185e9864be0ddf739209e649adc4d13b52554b648fac10fb531c9c32ac9e55f",
+      "migrated_sha256": "7185e9864be0ddf739209e649adc4d13b52554b648fac10fb531c9c32ac9e55f",
+      "size_bytes": 1830,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/_run_manifest_internal.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/_run_manifest_internal.json",
+      "source_sha256": "36ab27adb2a33fe9b3b8e9d64c53e004bfc708e34bb6e8c59c3d788e832f75aa",
+      "migrated_sha256": "36ab27adb2a33fe9b3b8e9d64c53e004bfc708e34bb6e8c59c3d788e832f75aa",
+      "size_bytes": 374,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/static_sweep_135m.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/static_sweep_135m.json",
+      "source_sha256": "cd90e434006e7b62d29883b532283ca1a0931c3b5814840513ba21164b31357d",
+      "migrated_sha256": "cd90e434006e7b62d29883b532283ca1a0931c3b5814840513ba21164b31357d",
+      "size_bytes": 21655,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/static_sweep_360m.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/static_sweep_360m.json",
+      "source_sha256": "a20ae239898c051a9501b52d8344a21984b498fa8b96967c4c7cc1624a7997fc",
+      "migrated_sha256": "a20ae239898c051a9501b52d8344a21984b498fa8b96967c4c7cc1624a7997fc",
+      "size_bytes": 21621,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/summary.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/summary.json",
+      "source_sha256": "c3531e4e664e11bcd750cd2303554eac4fae17c3071fba8a8730f2cdf8185307",
+      "migrated_sha256": "c3531e4e664e11bcd750cd2303554eac4fae17c3071fba8a8730f2cdf8185307",
+      "size_bytes": 1310,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/transfer_activity.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/transfer_activity.json",
+      "source_sha256": "2f896c1b57b798d4fda5e5d95b35d935fa3504d0bf16e499ca14e4e3f6fb4a60",
+      "migrated_sha256": "2f896c1b57b798d4fda5e5d95b35d935fa3504d0bf16e499ca14e4e3f6fb4a60",
+      "size_bytes": 12476,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/utilization.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/utilization.json",
+      "source_sha256": "5a0da414c2e3a8ab8ef81057a1eacda24a8c41053977a3696680c228188b1b99",
+      "migrated_sha256": "5a0da414c2e3a8ab8ef81057a1eacda24a8c41053977a3696680c228188b1b99",
+      "size_bytes": 7459,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/results/canonical/weight_compute_control.json",
+      "source_path": "results/phase12/kv-placement-bottleneck/weight_compute_control.json",
+      "source_sha256": "a53405d6cf63cf33bc6bcf4e6b6e46d397d86577f120e5850d0e33e8e669b4ca",
+      "migrated_sha256": "a53405d6cf63cf33bc6bcf4e6b6e46d397d86577f120e5850d0e33e8e669b4ca",
+      "size_bytes": 1891,
+      "category": "A_essential_evidence"
+    }
+  ],
+  "follow_up": "This phase's next_step_recommendation: stop performance-driven dynamic KV placement policy work and focus on capacity/residency productization -- directly adopted as PR #21's static, pre-context-only `--kv-placement` planner. The Phase 12C-12F dynamic mechanisms (live relocation, safe retirement, deterministic scheduling) remain validated, safe, research-only primitives, not shipped."
+}

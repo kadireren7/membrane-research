@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": "1-3",
+  "note": "Root-cause investigation of Phase 12C's hypothesis, re-derived against the pinned llama.cpp source directly (not assumed). See summary.json for the final, checkpoint-confirmed conclusion.",
+  "layers_vector_ownership": {
+    "location": "third_party/llama.cpp/src/llama-kv-cache.h:236-297 (kv_layer struct, private std::vector<kv_layer> layers)",
+    "construction_site": "third_party/llama.cpp/src/llama-kv-cache.cpp: allocation loop, layers.push_back({il, k, v, k_stream, v_stream}) -- runs once at construction, one entry per KV-cache layer.",
+    "confirmed_readers": [
+      "get_k/get_v (llama-kv-cache.cpp ~1285/1305) -- fresh ggml_view_4d over layers[ikv].k/.v, called every graph build (every llama_decode)",
+      "cpy_k/cpy_v (llama-kv-cache.cpp) -- writes the current token's K/V into layers[ikv].k/.v, called every graph build",
+      "state_write_data (llama-kv-cache.cpp:2145) -- reads layer.k_stream[cr.strm] fresh from the live layers vector on every state_write call",
+      "update()'s stream-copy and K-shift paths (llama-kv-cache.cpp ~884) -- read layer.k_stream/v_stream fresh from the live layers vector"
+    ],
+    "conclusion": "every reader re-resolves layers[ikv].k/.v/k_stream/v_stream fresh on every call -- no caching of the tensor pointer itself was found outside the layers vector."
+  },
+  "ctxs_bufs_allocation_granularity": {
+    "location": "third_party/llama.cpp/src/llama-kv-cache.h:275 (std::vector<std::pair<ggml_context_ptr, ggml_backend_buffer_ptr>> ctxs_bufs)",
+    "finding": "Construction allocates ONE ggml_context + ONE ggml_backend_buffer_t PER DISTINCT buffer type (llama-kv-cache.cpp: 'ctx_for_buft' lambda, std::map<buft, ctx> ctx_map) -- ALL layers sharing a buft (e.g. all CPU-placed layers under kv_dev_override) share ONE physical backend buffer. A single relocated layer can therefore never free that shared buffer on its first move away from it (other layers still reference it).",
+    "implication_for_relocate_layer": "relocate_layer's destination is always a brand-new DEDICATED (single-layer) ctx+buf pair, appended to ctxs_bufs -- this makes the SECOND move of the SAME layer (away from its own now-dedicated buffer) the first point where a real, isolated free is even possible."
+  },
+  "graph_rebuild_assumption": {
+    "question": "Is a completely new ggml_cgraph allocated every decode?",
+    "answer": "Yes -- confirmed via llama-graph.cpp: mctx_cur->get_k(ctx0, il) is called fresh inside graph construction on every llama_decode call (build_attn and related call sites).",
+    "kv_views_recreated": "Yes -- get_k/get_v build a fresh ggml_view_4d over the CURRENT layers[ikv].k/.v every decode; nothing about the view itself persists across decodes.",
+    "scheduler_reset_per_decode": "ggml_backend_sched_reset(sched.get()) is called automatically inside llama_context::graph_reserve (llama-context.cpp:2370), and graph_reserve runs on every single decode call (confirmed via 'sched_reserve: reserving ...' log lines appearing on every decode in every probe run this phase) -- there is no separate public reset primitive to test beyond what already runs automatically.",
+    "ggml_backend_tensor_copy_synchronicity": "Confirmed synchronous by reading ggml-backend.cpp:477-498: for a GPU-source/CPU-dest copy it calls ggml_backend_tensor_get, which calls buf->iface.get_tensor directly (the blocking variant, not get_tensor_async) -- ruled out as an async-completion race."
+  },
+  "control_experiments": {
+    "different_layer_A_then_B": "PASS -- see raw_different_layer_control_135m.json. Two different layers, each relocated once (both first-moves, neither triggers a free), decode remains correct. No crash.",
+    "unique_tensor_naming": "Did NOT change the outcome (tested and reverted) -- rules out tensor-name-keyed caching as the mechanism.",
+    "genuinely_new_tensor_object_per_relocation": "Already the design (not a fix to test) -- every relocate_layer call creates a new ggml_tensor in a new ggml_context with a new ggml_backend_buffer_t. Confirmed via pointer capture (points A vs C in the repro2 reproducer): tensor_ptr, buffer_ptr, and data_ptr all differ after relocation #1.",
+    "explicit_llama_synchronize_before_relocate": "Did NOT change the outcome (still crashes when old backing is freed).",
+    "settling_window_multiple_ordinary_decodes_before_second_relocation": "Tested (4 extra decode() calls between relocation #1 and relocation #2, matching what mode=roundtrip does) -- did NOT prevent the crash in the repro2 reproducer."
+  },
+  "ground_truth_method": "cb_eval-based tensor/buffer-pointer capture (used for diagnostics throughout this and the Phase 12C probe) was found to report STALE identity specifically after a layer's second relocation, even when the underlying decode output is provably correct (see poison_test.json). This is a real, reproducible measurement artifact of the capture mechanism used in this research probe -- its exact internal cause was not conclusively traced (candidate: some graph node inherits the persistent tensor's name via ggml_set_rows's in-place-style result, independent of the scheduler's own leaf-tensor accounting) and is reported as UNKNOWN rather than asserted. All CORRECTNESS claims in this phase rely on the poison test (real generation output), never on this pointer capture alone.",
+  "known_safe_statement": "Old backing remains referenced somewhere in the Vulkan/backend execution path after rebind; releasing it makes a later graph operation observe a tensor whose expected buffer is no longer valid. The exact internal owner of that stale reference was not conclusively identified within this phase's budget -- it is NOT confirmed to be ggml_backend_sched's prev_node_backend_ids/prev_leaf_backend_ids arrays (reset already runs every decode, reasoned analysis suggests these self-correct), and it is NOT confirmed to be a Vulkan buffer-pool/suballocation reuse bug specifically (plausible but not instrumented/proven). This is reported as UNKNOWN, not as a scheduler bug, per the explicit instruction not to overclaim root cause.",
+  "non_determinism_disclosure": "The release-triggered failure does not manifest identically in every call pattern: mode=repro2 (relocation #1 -> ONE decode -> relocation #2 -> decode) reliably crashes (GGML_ASSERT in one scenario, SIGSEGV in another, both real memory-safety failures); mode=roundtrip (relocation #1 -> decode -> 4 MORE decode steps -> relocation #2 -> decode) reliably completes without a visible crash across 4 repeated runs. This difference is NOT treated as evidence that roundtrip's pattern is safe -- non-deterministic-looking but call-pattern-deterministic behavior of this kind is the classic signature of a use-after-free/stale-reference bug, not proof of correctness. See release_failure.json."
+}

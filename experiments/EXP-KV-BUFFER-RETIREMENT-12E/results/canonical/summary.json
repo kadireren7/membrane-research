@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "title": "Safe Backend Buffer Retirement / Lifetime Ownership",
+  "branch": "experiment/kv-buffer-retirement",
+  "baseline_sha": "9c99eead15492b9aed1e46bb9775c78728848e35",
+  "phase12d_verdict": "RUNTIME_KV_RELOCATE_WORKS_BUT_LEAKS_BACKING",
+  "patch_filename": "patches/llama.cpp-membrane-kv-buffer-retirement.patch",
+  "patch_scope_summary": "5 files, 145 insertions / 6 deletions, applies cleanly on top of the 3 prior MEMBRANE llama.cpp patches (see patch_scope in maintenance.json)",
+  "exact_failing_tensor": "'cache_v_l4 (view)' -- the cpy_v() write-path node for layer 4's V cache, sourced from a graph that was NOT rebuilt for the crashing decode. Its tensor->buffer pointed at a freed ggml_backend_buffer struct (buffer->context / buffer->size read as garbage: 0x5a570000003d / 2, both implausible). See failing_tensor_trace.json.",
+  "stale_reference_lifetime_evidence": [
+    "The stale reference is NOT owned by ggml_backend_sched, NOT by the Vulkan backend's tensor->extra (unused), and NOT by any view-lifetime issue inside llama-kv-cache.cpp (cpy_v/get_v always read layers[ikv].v fresh). It is owned by llama_context::gf_res_prev -- the cached llm_graph_result from the LAST graph build, kept alive and RE-EXECUTED unchanged whenever llama_context::process_ubatch's res->can_reuse(gparams) returns true (llama-context.cpp:1336), which happens on essentially every same-shape autoregressive decode step. This reuse path skips cpy_v/get_v (so it never picks up a relocated layer's new placement) and skips ggml_backend_sched_reset (so nothing forces recomputation either). See scheduler_lifetime.json for the full source trace."
+  ],
+  "vulkan_extra_findings": "Ruled out -- see vulkan_extra_lifetime.json. Vulkan does not attach persistent per-tensor metadata via ggml_tensor::extra.",
+  "scheduler_lifetime_findings": "See scheduler_lifetime.json -- ggml_backend_sched's own state management is correct and irrelevant; the bug is one level up, in llama_context's graph-reuse decision.",
+  "retirement_timing_results": "No generation-count delay is needed -- see retirement_timing.json. Immediate retirement (free right after relocation) is safe, unconditionally, provided the new llama_invalidate_graph_cache() call is made first. This collapsed the original A-H timing experiment space to a single clean answer.",
+  "cpu_control": "Not live-tested (no second backend available on a CPU-only build to relocate to/from) -- source-level argument that the root cause and fix are both backend-generic. See cpu_control.json.",
+  "directionality": "Both directions (CPU-start and GPU-start layers) confirmed safe with the fix across 50 and 20 cycles respectively. See backend_direction.json.",
+  "minimal_safe_retirement_rule": "Call llama_invalidate_graph_cache(ctx) once, any time after one or more relocate_layer()/retire_layer_backing() calls that changed KV backend placement, and before the next llama_decode() call on that context. No delay, no generation counting, no reference counting beyond what relocate_layer already does internally.",
+  "cycle_50_result": "PASS -- 50/50 cycles (layer 4, starts CPU) and 20/20 cycles (layer 20, starts GPU), real free every cycle, no crash, no assertion, no VRAM/RSS creep, correct decode output every cycle. See cycle_stability.json.",
+  "old_backing_release_proof": "See release proof throughout cycle_stability.json, multi_layer.json, and pressure_test.json -- every retirement shows a real, external (nvidia-smi) VRAM drop.",
+  "vram_rss_reclamation": "6/9/15/28 MiB reclaimed for 1/2/4/8-layer groups at ctx=8192/135M; 132 MiB reclaimed at the real ctx=200000/360M pressure-regime scale. See memory_reclamation.json for allocator-overhead honesty.",
+  "multi_layer_result": "PASS -- 1, 2, 4, 8-layer deterministic groups all promote+retire cleanly with a single invalidate_graph_cache call per batch. See multi_layer.json.",
+  "pressure_result": "PASS -- first true dynamic memory reclamation proof at the real GTX 1650 ctx=200000 boundary: static split -> promote -> decode -> demote -> RETIRE -> VRAM genuinely returns (3107 -> 3237 -> 3105 MiB). See pressure_test.json.",
+  "failure_atomicity": "7 cases (4 from Phase 12D plus 3 new retirement-specific ones), all fail closed, no half-rebound state, no double-free. See failure_atomicity.json.",
+  "product_regression": "Vulkan Release ctest: test_relocate_state and every Phase-12-relevant test consistently pass; test_mem_guard flakes with real-time host swap pressure (same pre-existing, unrelated condition documented in Phase 12D's regression.json -- mem_guard.cpp untouched). Product CLI untouched (git diff --stat tools/membrane-run/ shows no changes). No public CLI addition. native/q8/q5/adaptive/compare/gpu-bench/auto/guard all unaffected (relocate/retire/invalidate APIs are new, additive, opt-in, and called from no product code path).",
+  "sanitizers": {
+    "llama_free_release": "PASS",
+    "llama_free_asan_ubsan": "PASS, 0 sanitizer reports",
+    "llama_enabled_cpu_release": "PASS",
+    "llama_enabled_cpu_asan_ubsan": "PASS, 0 sanitizer reports",
+    "vulkan_release": "PASS (test_relocate_state and Phase-12-relevant tests; test_mem_guard swap-pressure flake as noted above)",
+    "vulkan_asan": "Not attempted -- same disclosed host-resource-risk reasoning as Phase 12C/12D."
+  },
+  "verifier": "scripts/verify-results.py extended with Phase 12E checks, mutation-tested -- see final commit report for the exact count.",
+  "maintenance_assessment": "See maintenance.json -- low-to-moderate risk, the core fix reuses an existing, actively-maintained llama.cpp mechanism rather than inventing new logic.",
+  "what_is_proven": [
+    "The exact root cause of Phase 12D's release-failure crash: llama_context's graph-reuse optimization re-executing a stale cached graph that references freed KV backing.",
+    "A minimal, generic, backend-agnostic fix exists and is validated: llama_invalidate_graph_cache().",
+    "With the fix, IMMEDIATE old-backing retirement is safe -- no delay/generation-queue mechanism is required.",
+    "Real, repeated (50x), leak-free VRAM/RSS reclamation, including at the real constrained-hardware pressure boundary.",
+    "The fix is small (145 insertions/6 deletions across 5 files, 0 backend-specific code) and reuses an existing, precedented internal mechanism."
+  ],
+  "what_remains_unknown": [
+    "Whether the crash's two observed signatures (SIGSEGV vs GGML_ASSERT) are truly the identical underlying fault verified via a debugger, or two related-but-distinct manifestations of the same class of stale-graph reuse -- not disambiguated with certainty.",
+    "Live confirmation on a second, non-Vulkan backend was not obtained (only a source-level generality argument) -- see cpu_control.json.",
+    "Whether llama.cpp's OWN future changes to gf_res_prev/can_reuse could silently reintroduce a related hazard is not something this fix can guard against beyond its current scope."
+  ],
+  "limitations": [
+    "The RESEARCH-ONLY deferred-retirement path (defer_retirement_for_research / retire_layer_backing) has a disclosed sharp edge: deferring a layer's FIRST relocation's retirement can never actually retire (its old backing is the shared bulk buffer) -- the validated real fix does not use this path at all, so this limitation does not affect the adopted solution.",
+    "Multi-layer and pressure-regime tests used a single invalidate_graph_cache call per BATCH of relocations, not per individual relocate call -- batching beyond what was tested here (e.g. very large groups, or interleaved with other memory-module updates) was not exercised.",
+    "GPU-side allocator overhead makes small (1-2 layer) VRAM reclamation numbers non-linear versus raw tensor bytes -- honestly disclosed, not hidden."
+  ],
+  "decision_gate": "KV_BUFFER_RETIREMENT_VIABLE",
+  "decision_gate_meaning": "The exact/sufficient lifetime boundary was identified (call llama_invalidate_graph_cache() before the next decode after a KV relocation). Old backing can be safely freed -- immediately, no delay needed. Repeated relocation + release is stable across 50+ cycles and multi-layer groups. Real memory reclamation is proven, including at the real hardware pressure boundary. The fix is small (145/6 LOC, 5 files, zero backend-specific code) and maintainable (reuses an existing, precedented internal llama.cpp mechanism).",
+  "next_step_recommendation": "Build a deterministic dynamic tiering scheduler using the relocation + safe retirement primitive established in Phases 12B-12E.",
+  "explicit_non_actions_confirmed": {
+    "no_adaptive_tiering_built": true,
+    "no_hot_cold_policy": true,
+    "no_prefetch_scheduling": true,
+    "no_token_paging": true,
+    "no_cuda_work": true,
+    "no_mixed_precision_work": true,
+    "no_product_cli_added": true,
+    "no_release": true,
+    "no_version_bump": true,
+    "no_automatic_merge": true,
+    "no_co_authored_by": true,
+    "no_phase_12f_started": true
+  }
+}

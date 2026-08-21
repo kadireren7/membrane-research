@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "n_ctx": 65536,
+  "deviation_from_spec": "Spec suggested ctx~=200000; scaled to 65536 because the host had only ~214 MiB free system RAM and 4.9/9.6 GiB swap already in use from unrelated concurrent processes (2nd Claude session, Firefox, an unrelated pytest run) at test time -- launching the full 200000 test risked OOM-killing unrelated work rather than just this experiment. journalctl was checked before and after both runs; no OOM kill occurred either way.",
+  "static_split20_result": {
+    "schema_version": 1,
+    "mode": "hotset",
+    "split": 20,
+    "n_gpu_kv_layers": 10,
+    "n_cpu_kv_layers": 20,
+    "gpu_kv_bytes": 267386880,
+    "cpu_kv_bytes": 534773760,
+    "prompt_ms": 84.71,
+    "n_decodes": 3,
+    "decode_total_ms": 138.783,
+    "generation_tok_s": 21.6165,
+    "vram_used_mib": 616,
+    "rss_kb": 799216,
+    "generated_tokens": [
+      198,
+      198,
+      788
+    ]
+  },
+  "dynamic_schedule_result": {
+    "transitions": [
+      {
+        "decode_idx": 5,
+        "layer": 16,
+        "action": "PROMOTE",
+        "reason": "SCHEDULED_PROMOTION",
+        "bytes": 26738688,
+        "before_device": "CPU",
+        "after_device": "GPU",
+        "duration_us": 8021.0,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 5,
+        "layer": 17,
+        "action": "PROMOTE",
+        "reason": "SCHEDULED_PROMOTION",
+        "bytes": 26738688,
+        "before_device": "CPU",
+        "after_device": "GPU",
+        "duration_us": 8611.8,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 5,
+        "layer": 18,
+        "action": "PROMOTE",
+        "reason": "SCHEDULED_PROMOTION",
+        "bytes": 26738688,
+        "before_device": "CPU",
+        "after_device": "GPU",
+        "duration_us": 6922.6,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 5,
+        "layer": 19,
+        "action": "PROMOTE",
+        "reason": "SCHEDULED_PROMOTION",
+        "bytes": 26738688,
+        "before_device": "CPU",
+        "after_device": "GPU",
+        "duration_us": 6355.6,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 10,
+        "layer": 16,
+        "action": "DEMOTE",
+        "reason": "SCHEDULED_DEMOTION",
+        "bytes": 26738688,
+        "before_device": "GPU",
+        "after_device": "CPU",
+        "duration_us": 28776.5,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 10,
+        "layer": 17,
+        "action": "DEMOTE",
+        "reason": "SCHEDULED_DEMOTION",
+        "bytes": 26738688,
+        "before_device": "GPU",
+        "after_device": "CPU",
+        "duration_us": 26237.1,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 10,
+        "layer": 18,
+        "action": "DEMOTE",
+        "reason": "SCHEDULED_DEMOTION",
+        "bytes": 26738688,
+        "before_device": "GPU",
+        "after_device": "CPU",
+        "duration_us": 26713.0,
+        "result": "ok"
+      },
+      {
+        "decode_idx": 10,
+        "layer": 19,
+        "action": "DEMOTE",
+        "reason": "SCHEDULED_DEMOTION",
+        "bytes": 26738688,
+        "before_device": "GPU",
+        "after_device": "CPU",
+        "duration_us": 25948.8,
+        "result": "ok"
+      }
+    ],
+    "generated_tokens": [
+      198,
+      198,
+      788,
+      451,
+      14874,
+      3586,
+      28,
+      339,
+      3543,
+      1135,
+      253,
+      1443,
+      1971,
+      288,
+      1947
+    ],
+    "matches_ctx2048_reference": true,
+    "all_transitions_ok": true
+  },
+  "oom_detected": false
+}

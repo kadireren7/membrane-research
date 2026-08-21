@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 12,
+  "method": "One representative relocate+poison trial on SmolLM2-360M (32 layers vs 135M's 30), ctx=2048, Q8_0, layer 4, CPU->GPU.",
+  "ok": true,
+  "k_bytes": 696320,
+  "pointer_changed": true,
+  "device_matches_target": true,
+  "poison_had_no_effect_on_output": true,
+  "conclusion": "relocate_layer works identically on a second model with different layer-count/geometry -- not accidentally tied to SmolLM2-135M specifics.",
+  "raw_data": "raw_second_model_360m_relocate_layer4.json"
+}

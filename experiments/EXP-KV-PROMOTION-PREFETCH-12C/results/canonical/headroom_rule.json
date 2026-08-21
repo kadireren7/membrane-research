@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 18,
+  "rule": "free_vram_bytes >= reserve_bytes + group_bytes + compute_buffer_bytes + safety_margin_bytes",
+  "constants_used": {
+    "reserve_mib": 64,
+    "compute_buffer_mib": 32,
+    "safety_margin_mib": 32,
+    "note": "Fixed, disclosed research constants -- NOT tuned per model, NOT the product gpu_policy guard (Section 18 explicitly forbids modifying the product guard in this phase)."
+  },
+  "implementation": "tools/membrane-kv-promotion-prefetch/ownership_state.c: membrane_kv_promo_headroom_ok (llama-free, overflow-checked, unit-tested in test_ownership_state.c) -- wired to real nvidia-smi numbers via headroom_ok_real() in promotion_probe.cpp.",
+  "attempts_audited": [
+    {
+      "trial": "promote_135m_layer4_q8",
+      "vram_before_mib": 378,
+      "vram_total_mib": 4096,
+      "group_bytes": 835584,
+      "predicted_safe": true,
+      "actually_succeeded": true,
+      "false_safe": false,
+      "false_reject": false
+    },
+    {
+      "trial": "promote_360m_layer12_ctx200000_pressure",
+      "vram_before_mib": 3107,
+      "vram_total_mib": 4096,
+      "group_bytes": 136130560,
+      "predicted_safe": true,
+      "actually_succeeded": true,
+      "false_safe": false,
+      "false_reject": false
+    },
+    {
+      "trial": "promote_135m_layer4_huge_forced",
+      "required_bytes": 1671168000000,
+      "predicted_safe": false,
+      "actually_attempted": false,
+      "note": "deliberately absurd request (Section 21 fail-closed path); real free VRAM (~3.7 GiB) is nowhere close to the ~1.56 TB required, so this is an unambiguous true-negative, not a close call.",
+      "false_safe": false,
+      "false_reject": false
+    }
+  ],
+  "false_safe_count": 0,
+  "false_reject_count": 0,
+  "sample_size_caveat": "Only 3 real promotion attempts were run through this rule in Phase 12C (2 real successes at comfortable and pressure-regime headroom, 1 forced-huge true-negative). 0/0 false-safe and false-reject is consistent with the rule working correctly on this small sample, but is NOT a statistically powered validation of the constants -- a wider sweep near the actual boundary (headroom of exactly reserve+group+compute+margin +/- a few MiB) was not attempted this phase and would be needed before trusting these exact constant values in a real guard."
+}

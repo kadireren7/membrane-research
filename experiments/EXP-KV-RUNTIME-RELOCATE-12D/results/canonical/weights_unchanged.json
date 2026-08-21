@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 10,
+  "method": "membrane-kv-runtime-relocate-probe 'weights_table' mode: mp.n_gpu_layers=-1 forces full GPU weight residency for every layer regardless of KV placement (the same invariant established and externally cross-checked in Phase 12B/12C). One relocation is performed and the per-layer table is printed before and after.",
+  "cpu_to_gpu_trial": {
+    "relocated_layer": 4,
+    "relocate_ok": true,
+    "row": {
+      "layer": 4,
+      "weight_device": "Vulkan(n_gpu_layers=-1)",
+      "kv_before": "CPU",
+      "kv_after": "GPU"
+    },
+    "vram_used_mib": 380
+  },
+  "gpu_to_cpu_trial": {
+    "relocated_layer": 20,
+    "relocate_ok": true,
+    "row": {
+      "layer": 20,
+      "weight_device": "Vulkan(n_gpu_layers=-1)",
+      "kv_before": "GPU",
+      "kv_after": "CPU"
+    },
+    "vram_used_mib": 379
+  },
+  "known_limitation": "weight_device is reported as a constant ('Vulkan(n_gpu_layers=-1)') rather than captured per-layer from a live tensor, matching the same disclosed instrumentation gap as Phase 12C's vram_accounting.json -- weight residency is established via the mp.n_gpu_layers=-1 invariant plus the measured VRAM baseline, not per-tensor capture.",
+  "conclusion": "weight placement is unaffected by KV relocation in both directions tested.",
+  "raw_data": [
+    "raw_weights_table_135m_cpu_to_gpu.json",
+    "raw_weights_table_135m_gpu_to_cpu.json"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 11,
+  "method": "One representative relocate+poison trial with Q5_1 instead of Q8_0, same model/layer/direction as single_cpu_gpu.json.",
+  "ok": true,
+  "kv_type": "Q5_1",
+  "k_bytes": 294912,
+  "k_bytes_q8_for_comparison": 417792,
+  "pointer_changed": true,
+  "device_matches_target": true,
+  "poison_had_no_effect_on_output": true,
+  "conclusion": "relocate_layer is type-agnostic -- Q5_1 byte count (294912) correctly differs from Q8_0 (417792) at the same layer, live rebind still poison-test-confirmed.",
+  "raw_data": "raw_q5_relocate_135m_layer4.json"
+}

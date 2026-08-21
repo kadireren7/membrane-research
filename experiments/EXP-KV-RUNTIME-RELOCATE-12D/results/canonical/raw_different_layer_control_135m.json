@@ -1,0 +1,1 @@
+{"schema_version":1,"mode":"multi","direction":"to_gpu","n_layers":2,"steps":[{"layer":4,"ok":true,"relocate_ms":0.4636,"vram_used_mib":380},{"layer":5,"ok":true,"relocate_ms":0.9651,"vram_used_mib":380}],"all_relocations_ok":true,"post_relocate_generation_ok":true,"post_relocate_tokens":[314,42,198,504,2365,6354,16438,27003]}

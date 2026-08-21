@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "layer_states": [
+    "CPU_RESIDENT",
+    "GPU_RESIDENT",
+    "PROMOTING",
+    "DEMOTING",
+    "ERROR"
+  ],
+  "sched_states": [
+    "IDLE",
+    "PLANNING",
+    "APPLYING",
+    "SYNCING",
+    "FAILED"
+  ],
+  "transitions": {
+    "begin_promote": "CPU_RESIDENT -> PROMOTING",
+    "commit_promote": "PROMOTING -> GPU_RESIDENT",
+    "fail_promote": "PROMOTING -> ERROR",
+    "begin_demote": "GPU_RESIDENT -> DEMOTING",
+    "commit_demote": "DEMOTING -> CPU_RESIDENT",
+    "fail_demote": "DEMOTING -> ERROR"
+  },
+  "invariant": "ERROR is terminal for a layer within a run; no transition out of ERROR is defined in scheduler_core.c."
+}

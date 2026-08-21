@@ -1,0 +1,240 @@
+{
+  "idle_vram_mib": 2,
+  "peak_vram_mib": 502,
+  "exit_code": 0,
+  "run": {
+    "schema_version": 1,
+    "n_layer": 30,
+    "split": 8,
+    "n_ctx": 16384,
+    "kv_type": "Q8_0",
+    "gen_tokens": 8,
+    "prompt_tok_per_s": 132.248,
+    "generation_tok_per_s": 21.083,
+    "per_layer_kv_device": [
+      {
+        "layer": 0,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 1,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 2,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 3,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 4,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 5,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 6,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 7,
+        "expected": "CPU",
+        "k_buffer": "CPU",
+        "v_buffer": "CPU",
+        "k_v_agree": true
+      },
+      {
+        "layer": 8,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 9,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 10,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 11,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 12,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 13,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 14,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 15,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 16,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 17,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 18,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 19,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 20,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 21,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 22,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 23,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 24,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 25,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 26,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 27,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 28,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      },
+      {
+        "layer": 29,
+        "expected": "GPU",
+        "k_buffer": "Vulkan1",
+        "v_buffer": "Vulkan1",
+        "k_v_agree": true
+      }
+    ],
+    "n_cpu_kv_layers": 8,
+    "n_gpu_kv_layers": 22,
+    "generated_tokens_list": [
+      198,
+      198,
+      788,
+      451,
+      14874,
+      3586,
+      28,
+      339
+    ]
+  },
+  "stderr_tail": "~llama_context:    Vulkan1 compute buffer size is  97.1250 MiB, matches expectation of  97.1250 MiB\n~llama_context: Vulkan_Host compute buffer size is  18.3008 MiB, matches expectation of  18.3008 MiB"
+}

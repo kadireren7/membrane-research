@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Sections 2-5: patch design, scope, and reproducibility.",
+  "patch_file": "patches/llama.cpp-membrane-kv-device-override.patch",
+  "line_count": {"insertions": 68, "deletions": 7, "net": 61},
+  "comparison_to_kv_type_override_patch": {"insertions": 61, "deletions": 19, "net": 42,
+    "note": "comparable size, same 6 files, same threading pattern (llama_context_params -> llama_memory_params -> llama_kv_cache constructor) -- deliberately mirrored"},
+  "files_changed": [
+    "include/llama.h",
+    "src/llama-context.cpp",
+    "src/llama-kv-cache.cpp",
+    "src/llama-kv-cache.h",
+    "src/llama-memory.h",
+    "src/llama-model.cpp"
+  ],
+  "callback_signature": "ggml_backend_dev_t (*kv_dev_override)(int32_t il, ggml_backend_dev_t default_dev, void *user_data)",
+  "signature_design_notes": {
+    "single_device_per_layer_not_per_k_v": "deliberately simpler than kv_type_override's (il, is_v, ud) shape -- Section 2's own target behavior description ('K and V for a layer use the override-selected KV device') specifies ONE device per layer, not independently selectable K/V devices. This keeps the core per-layer loop change to a single device/buft/ctx resolution point (matching Section 3's 'one per-layer device selection point' preference) instead of doubling it for K vs V.",
+    "default_dev_parameter": "the callback receives default_dev (exactly what upstream would have used -- model.dev_layer(il) when offload, else CPU) so the callback never has to duplicate llama.cpp's own weight-placement logic to make an informed KV placement decision, and so 'redirect KV, leave weights alone' is the natural, easy-to-write default for any caller.",
+    "null_return_semantics": "returning NULL from the callback for a given layer falls back to default_dev for that layer -- documented, implemented, and directly tested (see default_regression.json) to be exactly equivalent to not installing a callback at all."
+  },
+  "core_change_location": "src/llama-kv-cache.cpp, the per-layer buft resolution block inside llama_kv_cache::llama_kv_cache's main allocation loop (originally ~9 lines resolving `buft`/`dev_name` from model.dev_layer(il); now ~26 lines: the same resolution, unchanged, PLUS an if(kv_dev_override) block that may redirect buft/dev_name to a different device -- buft is only recomputed when the override actually differs from default_dev, so the no-override code path is byte-for-byte the original resolution).",
+  "scope_bar_compliance": {
+    "avoided": ["scheduler changes", "graph rewrites", "backend-specific branching", "Vulkan kernel changes", "attention math changes", "large structural refactors"],
+    "did_not_expand_beyond_minimal": true,
+    "note": "the ONLY llama.cpp behavior change is which ggml_backend_buffer_type_t a layer's K/V tensors are allocated into -- everything downstream (graph construction, attention math, backend scheduling, cross-device copy insertion) is completely unmodified, pre-existing llama.cpp/ggml machinery, exercised here for a NEW reason (independent KV placement) rather than the old one (partial weight offload) but through the exact same code paths."
+  },
+  "reproducibility": {
+    "applies_cleanly_from_pristine_pinned_commit": true,
+    "applies_cleanly_in_sequence_after_kv_type_override_patch": true,
+    "zero_fuzz_offset": "git apply (no --reverse, no -C flag) succeeded with no warnings both times tested -- git apply does not fuzz-match by default, so success here means exact context match, not an approximate one",
+    "clean_reset_plus_reapply_identical": "verified: `git diff` after (checkout -- . ; apply patch1 ; apply patch2) byte-for-byte identical to the first application, confirmed via `diff` returning exit 0",
+    "idempotency_check_fix": {
+      "finding": "the EXISTING kv_type_override patch's own CMakeLists.txt idempotency check (`git apply --reverse --check`) breaks once this SECOND patch is also applied, because this patch's insertions sit immediately adjacent to the first patch's insertions in every file it touches -- reversing the first patch alone then requires context that the second patch has since modified, so the reverse-check fails and CMake would incorrectly attempt to re-apply patch 1 forward (which then fails because the file is already modified).",
+      "fix": "both patches' CMakeLists.txt idempotency checks were changed from `git apply --reverse --check` to a content-marker check (does a known, patch-unique string already appear in the target file?) -- ordering/adjacency-independent, robust to any number of layered patches. This is a real, necessary fix to the EXISTING patch-application mechanism, not scope creep of the new patch's own llama.cpp-side diff (which stayed the same size regardless)."
+    }
+  }
+}

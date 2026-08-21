@@ -1,0 +1,425 @@
+{
+  "schema_version": 1,
+  "note": "Pareto-optimal = no other tested point in the same model/context group has both <= VRAM and >= tok/s with at least one strict improvement. Dominated points are marked is_pareto_optimal=false, never presented as optimal (section 24).",
+  "groups": [
+    {
+      "group": "135M_ctx2048",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 385,
+          "generation_tok_s_mean": 23.590933333333336,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 379,
+          "generation_tok_s_mean": 24.428733333333334,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 373,
+          "generation_tok_s_mean": 25.2234,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 368,
+          "generation_tok_s_mean": 25.769033333333333,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 361,
+          "generation_tok_s_mean": 26.560000000000002,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "135M_ctx8192",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 457,
+          "generation_tok_s_mean": 23.624866666666666,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 431,
+          "generation_tok_s_mean": 24.3563,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 409,
+          "generation_tok_s_mean": 25.0531,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 387,
+          "generation_tok_s_mean": 25.664633333333335,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 361,
+          "generation_tok_s_mean": 26.505233333333333,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "135M_ctx16384",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 553,
+          "generation_tok_s_mean": 23.644466666666666,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 502,
+          "generation_tok_s_mean": 24.47993333333333,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 457,
+          "generation_tok_s_mean": 25.021033333333335,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 412,
+          "generation_tok_s_mean": 25.72833333333333,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 362,
+          "generation_tok_s_mean": 26.456666666666667,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "135M_ctx32768",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 744,
+          "generation_tok_s_mean": 23.867733333333334,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 642,
+          "generation_tok_s_mean": 24.386499999999998,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 553,
+          "generation_tok_s_mean": 24.244266666666668,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 463,
+          "generation_tok_s_mean": 25.89196666666667,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 362,
+          "generation_tok_s_mean": 26.5547,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "135M_ctx65536",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 1126,
+          "generation_tok_s_mean": 23.748833333333334,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 922,
+          "generation_tok_s_mean": 24.302266666666668,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 744,
+          "generation_tok_s_mean": 25.3014,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 565,
+          "generation_tok_s_mean": 24.70263333333333,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 362,
+          "generation_tok_s_mean": 26.5835,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "360M_ctx2048",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 838,
+          "generation_tok_s_mean": 21.1627,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 828,
+          "generation_tok_s_mean": 21.737666666666666,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 817,
+          "generation_tok_s_mean": 22.3403,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 806,
+          "generation_tok_s_mean": 22.585966666666668,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 796,
+          "generation_tok_s_mean": 23.20853333333333,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "360M_ctx8192",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 966,
+          "generation_tok_s_mean": 20.997866666666667,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 923,
+          "generation_tok_s_mean": 21.62343333333333,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 881,
+          "generation_tok_s_mean": 22.0163,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 838,
+          "generation_tok_s_mean": 22.576266666666665,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 796,
+          "generation_tok_s_mean": 22.797366666666665,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "360M_ctx16384",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 1136,
+          "generation_tok_s_mean": 21.083766666666666,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 1051,
+          "generation_tok_s_mean": 21.5836,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 966,
+          "generation_tok_s_mean": 21.4917,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 881,
+          "generation_tok_s_mean": 22.6558,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 798,
+          "generation_tok_s_mean": 23.1592,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "360M_ctx32768",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 1476,
+          "generation_tok_s_mean": 21.1661,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 1306,
+          "generation_tok_s_mean": 21.458133333333333,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 1136,
+          "generation_tok_s_mean": 22.1264,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 966,
+          "generation_tok_s_mean": 21.675533333333334,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 798,
+          "generation_tok_s_mean": 23.2183,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "360M_ctx65536",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 2156,
+          "generation_tok_s_mean": 21.229533333333332,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 75,
+          "vram_used_mib": 1831,
+          "generation_tok_s_mean": 21.7071,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 1491,
+          "generation_tok_s_mean": 22.150866666666666,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 25,
+          "vram_used_mib": 1151,
+          "generation_tok_s_mean": 22.5148,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 811,
+          "generation_tok_s_mean": 22.838766666666668,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "1.5B_ctx2048",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 3282,
+          "generation_tok_s_mean": 17.07096,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 3267,
+          "generation_tok_s_mean": 17.34872,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 3252,
+          "generation_tok_s_mean": 17.54904,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "1.5B_ctx8192",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 3371,
+          "generation_tok_s_mean": 17.12008,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 3312,
+          "generation_tok_s_mean": 17.20778,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 3257,
+          "generation_tok_s_mean": 17.53772,
+          "is_pareto_optimal": true
+        }
+      ]
+    },
+    {
+      "group": "1.5B_ctx16384",
+      "points": [
+        {
+          "gpu_kv_pct": 100,
+          "vram_used_mib": 3490,
+          "generation_tok_s_mean": 16.94848,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 50,
+          "vram_used_mib": 3371,
+          "generation_tok_s_mean": 17.24804,
+          "is_pareto_optimal": false
+        },
+        {
+          "gpu_kv_pct": 0,
+          "vram_used_mib": 3255,
+          "generation_tok_s_mean": 17.69428,
+          "is_pareto_optimal": true
+        }
+      ]
+    }
+  ]
+}

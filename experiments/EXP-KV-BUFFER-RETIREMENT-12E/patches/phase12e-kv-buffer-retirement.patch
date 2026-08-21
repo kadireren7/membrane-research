@@ -1,0 +1,759 @@
+diff --git a/patches/llama.cpp-membrane-kv-buffer-retirement.patch b/patches/llama.cpp-membrane-kv-buffer-retirement.patch
+new file mode 100644
+index 0000000..70a0f6d
+--- /dev/null
++++ b/patches/llama.cpp-membrane-kv-buffer-retirement.patch
+@@ -0,0 +1,246 @@
++diff --git a/include/llama.h b/include/llama.h
++index 6679a26..c0d79cb 100644
++--- a/include/llama.h
+++++ b/include/llama.h
++@@ -831,11 +831,41 @@ extern "C" {
++     // .h. When true, permanently leaks the old backing instead of
++     // attempting to free it -- never a memory optimization, exists
++     // only to isolate rebind correctness from release safety.
+++    //
+++    // [MEMBRANE] Phase 12E: defer_retirement_for_research (default
+++    // false, ignored if retain_old_backing_for_research is true): defer
+++    // the old backing's free to a later, caller-controlled
+++    // llama_kv_cache_retire_layer_backing() call instead of attempting
+++    // it immediately -- lets a research caller bound the safe
+++    // retirement lifetime empirically. RESEARCH ONLY.
++     LLAMA_API bool llama_kv_cache_relocate_layer(
++             llama_memory_t mem,
++               int32_t il,
++               ggml_backend_dev_t dev,
++-              bool retain_old_backing_for_research = false);
+++              bool retain_old_backing_for_research = false,
+++              bool defer_retirement_for_research = false);
+++
+++    // [MEMBRANE] Phase 12E: retire (free) layer il's pending deferred
+++    // old backing now, if any -- see llama_kv_cache::
+++    // retire_layer_backing's contract in llama-kv-cache.h. Returns
+++    // false (mem untouched) if mem is not a plain llama_kv_cache, if
+++    // il is invalid, or if nothing is pending for this layer.
+++    // RESEARCH ONLY.
+++    LLAMA_API bool llama_kv_cache_retire_layer_backing(
+++            llama_memory_t mem,
+++              int32_t il);
+++
+++    // [MEMBRANE] Phase 12E: force the next llama_decode() call on ctx
+++    // to fully rebuild its compute graph instead of reusing the
+++    // previous one (llama_context::invalidate_graph_cache() -- the
+++    // exact mechanism llama_context already uses internally after a
+++    // memory-module update). MUST be called after
+++    // llama_kv_cache_relocate_layer()/retire_layer_backing() (or any
+++    // other out-of-band KV cache backend/buffer placement change) and
+++    // before the next llama_decode(), otherwise the reused graph may
+++    // still reference tensors/buffers that have since been reassigned
+++    // or freed. RESEARCH ONLY -- not called from any product code path.
+++    LLAMA_API void llama_invalidate_graph_cache(struct llama_context * ctx);
++ 
++     //
++     // State / sessions
++diff --git a/src/llama-context.cpp b/src/llama-context.cpp
++index b15ed41..a45f022 100644
++--- a/src/llama-context.cpp
+++++ b/src/llama-context.cpp
++@@ -1260,6 +1260,11 @@ bool llama_context::set_sampler(llama_seq_id seq_id, llama_sampler * sampler) {
++     return true;
++ }
++ 
+++// [MEMBRANE] Phase 12E: see llama-context.h for the contract.
+++void llama_context::invalidate_graph_cache() {
+++    gf_res_prev->reset();
+++}
+++
++ void llama_context::set_adapters_lora(llama_adapter_lora ** adapters, size_t n_adapters, float * scales) {
++     LLAMA_LOG_DEBUG("%s: adapters = %p\n", __func__, (void *) adapters);
++ 
++@@ -3949,7 +3954,7 @@ bool llama_memory_can_shift(llama_memory_t mem) {
++ 
++ // [MEMBRANE] Phase 12D: see llama.h for the contract.
++ bool llama_kv_cache_relocate_layer(llama_memory_t mem, int32_t il, ggml_backend_dev_t dev,
++-        bool retain_old_backing_for_research) {
+++        bool retain_old_backing_for_research, bool defer_retirement_for_research) {
++     if (!mem || !dev) {
++         return false;
++     }
++@@ -3959,7 +3964,30 @@ bool llama_kv_cache_relocate_layer(llama_memory_t mem, int32_t il, ggml_backend_
++         return false;
++     }
++ 
++-    return kv->relocate_layer(il, ggml_backend_dev_buffer_type(dev), retain_old_backing_for_research);
+++    return kv->relocate_layer(il, ggml_backend_dev_buffer_type(dev), retain_old_backing_for_research,
+++        defer_retirement_for_research);
+++}
+++
+++// [MEMBRANE] Phase 12E: see llama.h for the contract.
+++bool llama_kv_cache_retire_layer_backing(llama_memory_t mem, int32_t il) {
+++    if (!mem) {
+++        return false;
+++    }
+++
+++    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+++    if (!kv) {
+++        return false;
+++    }
+++
+++    return kv->retire_layer_backing(il);
+++}
+++
+++// [MEMBRANE] Phase 12E: see llama.h for the contract.
+++void llama_invalidate_graph_cache(llama_context * ctx) {
+++    if (!ctx) {
+++        return;
+++    }
+++    ctx->invalidate_graph_cache();
++ }
++ 
++ // llama state API
++diff --git a/src/llama-context.h b/src/llama-context.h
++index bf91daa..231df03 100644
++--- a/src/llama-context.h
+++++ b/src/llama-context.h
++@@ -253,6 +253,17 @@ public:
++ 
++     bool set_sampler(llama_seq_id seq_id, llama_sampler * sampler);
++ 
+++    // [MEMBRANE] Phase 12E: force the next process_ubatch() call to
+++    // fully rebuild its compute graph instead of reusing gf_res_prev.
+++    // This is the exact mechanism llama_context already uses
+++    // internally after a memory-module update (see decode()'s "reset
+++    // the previous graph result to make sure that it won't be reused"
+++    // call site) -- exposed here as a minimal, generic invalidation
+++    // hook for callers that mutate KV cache backend/buffer placement
+++    // outside the normal memory-update path (e.g. llama_kv_cache::
+++    // relocate_layer / retire_layer_backing). RESEARCH ONLY.
+++    void invalidate_graph_cache();
+++
++ private:
++     llm_graph_params graph_params(
++                         llm_graph_result * res,
++diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
++index 8df389a..caea3c6 100644
++--- a/src/llama-kv-cache.cpp
+++++ b/src/llama-kv-cache.cpp
++@@ -1268,7 +1268,7 @@ ggml_tensor * llama_kv_cache::get_k_storage(int32_t il) const {
++ 
++ // [MEMBRANE] Phase 12D: see llama-kv-cache.h for the contract.
++ bool llama_kv_cache::relocate_layer(int32_t il, ggml_backend_buffer_type_t new_buft,
++-        bool retain_old_backing_for_research) {
+++        bool retain_old_backing_for_research, bool defer_retirement_for_research) {
++     if (!new_buft) {
++         return false;
++     }
++@@ -1361,7 +1361,9 @@ bool llama_kv_cache::relocate_layer(int32_t il, ggml_backend_buffer_type_t new_b
++             break;
++         }
++     }
++-    if (!old_buf_still_referenced && !retain_old_backing_for_research) {
+++    if (defer_retirement_for_research && !retain_old_backing_for_research) {
+++        pending_retirement[ikv] = old_buf;
+++    } else if (!old_buf_still_referenced && !retain_old_backing_for_research) {
++         for (auto jt = ctxs_bufs.begin(); jt != ctxs_bufs.end(); ++jt) {
++             if (jt->second.get() == old_buf) {
++                 ctxs_bufs.erase(jt);
++@@ -1373,6 +1375,42 @@ bool llama_kv_cache::relocate_layer(int32_t il, ggml_backend_buffer_type_t new_b
++     return true;
++ }
++ 
+++bool llama_kv_cache::retire_layer_backing(int32_t il) {
+++    const auto it = map_layer_ids.find(il);
+++    if (it == map_layer_ids.end()) {
+++        return false;
+++    }
+++    const int32_t ikv = it->second;
+++
+++    const auto pit = pending_retirement.find(ikv);
+++    if (pit == pending_retirement.end()) {
+++        return false;
+++    }
+++    ggml_backend_buffer_t old_buf = pit->second;
+++
+++    bool old_buf_still_referenced = false;
+++    for (const auto & other_layer : layers) {
+++        if (other_layer.k->buffer == old_buf || (other_layer.v && other_layer.v->buffer == old_buf)) {
+++            old_buf_still_referenced = true;
+++            break;
+++        }
+++    }
+++    if (old_buf_still_referenced) {
+++        return false; // fail closed -- never free a buffer still in use
+++    }
+++
+++    bool freed = false;
+++    for (auto jt = ctxs_bufs.begin(); jt != ctxs_bufs.end(); ++jt) {
+++        if (jt->second.get() == old_buf) {
+++            ctxs_bufs.erase(jt);
+++            freed = true;
+++            break;
+++        }
+++    }
+++    pending_retirement.erase(pit);
+++    return freed;
+++}
+++
++ uint32_t llama_kv_cache::get_n_kv(const slot_info & sinfo) const {
++     uint32_t result = 0;
++ 
++diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
++index 631d74e..ee34c68 100644
++--- a/src/llama-kv-cache.h
+++++ b/src/llama-kv-cache.h
++@@ -201,8 +201,35 @@ public:
++     // optimization and must never be presented as one: every retained
++     // buffer stays fully, permanently allocated. Default (false)
++     // preserves the real release-attempt behavior described above.
+++    // [MEMBRANE] Phase 12E: defer_retirement_for_research (default
+++    // false, ignored if retain_old_backing_for_research is true): when
+++    // true, the old backing is NOT freed immediately (regardless of
+++    // the reference scan) -- instead it is recorded in a per-layer
+++    // pending-retirement slot, to be freed later by an explicit
+++    // retire_layer_backing() call. Lets a research caller control
+++    // EXACTLY when the free happens relative to decode count, to
+++    // empirically bound the safe retirement lifetime (see
+++    // results/phase12/buffer-retirement/retirement_timing.json). Only
+++    // one pending retirement per layer is tracked; a second
+++    // defer_retirement_for_research=true relocation of the same layer
+++    // before the first is retired overwrites the pending slot (the
+++    // earlier old buffer is never retired and leaks for the remainder
+++    // of this research build -- acceptable for a bounded experiment,
+++    // never for production use).
++     bool relocate_layer(int32_t il, ggml_backend_buffer_type_t new_buft,
++-            bool retain_old_backing_for_research = false);
+++            bool retain_old_backing_for_research = false,
+++            bool defer_retirement_for_research = false);
+++
+++    // [MEMBRANE] Phase 12E: if layer il has a pending deferred old
+++    // backing (from a prior relocate_layer(..., defer_retirement_for_
+++    // research=true) call), attempt to retire (free) it NOW, using the
+++    // same live-reference safety scan the immediate-free path uses.
+++    // Returns true iff a buffer was actually freed; false if nothing
+++    // is pending for this layer, or (defensively, should not happen
+++    // given per-layer dedicated buffers) the buffer is still
+++    // referenced elsewhere -- fails closed, never frees a buffer still
+++    // in use. RESEARCH ONLY.
+++    bool retire_layer_backing(int32_t il);
++ 
++     //
++     // graph_build API
++@@ -305,6 +332,11 @@ private:
++     // ggml contexts for the KV cache along with the allocated backend buffers:
++     std::vector<std::pair<ggml_context_ptr, ggml_backend_buffer_ptr>> ctxs_bufs;
++ 
+++    // [MEMBRANE] Phase 12E: at most one pending (deferred) old-backing
+++    // retirement per kv-cache-local layer index, keyed by ikv -- see
+++    // relocate_layer's defer_retirement_for_research parameter.
+++    std::unordered_map<int32_t, ggml_backend_buffer_t> pending_retirement;
+++
++     // the current index from where we start searching for a free slot in the ring buffer of KV cells (see find_slot())
++     // note: this is not part of the KV state and it's only used to speed-up the find_slot() method
++     std::vector<uint32_t> v_heads;
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index f9c2c37..c1d4f9e 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -2129,6 +2129,247 @@ def _c99():
+ 	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all runtime-relocate artifact files"
+ 
+ 
++V12E_DIR = REPO_ROOT / "results" / "phase12" / "buffer-retirement"
++_V12E_CACHE = {}
++
++
++def _load_v12e(name):
++	key = name
++	if key not in _V12E_CACHE:
++		path = V12E_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12E_CACHE[key] = rows
++		elif name.endswith(".txt"):
++			_V12E_CACHE[key] = path.read_text()
++		else:
++			_V12E_CACHE[key] = json.loads(path.read_text())
++	return _V12E_CACHE[key]
++
++
++@check("Phase 12E: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual file in the directory (json/jsonl/txt, including "
++	"itself) and no others")
++def _c100():
++	if not (V12E_DIR / "manifest.json").exists():
++		return False, f"{V12E_DIR}/manifest.json does not exist"
++	m = _load_v12e("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V12E_DIR.glob("*") if p.suffix in (".json", ".jsonl", ".txt")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
++@check("Phase 12E: failing_tensor_trace.json's raw evidence files are "
++	"non-empty and actually contain the claimed tensor name and "
++	"corrupted buffer fields")
++def _c101():
++	trace_text = _load_v12e("raw_failing_tensor_trace_excerpt.txt")
++	cpy_get_v_text = _load_v12e("raw_cpy_get_v_trace.txt")
++	bad = []
++	if "cache_v_l4" not in trace_text:
++		bad.append("raw_failing_tensor_trace_excerpt.txt does not contain 'cache_v_l4'")
++	if len(trace_text.strip().splitlines()) < 10:
++		bad.append("raw_failing_tensor_trace_excerpt.txt suspiciously short")
++	if "bufname=CPU" not in cpy_get_v_text or "bufname=Vulkan1" not in cpy_get_v_text:
++		bad.append("raw_cpy_get_v_trace.txt does not show both a CPU and a Vulkan1 placement (expected: prompt on CPU, post-relocation-1 on GPU)")
++	n_calls = len([l for l in cpy_get_v_text.splitlines() if l.strip()])
++	if n_calls < 2:
++		bad.append(f"only {n_calls} cpy_v/get_v trace lines, expected multiple")
++	return len(bad) == 0, "; ".join(bad) if bad else "failing_tensor_trace.json's raw evidence is present, non-empty, and contains the claimed tensor/placement transition"
++
++
++@check("Phase 12E: retirement_timing.json does not claim the delay-"
++	"based options (D-H) were tested, and the adopted option C is "
++	"marked safe with real validation evidence")
++def _c102():
++	art = _load_v12e("retirement_timing.json")
++	bad = []
++	delay = art.get("options_tested", {}).get("delay_based_options_D_through_H", {})
++	if delay.get("tested") is not False:
++		bad.append("delay_based_options_D_through_H.tested is not explicitly False")
++	opt_c = art.get("options_tested", {}).get("C_immediate_plus_invalidate_graph_cache", {})
++	if "SAFE" not in opt_c.get("result", ""):
++		bad.append("option C is not marked SAFE")
++	opt_a = art.get("options_tested", {}).get("A_immediate_no_invalidate", {})
++	if "UNSAFE" not in opt_a.get("result", ""):
++		bad.append("option A (no fix) is not marked UNSAFE -- contradicts the crash evidence")
++	return len(bad) == 0, "; ".join(bad) if bad else "retirement_timing.json correctly distinguishes tested-and-safe (C) from untested (D-H) and unsafe (A)"
++
++
++@check("Phase 12E: cycle_stability.json's 50-cycle and 20-cycle claims "
++	"are recomputed exactly from their raw JSONL files, with no crash "
++	"and no monotonic VRAM/RSS creep")
++def _c103():
++	art = _load_v12e("cycle_stability.json")
++	raw50 = _load_v12e("raw_cycle_stability_50x.jsonl")
++	raw20 = _load_v12e("raw_cycle_stability_gpu_start_layer20.jsonl")
++	bad = []
++	if len(raw50) < 50:
++		bad.append(f"raw_cycle_stability_50x.jsonl has only {len(raw50)} cycles, need >= 50")
++	c50 = art.get("cpu_start_layer4_135m", {})
++	if c50.get("n_cycles") != len(raw50):
++		bad.append(f"n_cycles claim {c50.get('n_cycles')} != actual raw row count {len(raw50)}")
++	real_all_ok = all(r["ok"] and r["decode_ok"] and r["correct_side"] for r in raw50)
++	if c50.get("all_ok") != all(r["ok"] for r in raw50):
++		bad.append("all_ok claim mismatches raw data")
++	if not real_all_ok:
++		bad.append("raw_cycle_stability_50x.jsonl contains a failing cycle -- cannot claim stability")
++	vram50 = [r["vram_used_mib"] for r in raw50]
++	# real oscillation expected (CPU/GPU toggle), but no MONOTONIC drift: max-min should be small
++	if max(vram50) - min(vram50) > 50:
++		bad.append(f"VRAM range {max(vram50) - min(vram50)} MiB looks like real creep, not oscillation")
++	if len(raw20) < 20:
++		bad.append(f"raw_cycle_stability_gpu_start_layer20.jsonl has only {len(raw20)} cycles, need >= 20")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(raw50)}+{len(raw20)} cycles recomputed exactly from raw data, no crash, no creep"
++
++
++@check("Phase 12E: multi_layer.json's VRAM reclamation figures match "
++	"raw_multi_layer_retirement.jsonl exactly and increase with group "
++	"size (real signal, not fabricated)")
++def _c104():
++	art = _load_v12e("multi_layer.json")
++	raw = _load_v12e("raw_multi_layer_retirement.jsonl")
++	bad = []
++	art_results = {r["n_layers"]: r for r in art.get("results", [])}
++	raw_results = {r["n_layers"]: r for r in raw}
++	if set(art_results.keys()) != set(raw_results.keys()):
++		bad.append(f"layer-count sets differ: artifact={set(art_results.keys())}, raw={set(raw_results.keys())}")
++	for n, raw_r in raw_results.items():
++		art_r = art_results.get(n, {})
++		if art_r.get("vram_reclaimed_mib") != raw_r.get("vram_reclaimed_mib"):
++			bad.append(f"n_layers={n}: vram_reclaimed_mib mismatch ({art_r.get('vram_reclaimed_mib')} vs raw {raw_r.get('vram_reclaimed_mib')})")
++	sorted_ns = sorted(raw_results.keys())
++	reclaimed_in_order = [raw_results[n]["vram_reclaimed_mib"] for n in sorted_ns]
++	if reclaimed_in_order != sorted(reclaimed_in_order):
++		bad.append(f"vram_reclaimed_mib does not increase monotonically with layer count: {list(zip(sorted_ns, reclaimed_in_order))}")
++	if not all(raw_results[n]["promote_ok"] and raw_results[n]["retire_ok"] for n in sorted_ns):
++		bad.append("not every group's promote_ok/retire_ok is true")
++	return len(bad) == 0, "; ".join(bad) if bad else f"multi-layer VRAM reclamation ({reclaimed_in_order} MiB for {sorted_ns} layers) matches raw data exactly and scales monotonically"
++
++
++@check("Phase 12E: pressure_test.json's VRAM figures match "
++	"raw_pressure_retirement_360m_ctx200000.jsonl exactly, and the "
++	"retirement actually succeeded with a real reclaim")
++def _c105():
++	art = _load_v12e("pressure_test.json")
++	raw = _load_v12e("raw_pressure_retirement_360m_ctx200000.jsonl")
++	bad = []
++	if not raw:
++		return False, "raw_pressure_retirement_360m_ctx200000.jsonl is empty"
++	r = raw[0]
++	for field, art_field in (
++		("vram_before_mib", "vram_before_promote_mib"),
++		("vram_after_promote_mib", "vram_during_promote_mib"),
++		("vram_after_retire_mib", "vram_after_retire_mib"),
++		("vram_reclaimed_mib", "vram_reclaimed_mib"),
++	):
++		if art.get(art_field) != r.get(field):
++			bad.append(f"{art_field}: artifact={art.get(art_field)} != raw.{field}={r.get(field)}")
++	if not (r.get("promote_ok") and r.get("retire_ok")):
++		bad.append("promote_ok/retire_ok not both true in raw data")
++	if not r.get("vram_reclaimed_mib", 0) > 0:
++		bad.append("vram_reclaimed_mib is not a positive real reclaim")
++	return len(bad) == 0, "; ".join(bad) if bad else "pressure_test.json fields match raw pressure-regime data exactly, real positive VRAM reclaim confirmed"
++
++
++@check("Phase 12E: failure_atomicity.json has all 7 required cases "
++	"(4 from Phase 12D plus 3 new retirement-specific ones), backed "
++	"by raw_failure_atomicity.jsonl, all showing the layer untouched")
++def _c106():
++	art = _load_v12e("failure_atomicity.json")
++	raw = _load_v12e("raw_failure_atomicity.jsonl")
++	bad = []
++	required = {"invalid_layer", "invalid_dev", "same_dev", "duplicate",
++		"retire_without_pending", "retire_invalid_layer", "retire_duplicate_request"}
++	raw_cases = {r["case"] for r in raw}
++	if not required.issubset(raw_cases):
++		bad.append(f"missing raw cases: {required - raw_cases}")
++	for r in raw:
++		if r.get("layer0_pointer_untouched") is not True:
++			bad.append(f"case {r.get('case')!r}: layer0_pointer_untouched is not True")
++		if r.get("decode_still_works") is not True:
++			bad.append(f"case {r.get('case')!r}: decode_still_works is not True")
++	if len(art.get("cases", {})) < 7:
++		bad.append(f"only {len(art.get('cases', {}))} documented cases, need >= 7")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(raw)} raw failure cases (>= 7 required), all show the layer untouched and decode still working"
++
++
++@check("Phase 12E: maintenance.json's backend_specificity claim of "
++	"'None' is consistent with the real patch file touching no "
++	"backend-specific (ggml-vulkan/ggml-cuda) source files")
++def _c107():
++	patch_path = REPO_ROOT / "patches" / "llama.cpp-membrane-kv-buffer-retirement.patch"
++	if not patch_path.exists():
++		return False, f"{patch_path} does not exist"
++	text = patch_path.read_text()
++	files_changed = set(re.findall(r"^diff --git a/(\S+) b/\S+$", text, re.MULTILINE))
++	bad = []
++	backend_specific = [f for f in files_changed if "ggml-vulkan" in f or "ggml-cuda" in f or "ggml-metal" in f]
++	if backend_specific:
++		bad.append(f"patch touches backend-specific files: {backend_specific}")
++	m = _load_v12e("maintenance.json")
++	if "None" not in m.get("backend_specificity", ""):
++		bad.append("maintenance.json backend_specificity does not claim 'None'")
++	if set(m.get("files_touched", [])) != {f"third_party/llama.cpp/{f}" for f in files_changed}:
++		bad.append("maintenance.json files_touched does not match the real patch file's changed files exactly")
++	return len(bad) == 0, "; ".join(bad) if bad else f"patch touches {len(files_changed)} files, none backend-specific, matching maintenance.json exactly"
++
++
++@check("Phase 12E: summary.json's decision_gate is one of the five "
++	"valid values, and if KV_BUFFER_RETIREMENT_VIABLE is claimed it is "
++	"backed by real cycle-stability and memory-reclamation evidence; "
++	"all explicit_non_actions_confirmed flags are True")
++def _c108():
++	s = _load_v12e("summary.json")
++	valid = {
++		"KV_BUFFER_RETIREMENT_VIABLE",
++		"KV_BUFFER_RETIREMENT_DELAYED_BUT_VIABLE",
++		"KV_BUFFER_RETIREMENT_VULKAN_LIMITED",
++		"KV_BUFFER_RETIREMENT_REQUIRES_DEEP_BACKEND_CHANGE",
++		"KV_BUFFER_RETIREMENT_INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the five valid values")
++	non_actions = s.get("explicit_non_actions_confirmed", {})
++	if not non_actions or not all(non_actions.values()):
++		bad.append(f"explicit_non_actions_confirmed has a False/missing flag: {non_actions}")
++	if gate == "KV_BUFFER_RETIREMENT_VIABLE":
++		cyc = _load_v12e("cycle_stability.json")
++		mem = _load_v12e("memory_reclamation.json")
++		cyc_ok = cyc.get("cpu_start_layer4_135m", {}).get("all_ok") is True and cyc.get("cpu_start_layer4_135m", {}).get("n_cycles", 0) >= 50
++		mem_ok = mem.get("gpu_to_cpu_vram_decrease", {}).get("pressure_regime_evidence", {}).get("vram_reclaimed_mib", 0) > 0
++		if not (cyc_ok and mem_ok):
++			bad.append(f"decision_gate=VIABLE but supporting evidence incomplete (cycle_ok={cyc_ok}, mem_ok={mem_ok})")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} valid and consistent with the recorded evidence, all non-action flags confirmed True"
++
++
++@check("Phase 12E: no absolute filesystem paths (/home/..., /tmp/..., "
++	"etc.) leaked in any buffer-retirement .json/.jsonl/.txt artifact")
++def _c109():
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	hits = []
++	for path in sorted(V12E_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl", ".txt"):
++			continue
++		found = pattern.findall(path.read_text())
++		found = [h for h in found if not h.startswith("/models/")]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all buffer-retirement artifact files"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -2155,6 +2396,7 @@ def main() -> int:
+ 			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73, _c74, _c75,
+ 			_c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83, _c84, _c85, _c86, _c87,
+ 			_c88, _c89, _c90, _c91, _c92, _c93, _c94, _c95, _c96, _c97, _c98, _c99,
++			_c100, _c101, _c102, _c103, _c104, _c105, _c106, _c107, _c108, _c109,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-runtime-relocate/relocate_probe.cpp b/tools/membrane-kv-runtime-relocate/relocate_probe.cpp
+index a5912a3..510f518 100644
+--- a/tools/membrane-kv-runtime-relocate/relocate_probe.cpp
++++ b/tools/membrane-kv-runtime-relocate/relocate_probe.cpp
+@@ -558,7 +558,7 @@ static int	cmd_roundtrip(const char *model, int32_t n_ctx, const char *kvt,
+ /* ---------- mode: cycle (repeated CPU <-> GPU relocate) ---------- */
+ 
+ static int	cmd_cycle(const char *model, int32_t n_ctx, const char *kvt,
+-			int32_t split, int32_t layer, int cycles)
++			int32_t split, int32_t layer, int cycles, bool invalidate_cache)
+ {
+ 	loaded_t	l{};
+ 
+@@ -589,6 +589,8 @@ static int	cmd_cycle(const char *model, int32_t n_ctx, const char *kvt,
+ 		ggml_backend_dev_t	target = cur_is_cpu ? gpu_dev : cpu_dev;
+ 		llama_synchronize(l.ctx);
+ 		bool	ok = llama_kv_cache_relocate_layer(l.mem, layer, target);
++		if (invalidate_cache)
++			llama_invalidate_graph_cache(l.ctx);
+ 		bool	decode_ok = ok && decode_prompt(&l, "x");
+ 		bool	now_cpu = layer_is_cpu(l.cap.k_leaf[layer]);
+ 		bool	correct_side = (now_cpu == !cur_is_cpu);
+@@ -665,6 +667,67 @@ static int	cmd_multi(const char *model, int32_t n_ctx, const char *kvt,
+ 	return (0);
+ }
+ 
++/* ---------- mode: multi_retire (Section 19: N-layer group round trip
++ * with real free + invalidate_graph_cache) ---------- */
++
++static int	cmd_multi_retire(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, const std::vector<int32_t> &layers)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	ggml_backend_dev_t	cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	if (!gpu_dev)
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	long	vram_before = nvidia_smi_used_mib();
++
++	bool	ok1 = true;
++	for (int32_t layer : layers)
++	{
++		llama_synchronize(l.ctx);
++		ok1 = ok1 && llama_kv_cache_relocate_layer(l.mem, layer, gpu_dev);
++	}
++	llama_invalidate_graph_cache(l.ctx);
++	std::vector<llama_token>	gen1;
++	bool	decode1_ok = decode_prompt(&l, "second sentence") && generate_greedy(&l, 4, &gen1);
++	long	vram_after_promote = nvidia_smi_used_mib();
++
++	bool	ok2 = true;
++	for (int32_t layer : layers)
++	{
++		llama_synchronize(l.ctx);
++		ok2 = ok2 && llama_kv_cache_relocate_layer(l.mem, layer, cpu_dev);
++	}
++	llama_invalidate_graph_cache(l.ctx);
++	std::vector<llama_token>	gen2;
++	bool	decode2_ok = decode_prompt(&l, "third sentence") && generate_greedy(&l, 4, &gen2);
++	long	vram_after_retire = nvidia_smi_used_mib();
++
++	printf("{\"schema_version\":1,\"mode\":\"multi_retire\",\"n_layers\":%d,"
++		"\"promote_ok\":%s,\"decode_after_promote_ok\":%s,"
++		"\"retire_ok\":%s,\"decode_after_retire_ok\":%s,"
++		"\"vram_before_mib\":%ld,\"vram_after_promote_mib\":%ld,"
++		"\"vram_after_retire_mib\":%ld,\"vram_reclaimed_mib\":%ld}\n",
++		(int)layers.size(), ok1 ? "true" : "false", decode1_ok ? "true" : "false",
++		ok2 ? "true" : "false", decode2_ok ? "true" : "false",
++		vram_before, vram_after_promote, vram_after_retire,
++		vram_after_promote - vram_after_retire);
++	free_loaded(&l);
++	return ((ok1 && decode1_ok && ok2 && decode2_ok) ? 0 : 1);
++}
++
+ /* ---------- mode: weights_table ---------- */
+ 
+ static int	cmd_weights_table(const char *model, int32_t n_ctx,
+@@ -841,7 +904,8 @@ static int	cmd_state_save(const char *model, int32_t n_ctx, const char *kvt,
+  * of the SAME layer -- Section 1 of the follow-up investigation) ---------- */
+ 
+ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+-			int32_t split, int32_t layer, bool retain, int settle_decodes)
++			int32_t split, int32_t layer, bool retain, int settle_decodes,
++			bool invalidate_cache)
+ {
+ 	loaded_t	l{};
+ 
+@@ -878,6 +942,8 @@ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+ 	/* B: relocation #1 (CPU -> GPU) */
+ 	llama_synchronize(l.ctx);
+ 	bool	ok1 = llama_kv_cache_relocate_layer(l.mem, layer, gpu_dev, retain);
++	if (invalidate_cache)
++		llama_invalidate_graph_cache(l.ctx);
+ 	printf(",\"B_after_reloc1_call\":{\"ok\":%s}", ok1 ? "true" : "false");
+ 
+ 	/* C: graph build after relocation #1 */
+@@ -911,7 +977,10 @@ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+ 	 * invoking shell. */
+ 	llama_synchronize(l.ctx);
+ 	bool	ok2 = llama_kv_cache_relocate_layer(l.mem, layer, cpu_dev, retain);
+-	printf(",\"D_after_reloc2_call\":{\"ok\":%s}", ok2 ? "true" : "false");
++	if (invalidate_cache)
++		llama_invalidate_graph_cache(l.ctx);
++	printf(",\"D_after_reloc2_call\":{\"ok\":%s,\"invalidate_cache\":%s}", ok2 ? "true" : "false",
++		invalidate_cache ? "true" : "false");
+ 	fflush(stdout);
+ 
+ 	/* E: graph build after relocation #2 */
+@@ -938,9 +1007,19 @@ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+ 	 * context (l2) that follows the identical schedule (prompt,
+ 	 * relocate #1, "second sentence", relocate #2, "third sentence")
+ 	 * with NO poisoning, generating at the exact same position. */
++	/* c_k/c_v (relocation #1's destination) are only still valid,
++	 * writable tensors when retain==true (old backing intentionally
++	 * leaked). When retain==false, relocation #2's cleanup has already
++	 * physically freed that ggml_context/buffer -- writing through
++	 * c_k/c_v here would itself be a use-after-free in THIS PROBE, not
++	 * in llama.cpp, so skip the poison write in that case and just
++	 * measure normal generation instead. */
+ 	std::vector<uint8_t>	poison_k(kb, 0xAA), poison_v(vb, 0xAA);
+-	ggml_backend_tensor_set(c_k, poison_k.data(), 0, kb);
+-	ggml_backend_tensor_set(c_v, poison_v.data(), 0, vb);
++	if (retain)
++	{
++		ggml_backend_tensor_set(c_k, poison_k.data(), 0, kb);
++		ggml_backend_tensor_set(c_v, poison_v.data(), 0, vb);
++	}
+ 	std::vector<llama_token>	gen_poisoned;
+ 	generate_greedy(&l, 8, &gen_poisoned);
+ 
+@@ -949,6 +1028,8 @@ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+ 	decode_prompt(&l2, "The quick brown fox jumps over the lazy dog");
+ 	llama_synchronize(l2.ctx);
+ 	llama_kv_cache_relocate_layer(l2.mem, layer, gpu_dev, retain);
++	if (invalidate_cache)
++		llama_invalidate_graph_cache(l2.ctx);
+ 	decode_prompt(&l2, "second sentence");
+ 	if (settle_decodes > 0)
+ 	{
+@@ -957,6 +1038,8 @@ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+ 	}
+ 	llama_synchronize(l2.ctx);
+ 	llama_kv_cache_relocate_layer(l2.mem, layer, cpu_dev, retain);
++	if (invalidate_cache)
++		llama_invalidate_graph_cache(l2.ctx);
+ 	decode_prompt(&l2, "third sentence");
+ 	std::vector<llama_token>	gen_clean;
+ 	generate_greedy(&l2, 8, &gen_clean);
+@@ -965,8 +1048,9 @@ static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
+ 		(gen_poisoned == gen_clean);
+ 
+ 	printf(",\"ground_truth_poison_test\":{"
+-		"\"poisoned_tensor_was_relocation1_destination\":true,"
+-		"\"generated_after_poisoning_reloc1_dest\":[");
++		"\"poisoned_tensor_was_relocation1_destination\":%s,"
++		"\"generated_after_poisoning_reloc1_dest\":[",
++		retain ? "true" : "false");
+ 	print_tokens(stdout, gen_poisoned);
+ 	printf("],\"independent_clean_reference_same_position\":[");
+ 	print_tokens(stdout, gen_clean);
+@@ -1036,6 +1120,40 @@ static int	cmd_failure(const char *model, int32_t n_ctx, const char *kvt,
+ 				ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
+ 		ok = ok1 && ok2;
+ 	}
++	else if (strcmp(fcase, "retire_without_pending") == 0)
++	{
++		/* no deferred relocation was ever issued for layer 0 -- retire
++		 * must fail closed (nothing to free) and leave the layer valid. */
++		ok = llama_kv_cache_retire_layer_backing(l.mem, 0);
++	}
++	else if (strcmp(fcase, "retire_invalid_layer") == 0)
++	{
++		ok = llama_kv_cache_retire_layer_backing(l.mem, 99999);
++	}
++	else if (strcmp(fcase, "retire_duplicate_request") == 0)
++	{
++		/* layer 0's FIRST relocation targets the shared construction-
++		 * time bulk buffer (still referenced by layers 1-7 under
++		 * split=8) -- retirement of THAT would correctly refuse, which
++		 * is not what this case means to test. Do one immediate
++		 * (non-deferred) relocation first to give layer 0 its own
++		 * dedicated backing, THEN defer+retire the SECOND relocation,
++		 * whose old (now-dedicated, unshared) backing retirement
++		 * should genuinely be able to free. */
++		llama_synchronize(l.ctx);
++		bool	warmup_ok = gpu_dev && llama_kv_cache_relocate_layer(l.mem, 0, gpu_dev);
++		llama_invalidate_graph_cache(l.ctx);
++
++		llama_synchronize(l.ctx);
++		bool	reloc_ok = warmup_ok && llama_kv_cache_relocate_layer(l.mem, 0,
++				ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU),
++				/*retain_old_backing_for_research=*/false,
++				/*defer_retirement_for_research=*/true);
++		bool	retire1_ok = reloc_ok && llama_kv_cache_retire_layer_backing(l.mem, 0);
++		bool	retire2_ok = llama_kv_cache_retire_layer_backing(l.mem, 0);
++		llama_invalidate_graph_cache(l.ctx);
++		ok = reloc_ok && retire1_ok && !retire2_ok;
++	}
+ 	else
+ 	{
+ 		fprintf(stderr, "unknown case %s\n", fcase);
+@@ -1078,7 +1196,7 @@ int	main(int argc, char **argv)
+ 			atoi(argv[6]));
+ 	else if (mode == "cycle" && argc >= 8)
+ 		rc = cmd_cycle(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
+-			atoi(argv[6]), atoi(argv[7]));
++			atoi(argv[6]), atoi(argv[7]), argc >= 9 && std::string(argv[8]) == "invalidate");
+ 	else if (mode == "multi" && argc >= 7)
+ 	{
+ 		std::vector<int32_t>	layers;
+@@ -1087,6 +1205,13 @@ int	main(int argc, char **argv)
+ 		rc = cmd_multi(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
+ 			argv[6], layers);
+ 	}
++	else if (mode == "multi_retire" && argc >= 6)
++	{
++		std::vector<int32_t>	layers;
++		for (int i = 6; i < argc; i++)
++			layers.push_back(atoi(argv[i]));
++		rc = cmd_multi_retire(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]), layers);
++	}
+ 	else if (mode == "weights_table" && argc >= 7)
+ 		rc = cmd_weights_table(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
+ 			atoi(argv[6]));
+@@ -1104,7 +1229,8 @@ int	main(int argc, char **argv)
+ 	else if (mode == "repro2" && argc >= 8)
+ 		rc = cmd_repro2(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
+ 			atoi(argv[6]), std::string(argv[7]) == "retain",
+-			argc >= 9 ? atoi(argv[8]) : 0);
++			argc >= 9 ? atoi(argv[8]) : 0,
++			argc >= 10 && std::string(argv[9]) == "invalidate");
+ 	else if (mode == "failure" && argc >= 6)
+ 		rc = cmd_failure(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]), argv[6]);
+ 	else

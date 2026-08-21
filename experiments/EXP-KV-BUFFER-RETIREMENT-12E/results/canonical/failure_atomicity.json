@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 21,
+  "method": "membrane-kv-runtime-relocate-probe 'failure' mode, extended this phase with 3 new retirement-specific cases.",
+  "cases": {
+    "invalid_layer": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "invalid_layer",
+      "relocate_returned_ok": false,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "relocate(layer=99999) on a 30-layer model -- fails closed."
+    },
+    "invalid_dev": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "invalid_dev",
+      "relocate_returned_ok": false,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "relocate(dev=nullptr) -- fails closed."
+    },
+    "source_eq_destination": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "same_dev",
+      "relocate_returned_ok": true,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "relocate to the layer's own current device -- allowed as a harmless redundant relocation (not rejected), layer stays valid."
+    },
+    "duplicate_sequential_relocations": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "duplicate",
+      "relocate_returned_ok": true,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "two sequential (not concurrent) relocations of the same layer -- both succeed, layer stays valid."
+    },
+    "retire_without_pending": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "retire_without_pending",
+      "relocate_returned_ok": false,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "retire_layer_backing() called on a layer with NO deferred relocation pending -- correctly returns false, layer untouched."
+    },
+    "retire_invalid_layer": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "retire_invalid_layer",
+      "relocate_returned_ok": false,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "retire_layer_backing(layer=99999) -- correctly returns false, layer untouched."
+    },
+    "retire_duplicate_request": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "retire_duplicate_request",
+      "relocate_returned_ok": true,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "Real deferred relocation, retired once (succeeds), then retired again immediately (correctly fails closed -- nothing pending, does not double-free). A revealing sub-finding surfaced while building this case: deferring retirement on a layer's FIRST relocation (whose old backing is the SHARED construction-time bulk buffer) correctly refuses to ever retire that pending entry, since the scan always finds it still referenced by other layers -- this is safe (fails closed) but means a naive caller could accumulate permanently-unretirable pending entries if it only ever calls defer_retirement_for_research on first-time relocations. Documented as a known sharp edge of the RESEARCH-ONLY deferred-retirement escape hatch, not a concern for the validated real fix (immediate retirement + invalidate_graph_cache), which does not use deferred retirement at all."
+    }
+  },
+  "requirement_met": "original/current layer remains valid and usable in all 7 cases -- no half-rebound state, no double-free.",
+  "raw_data": "raw_failure_atomicity.jsonl"
+}

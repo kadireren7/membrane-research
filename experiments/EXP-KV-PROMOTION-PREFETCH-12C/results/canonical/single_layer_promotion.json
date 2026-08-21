@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 4,
+  "method": "membrane-kv-promotion-prefetch-probe 'promote' mode: real llama_init_from_model with kv_dev_override splitting KV per-layer, mp.n_gpu_layers=-1 (weights always fully Vulkan1-resident). For the target CPU-resident layer: read real K/V tensor bytes via ggml_backend_tensor_get, hash (FNV-1a), copy into a fresh GPU scratch tensor via ggml_backend_tensor_set, read back and hash again for round-trip verification, then run an independent poison test (see ownership_model.json live_rebind_classification) to empirically test whether live decode consumes the copy.",
+  "trials": {
+    "smollm2_135m_ctx2048_q8_layer4": {
+      "ok": true,
+      "k_bytes": 417792,
+      "v_bytes": 417792,
+      "copy_ms": 1.6836,
+      "roundtrip_byte_equal": true,
+      "hash_match": true,
+      "vram_before_mib": 378,
+      "vram_during_mib": 379,
+      "generated_control_tokens": [
+        198,
+        198,
+        788,
+        451,
+        14874,
+        3586,
+        28,
+        339
+      ],
+      "generated_poisoned_tokens": [
+        198,
+        198,
+        788,
+        451,
+        14874,
+        3586,
+        28,
+        339
+      ],
+      "poison_had_no_effect_on_output": true
+    },
+    "smollm2_360m_ctx2048_q8_layer4": {
+      "ok": true,
+      "k_bytes": 696320,
+      "v_bytes": 696320,
+      "copy_ms": 2.477,
+      "roundtrip_byte_equal": true,
+      "hash_match": true,
+      "poison_had_no_effect_on_output": true
+    },
+    "smollm2_135m_ctx2048_q5_1_layer4": {
+      "ok": true,
+      "k_bytes": 294912,
+      "v_bytes": 294912,
+      "copy_ms": 1.3711,
+      "roundtrip_byte_equal": true,
+      "note": "Q5_1 bytes-per-layer (294912) < Q8_0 (417792) as expected -- placement mechanism is precision-independent, see Section 16 / correctness.json."
+    }
+  },
+  "raw_data": [
+    "raw_promote_135m_layer4.json",
+    "raw_promote_360m_layer4.json",
+    "raw_promote_135m_layer4_q5.json"
+  ],
+  "classification": "B",
+  "classification_name": "COPY_WORKS_BUT_PLACEMENT_IS_STATIC"
+}

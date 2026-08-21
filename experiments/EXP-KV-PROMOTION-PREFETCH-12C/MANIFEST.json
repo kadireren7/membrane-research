@@ -1,0 +1,308 @@
+{
+  "experiment_id": "EXP-KV-PROMOTION-PREFETCH-12C",
+  "phase": "12C",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/kv-promotion-prefetch",
+  "source_head_sha": "73090efff08fa37627c1a5bf4e0be8480c700576",
+  "parent_experiment": "EXP-KV-DEVICE-OVERRIDE-12B",
+  "parent_head_sha": "a1ebd9e285bd763cfb448c8d8202536802783bb9",
+  "base_sha": "a1ebd9e285bd763cfb448c8d8202536802783bb9",
+  "date": "2026-08-17",
+  "purpose": "Determine whether a live KV tensor can be copied between CPU and GPU backing after context construction, whether the copy is correct, and whether the live decode graph actually consumes the relocated copy (true runtime relocation) or only a static-at-construction placement.",
+  "literal_verdict": "LIVE_KV_COPY_WORKS_BUT_REBIND_STATIC",
+  "verdict_summary": "Live CPU<->GPU KV copy is real, byte-verified, and precision-independent (Q8_0/Q5_1), reproduced at both tested model scales and at the real ctx=200000 pressure boundary, with <2% wall-clock stall for synchronous promotion. But llama_kv_cache::layers is a private field written once at construction and never again; the live decode graph keeps reading the ORIGINAL tensor, so every promotion/demotion this phase performs is a real, correct copy the decode graph never reads (poison-testing falsified live consumption in every trial). Source-level investigation (not inference) located the exact missing primitive: a relocate_layer-style method to reassign layers[il].k/.v after the copy -- not written this phase, per explicit instruction to stop and report.",
+  "verdict_source": "results/phase12/promotion-prefetch/summary.json:decision_gate / decision_gate_meaning (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "productization_note": "No code from this branch (tools/membrane-kv-promotion-prefetch/) exists on product main. This phase's value is research-lineage only: it proved the copy primitive safe and precisely located the missing rebind primitive that Phase 12D went on to build. The product's static planner (PR #21) does not perform any live copy or promotion at all -- it decides placement once, before context construction, using only the Phase 12B mechanism.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM), Vulkan backend",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/patches/phase12c-kv-promotion-prefetch.patch",
+      "source_path": "(derived) git diff a1ebd9e285bd763cfb448c8d8202536802783bb9..73090efff08fa37627c1a5bf4e0be8480c700576 -- . ':(exclude)results/phase12/promotion-prefetch/*'",
+      "source_sha256": "7ff57f88c1eb3d172ef0fd6b118ed2d9f527cea47259c5a4348e960d998d507a",
+      "migrated_sha256": "7ff57f88c1eb3d172ef0fd6b118ed2d9f527cea47259c5a4348e960d998d507a",
+      "size_bytes": 69249,
+      "category": "B_experiment_implementation"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/async_feasibility.json",
+      "source_path": "results/phase12/promotion-prefetch/async_feasibility.json",
+      "source_sha256": "2922faed0633c39175687eab9cc0e47acab2db6672b1730132df676581388c24",
+      "migrated_sha256": "2922faed0633c39175687eab9cc0e47acab2db6672b1730132df676581388c24",
+      "size_bytes": 3446,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/copy_microbench.json",
+      "source_path": "results/phase12/promotion-prefetch/copy_microbench.json",
+      "source_sha256": "bb72e9d7cc14fd7669e406c0a22337ed7b741217fce7b7fa9c669f6166925d9d",
+      "migrated_sha256": "bb72e9d7cc14fd7669e406c0a22337ed7b741217fce7b7fa9c669f6166925d9d",
+      "size_bytes": 6059,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/correctness.json",
+      "source_path": "results/phase12/promotion-prefetch/correctness.json",
+      "source_sha256": "05a18715b929f65be35c0f0ff0868ca855f879a0d5244736362697fb387c5d8a",
+      "migrated_sha256": "05a18715b929f65be35c0f0ff0868ca855f879a0d5244736362697fb387c5d8a",
+      "size_bytes": 2255,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/cycle_stability.json",
+      "source_path": "results/phase12/promotion-prefetch/cycle_stability.json",
+      "source_sha256": "526545bc252e126d2d14057f52ae1272d92ff661855bfb62815d61865c40f1bd",
+      "migrated_sha256": "526545bc252e126d2d14057f52ae1272d92ff661855bfb62815d61865c40f1bd",
+      "size_bytes": 945,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/failure_cases.json",
+      "source_path": "results/phase12/promotion-prefetch/failure_cases.json",
+      "source_sha256": "ef61e831c1db9f0f4773e9153f164c7aee786bf0678014a54e84649cd42584c2",
+      "migrated_sha256": "ef61e831c1db9f0f4773e9153f164c7aee786bf0678014a54e84649cd42584c2",
+      "size_bytes": 2966,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/headroom_rule.json",
+      "source_path": "results/phase12/promotion-prefetch/headroom_rule.json",
+      "source_sha256": "73c6f965020c3976da0d54b4af17fbaa8d318fd5d61534fb0884658f3a77e372",
+      "migrated_sha256": "73c6f965020c3976da0d54b4af17fbaa8d318fd5d61534fb0884658f3a77e372",
+      "size_bytes": 2342,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/manifest.json",
+      "source_path": "results/phase12/promotion-prefetch/manifest.json",
+      "source_sha256": "a85feeb39c699cbaecadbf728bf4ac5976992c183ac7746c30fd85f231ed18cf",
+      "migrated_sha256": "a85feeb39c699cbaecadbf728bf4ac5976992c183ac7746c30fd85f231ed18cf",
+      "size_bytes": 3632,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/multi_layer_schedule.json",
+      "source_path": "results/phase12/promotion-prefetch/multi_layer_schedule.json",
+      "source_sha256": "509df7d5125346e13ee26646b4dc4608fe419f9c66220b827b30c0135411cba4",
+      "migrated_sha256": "509df7d5125346e13ee26646b4dc4608fe419f9c66220b827b30c0135411cba4",
+      "size_bytes": 2265,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/ownership_model.json",
+      "source_path": "results/phase12/promotion-prefetch/ownership_model.json",
+      "source_sha256": "e53d69ec68a5063bde71c344b64ece01b64fd74a09366c9981e1878935014063",
+      "migrated_sha256": "e53d69ec68a5063bde71c344b64ece01b64fd74a09366c9981e1878935014063",
+      "size_bytes": 5137,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/prefetch_result.json",
+      "source_path": "results/phase12/promotion-prefetch/prefetch_result.json",
+      "source_sha256": "8a9ca6360652a34d7834dac49bc3f3329685e991a8a4de56cfe93e8c15365b70",
+      "migrated_sha256": "8a9ca6360652a34d7834dac49bc3f3329685e991a8a4de56cfe93e8c15365b70",
+      "size_bytes": 2190,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/pressure_test.json",
+      "source_path": "results/phase12/promotion-prefetch/pressure_test.json",
+      "source_sha256": "5b159d3dccabb35781e3ebb5620d1adb5bedc106aed62042c89be4f9e4e555d1",
+      "migrated_sha256": "5b159d3dccabb35781e3ebb5620d1adb5bedc106aed62042c89be4f9e4e555d1",
+      "size_bytes": 1852,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_copybench.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_copybench.jsonl",
+      "source_sha256": "226b7864210f38d04b11ad2dc68ede00bf0ffded3feefc471e43d065b9431d85",
+      "migrated_sha256": "226b7864210f38d04b11ad2dc68ede00bf0ffded3feefc471e43d065b9431d85",
+      "size_bytes": 13960,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_cycle_stability.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_cycle_stability.jsonl",
+      "source_sha256": "0d396835aea0acaeba3fb017ad5e2ff06f852e43824f6dc5370c74e3d84d98d7",
+      "migrated_sha256": "0d396835aea0acaeba3fb017ad5e2ff06f852e43824f6dc5370c74e3d84d98d7",
+      "size_bytes": 3890,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_demote_135m_layer20.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_demote_135m_layer20.json",
+      "source_sha256": "18b4090ac6c78e92e3e84cf9cb71bf1972c109d113a99bae2e5e7a5de53cf20f",
+      "migrated_sha256": "18b4090ac6c78e92e3e84cf9cb71bf1972c109d113a99bae2e5e7a5de53cf20f",
+      "size_bytes": 766,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_demote_360m_layer20.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_demote_360m_layer20.json",
+      "source_sha256": "b054a38c4a6da5057266371b17bd351d0384f3220fdf193d8380fca87cec0c68",
+      "migrated_sha256": "b054a38c4a6da5057266371b17bd351d0384f3220fdf193d8380fca87cec0c68",
+      "size_bytes": 752,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_failure_cases.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_failure_cases.jsonl",
+      "source_sha256": "35875c30c112785cbd18daa4ab563936dc14ca85d47512cc243108cc53fb8e83",
+      "migrated_sha256": "35875c30c112785cbd18daa4ab563936dc14ca85d47512cc243108cc53fb8e83",
+      "size_bytes": 1235,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_info_135m_ctx2048_q8_split8.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_info_135m_ctx2048_q8_split8.json",
+      "source_sha256": "cc653d11d5bd1e237c0e8cc02323a842a5d776a715b1a2b55177d01c662c6ffc",
+      "migrated_sha256": "cc653d11d5bd1e237c0e8cc02323a842a5d776a715b1a2b55177d01c662c6ffc",
+      "size_bytes": 3063,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_info_360m_ctx2048_q8_split8.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_info_360m_ctx2048_q8_split8.json",
+      "source_sha256": "db46f26b7c479e8fbfead777f77248a344ee78407273a49e8f29e16a76adfa9f",
+      "migrated_sha256": "db46f26b7c479e8fbfead777f77248a344ee78407273a49e8f29e16a76adfa9f",
+      "size_bytes": 3253,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_multi_schedule_135m.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_multi_schedule_135m.json",
+      "source_sha256": "dcce2e809b5999ee0f2c1b1b1e7df1e4d1de28e16975e1ceaa436873c8d810e3",
+      "migrated_sha256": "dcce2e809b5999ee0f2c1b1b1e7df1e4d1de28e16975e1ceaa436873c8d810e3",
+      "size_bytes": 1036,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_multi_schedule_360m.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_multi_schedule_360m.json",
+      "source_sha256": "82f45affba4f5a945a288b9678b15c063f0a338511af53dec257fc63b0717354",
+      "migrated_sha256": "82f45affba4f5a945a288b9678b15c063f0a338511af53dec257fc63b0717354",
+      "size_bytes": 1030,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_perf_curve_static_50_50.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_perf_curve_static_50_50.jsonl",
+      "source_sha256": "ef4eff62fa0fda6a807f66e6488f5cc28012dd0a45d9009b6ef3b734d3cb72f0",
+      "migrated_sha256": "ef4eff62fa0fda6a807f66e6488f5cc28012dd0a45d9009b6ef3b734d3cb72f0",
+      "size_bytes": 2527,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_perf_curve_static_full_gpu.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_perf_curve_static_full_gpu.jsonl",
+      "source_sha256": "ef304b8d79666f74f822991e061eab433c9be6f7df1fc099469f2137301a4a4c",
+      "migrated_sha256": "ef304b8d79666f74f822991e061eab433c9be6f7df1fc099469f2137301a4a4c",
+      "size_bytes": 2527,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_prefetch.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_prefetch.jsonl",
+      "source_sha256": "b65b028b0c80bffc8f344b70bf63624ab3c412e3284004bc300c2aa2fa686af8",
+      "migrated_sha256": "b65b028b0c80bffc8f344b70bf63624ab3c412e3284004bc300c2aa2fa686af8",
+      "size_bytes": 20447,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_pressure_info_360m_ctx200000_split16.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_pressure_info_360m_ctx200000_split16.json",
+      "source_sha256": "b9355f597bae86190adabcffba667c313e535e9df0b9f5f436f6c90404adab3d",
+      "migrated_sha256": "b9355f597bae86190adabcffba667c313e535e9df0b9f5f436f6c90404adab3d",
+      "size_bytes": 3354,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_pressure_promote_360m_layer12.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_pressure_promote_360m_layer12.json",
+      "source_sha256": "10ae0b9c44885379ddaaf1fefc953b62743a1c224661f1e3f398cb51605d8c4d",
+      "migrated_sha256": "10ae0b9c44885379ddaaf1fefc953b62743a1c224661f1e3f398cb51605d8c4d",
+      "size_bytes": 765,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_promote_135m_layer4.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_promote_135m_layer4.json",
+      "source_sha256": "61bfe58fb6e7caa6887f6adf4096638eb41c641df9c1808b5ddf676aad69da8c",
+      "migrated_sha256": "61bfe58fb6e7caa6887f6adf4096638eb41c641df9c1808b5ddf676aad69da8c",
+      "size_bytes": 766,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_promote_135m_layer4_q5.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_promote_135m_layer4_q5.json",
+      "source_sha256": "6132f314e2929f1544c9bd6ce0a619b0c6c3059cf8bb18750c046161c72acc7b",
+      "migrated_sha256": "6132f314e2929f1544c9bd6ce0a619b0c6c3059cf8bb18750c046161c72acc7b",
+      "size_bytes": 764,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_promote_360m_layer4.json",
+      "source_path": "results/phase12/promotion-prefetch/raw_promote_360m_layer4.json",
+      "source_sha256": "0ee3c5efb066377936a656ddacf9b1bebe7dbe97b30a9246026f875504575af0",
+      "migrated_sha256": "0ee3c5efb066377936a656ddacf9b1bebe7dbe97b30a9246026f875504575af0",
+      "size_bytes": 750,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/raw_sync_stall.jsonl",
+      "source_path": "results/phase12/promotion-prefetch/raw_sync_stall.jsonl",
+      "source_sha256": "85c73afa75cb0c6c43b469aec422179792df02888a1e86155c541d4d509cbcbd",
+      "migrated_sha256": "85c73afa75cb0c6c43b469aec422179792df02888a1e86155c541d4d509cbcbd",
+      "size_bytes": 10496,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/single_layer_demotion.json",
+      "source_path": "results/phase12/promotion-prefetch/single_layer_demotion.json",
+      "source_sha256": "f7d1f96196a51e1893da6fc318a9c4105bc6f3b475d01116b5c1b18825b9272d",
+      "migrated_sha256": "f7d1f96196a51e1893da6fc318a9c4105bc6f3b475d01116b5c1b18825b9272d",
+      "size_bytes": 1986,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/single_layer_promotion.json",
+      "source_path": "results/phase12/promotion-prefetch/single_layer_promotion.json",
+      "source_sha256": "60aa25c96db57bbf09aa5697822691522ca0b651f1d2a962b99039f8bb689961",
+      "migrated_sha256": "60aa25c96db57bbf09aa5697822691522ca0b651f1d2a962b99039f8bb689961",
+      "size_bytes": 2062,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/summary.json",
+      "source_path": "results/phase12/promotion-prefetch/summary.json",
+      "source_sha256": "e2a974e971389d6e606c99f41ad42f394e7cde42b76e96a1ddef3c47a3796286",
+      "migrated_sha256": "e2a974e971389d6e606c99f41ad42f394e7cde42b76e96a1ddef3c47a3796286",
+      "size_bytes": 14872,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/sync_stall.json",
+      "source_path": "results/phase12/promotion-prefetch/sync_stall.json",
+      "source_sha256": "d5ad3d66fda41e785e87ec464c6cd08c2892c23e33905708824b50795a77fba6",
+      "migrated_sha256": "d5ad3d66fda41e785e87ec464c6cd08c2892c23e33905708824b50795a77fba6",
+      "size_bytes": 6527,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-PROMOTION-PREFETCH-12C/results/canonical/vram_accounting.json",
+      "source_path": "results/phase12/promotion-prefetch/vram_accounting.json",
+      "source_sha256": "0e74d2ff1794d75aa9d74496d8dc0e2cb78faf4e1470b3b270d9e1d751a9101f",
+      "migrated_sha256": "0e74d2ff1794d75aa9d74496d8dc0e2cb78faf4e1470b3b270d9e1d751a9101f",
+      "size_bytes": 2757,
+      "category": "A_essential_evidence"
+    }
+  ],
+  "follow_up": "This phase's next_step_recommendation named exactly what Phase 12D built: a llama_kv_cache::relocate_layer(il, new_buft) method to reassign layers[il].k/.v after a real byte copy, since llama.cpp already rebuilds its graph fresh every decode call so no other engine change is needed for the next decode to pick up the new location."
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": "3+4+9",
+  "note": "Consolidates every poison test run this phase -- the single authoritative correctness method used throughout (never relying on tensor-pointer diagnostics alone).",
+  "single_relocation_cpu_to_gpu_135m_layer4": {
+    "poison_had_no_effect_on_output": true
+  },
+  "single_relocation_gpu_to_cpu_135m_layer20": {
+    "poison_had_no_effect_on_output": true
+  },
+  "repeated_same_layer_retained_135m_layer4": {
+    "control_matches_clean_reference": true
+  },
+  "all_poison_tests_confirm_authoritative_new_backing": true
+}

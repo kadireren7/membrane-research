@@ -1,0 +1,8 @@
+{"decode_idx":5,"layer":16,"action":"PROMOTE","reason":"SCHEDULED_PROMOTION","bytes":6684672,"before_device":"CPU","after_device":"GPU","duration_us":2115.0,"result":"ok"}
+{"decode_idx":5,"layer":17,"action":"PROMOTE","reason":"SCHEDULED_PROMOTION","bytes":6684672,"before_device":"CPU","after_device":"GPU","duration_us":2346.8,"result":"ok"}
+{"decode_idx":5,"layer":18,"action":"PROMOTE","reason":"SCHEDULED_PROMOTION","bytes":6684672,"before_device":"CPU","after_device":"GPU","duration_us":2205.1,"result":"ok"}
+{"decode_idx":5,"layer":19,"action":"PROMOTE","reason":"SCHEDULED_PROMOTION","bytes":6684672,"before_device":"CPU","after_device":"GPU","duration_us":2124.3,"result":"ok"}
+{"decode_idx":10,"layer":16,"action":"DEMOTE","reason":"SCHEDULED_DEMOTION","bytes":6684672,"before_device":"GPU","after_device":"CPU","duration_us":5293.4,"result":"ok"}
+{"decode_idx":10,"layer":17,"action":"DEMOTE","reason":"SCHEDULED_DEMOTION","bytes":6684672,"before_device":"GPU","after_device":"CPU","duration_us":4694.5,"result":"ok"}
+{"decode_idx":10,"layer":18,"action":"DEMOTE","reason":"SCHEDULED_DEMOTION","bytes":6684672,"before_device":"GPU","after_device":"CPU","duration_us":4821.1,"result":"ok"}
+{"decode_idx":10,"layer":19,"action":"DEMOTE","reason":"SCHEDULED_DEMOTION","bytes":6684672,"before_device":"GPU","after_device":"CPU","duration_us":4845.2,"result":"ok"}

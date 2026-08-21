@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": "3B",
+  "method": "Same as single_cpu_gpu.json, reverse direction: layer 20 (initially GPU-resident under split=8) relocated to CPU.",
+  "ok": true,
+  "pointer_changed": true,
+  "device_matches_target": true,
+  "new_device": "CPU",
+  "k_bytes": 417792,
+  "v_bytes": 417792,
+  "relocate_ms": 0.8291,
+  "poison_ran": true,
+  "poison_had_no_effect_on_output": true,
+  "generated_control": [
+    338,
+    6285,
+    1701,
+    260,
+    16438,
+    314,
+    260,
+    2365
+  ],
+  "generated_poisoned": [
+    338,
+    6285,
+    1701,
+    260,
+    16438,
+    314,
+    260,
+    2365
+  ],
+  "verdict": "live rebind confirmed (classification A), reverse direction",
+  "raw_data": "raw_relocate_135m_layer20_gpu_to_cpu.json"
+}

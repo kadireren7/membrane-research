@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 10,
+  "method": "SmolLM2-135M, ctx=2048, Q8_0, split=8, prompt decode + 32-token greedy generation. Variant A (none): no movement. B/C/D (pre): sync copy 1/4/8 CPU-resident layers to GPU scratch BEFORE the generation loop starts. E (repeated): cycle through 8 layers, one sync copy immediately before each of the 32 decode steps (32 copies total).",
+  "configs": {
+    "A_no_movement": {
+      "n_reps": 7,
+      "n_layers_moved": 0,
+      "n_copies_per_run": 0,
+      "total_ms": {
+        "n": 7,
+        "mean": 1344.8551,
+        "median": 1316.766,
+        "min": 1305.4593,
+        "max": 1426.3528,
+        "stddev": 46.3058
+      },
+      "copy_ms_total": {
+        "n": 7,
+        "mean": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "stddev": 0.0
+      },
+      "decode_only_ms": {
+        "n": 7,
+        "mean": 1344.8548,
+        "median": 1316.7657,
+        "min": 1305.4589,
+        "max": 1426.3525,
+        "stddev": 46.3058
+      },
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 23.8218,
+        "median": 24.302,
+        "min": 22.4348,
+        "max": 24.5124,
+        "stddev": 0.7967
+      }
+    },
+    "B_promote_1_layer_before_decode": {
+      "n_reps": 5,
+      "n_layers_moved": 1,
+      "n_copies_per_run": 1,
+      "total_ms": {
+        "n": 5,
+        "mean": 1359.6635,
+        "median": 1356.3794,
+        "min": 1314.3438,
+        "max": 1426.8343,
+        "stddev": 39.534
+      },
+      "copy_ms_total": {
+        "n": 5,
+        "mean": 0.6132,
+        "median": 0.573,
+        "min": 0.5218,
+        "max": 0.7805,
+        "stddev": 0.0928
+      },
+      "decode_only_ms": {
+        "n": 5,
+        "mean": 1358.2901,
+        "median": 1355.1172,
+        "min": 1313.0786,
+        "max": 1425.0942,
+        "stddev": 39.362
+      },
+      "generation_tok_s": {
+        "n": 5,
+        "mean": 23.5549,
+        "median": 23.5922,
+        "min": 22.4273,
+        "max": 24.3468,
+        "stddev": 0.6742
+      }
+    },
+    "C_promote_4_layers_before_decode": {
+      "n_reps": 5,
+      "n_layers_moved": 4,
+      "n_copies_per_run": 4,
+      "total_ms": {
+        "n": 5,
+        "mean": 1348.7454,
+        "median": 1322.3841,
+        "min": 1315.062,
+        "max": 1457.2522,
+        "stddev": 54.4379
+      },
+      "copy_ms_total": {
+        "n": 5,
+        "mean": 2.1412,
+        "median": 2.1826,
+        "min": 2.0097,
+        "max": 2.3126,
+        "stddev": 0.1147
+      },
+      "decode_only_ms": {
+        "n": 5,
+        "mean": 1345.0585,
+        "median": 1319.0248,
+        "min": 1310.9361,
+        "max": 1453.3009,
+        "stddev": 54.3276
+      },
+      "generation_tok_s": {
+        "n": 5,
+        "mean": 23.7623,
+        "median": 24.1987,
+        "min": 21.9591,
+        "max": 24.3335,
+        "stddev": 0.9053
+      }
+    },
+    "D_promote_8_layers_before_decode": {
+      "n_reps": 5,
+      "n_layers_moved": 8,
+      "n_copies_per_run": 8,
+      "total_ms": {
+        "n": 5,
+        "mean": 1363.0038,
+        "median": 1328.8857,
+        "min": 1321.893,
+        "max": 1499.8888,
+        "stddev": 68.582
+      },
+      "copy_ms_total": {
+        "n": 5,
+        "mean": 3.9933,
+        "median": 3.9702,
+        "min": 3.8046,
+        "max": 4.2004,
+        "stddev": 0.1281
+      },
+      "decode_only_ms": {
+        "n": 5,
+        "mean": 1356.6882,
+        "median": 1322.7311,
+        "min": 1315.7397,
+        "max": 1493.276,
+        "stddev": 68.4306
+      },
+      "generation_tok_s": {
+        "n": 5,
+        "mean": 23.533,
+        "median": 24.0803,
+        "min": 21.3349,
+        "max": 24.2077,
+        "stddev": 1.1019
+      }
+    },
+    "E_repeated_promotions_during_generation": {
+      "n_reps": 7,
+      "n_layers_moved": 8,
+      "n_copies_per_run": 32,
+      "total_ms": {
+        "n": 7,
+        "mean": 1370.4002,
+        "median": 1348.0886,
+        "min": 1331.8555,
+        "max": 1440.3342,
+        "stddev": 37.4918
+      },
+      "copy_ms_total": {
+        "n": 7,
+        "mean": 20.3517,
+        "median": 20.0645,
+        "min": 18.2607,
+        "max": 24.1765,
+        "stddev": 1.9045
+      },
+      "decode_only_ms": {
+        "n": 7,
+        "mean": 1350.0481,
+        "median": 1329.8276,
+        "min": 1313.2569,
+        "max": 1416.157,
+        "stddev": 35.7098
+      },
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 23.368,
+        "median": 23.7373,
+        "min": 22.2171,
+        "max": 24.0266,
+        "stddev": 0.6274
+      }
+    },
+    "static_full_gpu_kv_split0": {
+      "n_reps": 7,
+      "split": 0,
+      "total_ms": {
+        "n": 7,
+        "mean": 1362.3575,
+        "median": 1361.5974,
+        "min": 1352.2836,
+        "max": 1370.0356,
+        "stddev": 5.411
+      },
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 23.4891,
+        "median": 23.5018,
+        "min": 23.3571,
+        "max": 23.6637,
+        "stddev": 0.0935
+      }
+    },
+    "static_50_50_split15": {
+      "n_reps": 7,
+      "split": 15,
+      "total_ms": {
+        "n": 7,
+        "mean": 1286.8787,
+        "median": 1286.2252,
+        "min": 1278.3471,
+        "max": 1296.0395,
+        "stddev": 5.4575
+      },
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 24.8668,
+        "median": 24.879,
+        "min": 24.6906,
+        "max": 25.0323,
+        "stddev": 0.1054
+      }
+    }
+  },
+  "pct_slowdown_vs_baseline": {
+    "B": 1.101,
+    "C": 0.289,
+    "D": 1.349,
+    "E": 1.899
+  },
+  "caveat": "These are wall-clock costs of ISSUING the copy machinery synchronously, interleaved with real decode -- they measure the ceiling cost a real live-rebind primitive would have to beat, NOT a demonstration that the copies change generation (classification B: they don't). At these tiny per-layer byte counts (135M, ctx=2048) the sync copy cost is negligible (<2% even for repeated 32x promotion of 8 layers).",
+  "raw_data": [
+    "raw_sync_stall.jsonl",
+    "raw_perf_curve_static_full_gpu.jsonl",
+    "raw_perf_curve_static_50_50.jsonl"
+  ],
+  "section_23_note": "Section 23 performance curve is folded into this file rather than a separate artifact (not in the Section 26 file list): static_full_gpu_kv_split0 and static_50_50_split15 add the two placement-only baselines; A_no_movement is the static split=8 (75pct GPU KV) baseline used throughout the rest of Phase 12C; manual promotion schedule cost is in multi_layer_schedule.json; async-prefetch is in prefetch_result.json."
+}

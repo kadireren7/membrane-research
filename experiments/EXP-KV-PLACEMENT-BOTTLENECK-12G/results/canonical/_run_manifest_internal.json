@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "12G",
+  "sections": {
+    "phase_a_n_points": 50,
+    "phase_a_candidates": [],
+    "phase_b_points": 2,
+    "large_points": 9,
+    "q5_points": 2,
+    "worst_point": {
+      "model": "1.5B",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 50,
+      "slowdown_pct_vs_100gpu": -0.512263961383347
+    }
+  },
+  "wall_clock_s": 1202.2969608306885
+}

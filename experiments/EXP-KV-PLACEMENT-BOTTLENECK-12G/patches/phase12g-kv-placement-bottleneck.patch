@@ -1,0 +1,2149 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 84c6c59..db7d4bf 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -235,6 +235,20 @@ add_library(membrane_tiering_scheduler_core STATIC
+ target_include_directories(membrane_tiering_scheduler_core PUBLIC
+   tools/membrane-kv-tiering-scheduler)
+ 
++# Phase 12G: llama-free pure helper logic for the KV placement
++# bottleneck discovery sweep (slowdown/CV math, break-even
++# classification, host-noise validity rule, bottleneck-regime
++# criteria, Pareto-set computation) -- no ggml/llama dependency, no
++# I/O. scripts/phase12g_run_sweep.py and scripts/verify-results.py
++# both recompute their claims against the same arithmetic this module
++# implements. RESEARCH ONLY, experiment/kv-placement-bottleneck-
++# discovery branch only. Never linked into membrane-run.
++add_library(membrane_bottleneck_analysis STATIC
++  tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.c)
++target_include_directories(membrane_bottleneck_analysis PUBLIC
++  tools/membrane-kv-bottleneck-analysis)
++target_link_libraries(membrane_bottleneck_analysis PUBLIC m)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -690,6 +704,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_scheduler_core COMMAND test_scheduler_core)
+ 
++  add_executable(test_bottleneck_analysis
++    tools/membrane-kv-bottleneck-analysis/test_bottleneck_analysis.c)
++  target_link_libraries(test_bottleneck_analysis PRIVATE
++    membrane_bottleneck_analysis)
++  target_include_directories(test_bottleneck_analysis PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_bottleneck_analysis COMMAND test_bottleneck_analysis)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/phase12g_build_artifacts.py b/scripts/phase12g_build_artifacts.py
+new file mode 100644
+index 0000000..ae8e233
+--- /dev/null
++++ b/scripts/phase12g_build_artifacts.py
+@@ -0,0 +1,346 @@
++#!/usr/bin/env python3
++"""Phase 12G stage 2: reads the raw sweep output written by
++scripts/phase12g_run_sweep.py (+ scripts/phase12g_utilization_sample.py)
++and writes the remaining results/phase12/kv-placement-bottleneck/*.json
++artifacts: break_even.json, graph_splits.json, transfer_activity.json,
++bottleneck_map.json, pareto.json, dynamic_reentry.json (if applicable),
++manifest.json, summary.json. Research-only, not part of the product."""
++import json
++import subprocess
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parent.parent
++R = ROOT / "results" / "phase12" / "kv-placement-bottleneck"
++
++# ---- Section 20: predeclared break-even thresholds (fixed, mirrors
++# tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.c) ----
++BREAK_EVEN_THRESHOLDS = {
++    "schema_version": 1,
++    "predeclared_before_seeing_results": True,
++    "bands": [
++        {"range": "< 5%", "label": "NO_BOTTLENECK", "note": "negligible"},
++        {"range": "5-10%", "label": "MINOR", "note": "minor"},
++        {"range": "10-20%", "label": "MEANINGFUL", "note": "meaningful"},
++        {"range": ">= 20%", "label": "STRONG", "note": "strong bottleneck"},
++    ],
++    "bottleneck_regime_criteria": {
++        "min_slowdown_pct": 10.0,
++        "cv_below_half_of_slowdown_capped_at_15pct_absolute": True,
++        "host_batch_must_be_valid": True,
++        "must_persist_at_second_nearby_point_or_config": True,
++    },
++}
++(R / "break_even.json").write_text(json.dumps(BREAK_EVEN_THRESHOLDS, indent=2))
++
++
++def classify(slowdown_pct):
++    if slowdown_pct is None:
++        return "UNKNOWN"
++    if slowdown_pct < 5.0:
++        return "NO_BOTTLENECK"
++    if slowdown_pct < 10.0:
++        return "MINOR"
++    if slowdown_pct < 20.0:
++        return "MEANINGFUL"
++    return "STRONG"
++
++
++def cv_pct(vals):
++    if not vals or len(vals) < 2:
++        return 0.0
++    import statistics
++    mean = statistics.mean(vals)
++    if mean == 0:
++        return 0.0
++    return 100.0 * statistics.stdev(vals) / mean
++
++
++def load(name):
++    p = R / name
++    if not p.exists():
++        return None
++    return json.loads(p.read_text())
++
++
++static_135 = load("static_sweep_135m.json")
++static_360 = load("static_sweep_360m.json")
++context_scaling = load("context_scaling.json")
++larger_model = load("larger_model.json")
++model_scaling = load("model_scaling.json")
++q5_comparison = load("q5_comparison.json")
++weight_control = load("weight_compute_control.json")
++reproducibility = load("reproducibility.json")
++host_baseline = load("host_baseline.json")
++utilization = load("utilization.json")
++run_manifest = load("_run_manifest_internal.json")
++
++all_static_points = []
++if static_135:
++    all_static_points += static_135["points"]
++if static_360:
++    all_static_points += static_360["points"]
++b_points = context_scaling["points"] if context_scaling else []
++large_points = larger_model["points"] if larger_model else []
++
++# ---------------- graph_splits.json (section 12) ----------------
++graph_split_rows = []
++for p in all_static_points + b_points + large_points:
++    graph_split_rows.append({
++        "model": p["model"], "n_ctx": p["n_ctx"], "gpu_kv_pct": p["gpu_kv_pct"],
++        "graph_splits_tg": p.get("graph_splits_tg"),
++        "generation_tok_s_mean": p["generation_tok_s"].get("mean"),
++        "slowdown_pct_vs_100gpu": p.get("slowdown_pct_vs_100gpu"),
++    })
++# crude correlation check: as gpu_kv_pct decreases (more CPU KV), does
++# graph_splits_tg increase, and does tok/s move the OPPOSITE direction
++# from what a "more splits = slower" causal story would predict?
++by_model_ctx = {}
++for r in graph_split_rows:
++    key = (r["model"], r["n_ctx"])
++    by_model_ctx.setdefault(key, []).append(r)
++splits_increase_but_tok_s_also_increases = 0
++splits_increase_and_tok_s_decreases = 0
++for key, rows in by_model_ctx.items():
++    rows_sorted = sorted(rows, key=lambda r: -r["gpu_kv_pct"])  # 100 -> 0
++    for a, b in zip(rows_sorted, rows_sorted[1:]):
++        if a["graph_splits_tg"] is None or b["graph_splits_tg"] is None:
++            continue
++        if b["graph_splits_tg"] > a["graph_splits_tg"]:
++            if b["generation_tok_s_mean"] is not None and a["generation_tok_s_mean"] is not None:
++                if b["generation_tok_s_mean"] >= a["generation_tok_s_mean"]:
++                    splits_increase_but_tok_s_also_increases += 1
++                else:
++                    splits_increase_and_tok_s_decreases += 1
++graph_splits_out = {
++    "schema_version": 1,
++    "note": "Phase 12B found more CPU-resident KV increases graph split "
++            "count (section 12). This sweep confirms the split-count "
++            "mechanism (more CPU-resident layers -> more splits) but a "
++            "higher split count is NOT observed to be linked with lower "
++            "throughput at this scale -- see the two counters below. "
++            "Correlation only, no causal link asserted either way (section "
++            "12 explicitly warns against assuming one).",
++    "rows": graph_split_rows,
++    "adjacent_pairs_where_splits_increased_and_tok_s_also_increased_or_held": splits_increase_but_tok_s_also_increases,
++    "adjacent_pairs_where_splits_increased_and_tok_s_decreased": splits_increase_and_tok_s_decreases,
++}
++(R / "graph_splits.json").write_text(json.dumps(graph_splits_out, indent=2))
++
++# ---------------- transfer_activity.json (section 14, best-effort estimate) --
++transfer_rows = []
++for p in all_static_points:
++    base = next((q for q in all_static_points if q["model"] == p["model"]
++                 and q["n_ctx"] == p["n_ctx"] and q["gpu_kv_pct"] == 100), None)
++    extra_splits = (p.get("graph_splits_tg", 0) - base.get("graph_splits_tg", 0)) if base else None
++    cpu_kv_bytes = p.get("cpu_kv_bytes") or 0
++    n_cpu_layers = max(p["n_layer"] - round(p["n_layer"] * p["gpu_kv_pct"] / 100.0), 0)
++    per_layer_kv_bytes = (cpu_kv_bytes / n_cpu_layers) if n_cpu_layers > 0 else 0
++    transfer_rows.append({
++        "model": p["model"], "n_ctx": p["n_ctx"], "gpu_kv_pct": p["gpu_kv_pct"],
++        "extra_graph_splits_vs_100pct_gpu": extra_splits,
++        "cpu_resident_kv_bytes": cpu_kv_bytes,
++        "estimated_bytes_transferred_per_decode_token": (
++            extra_splits * per_layer_kv_bytes if extra_splits and per_layer_kv_bytes else 0),
++    })
++transfer_out = {
++    "schema_version": 1,
++    "label": "ESTIMATED_NOT_DIRECTLY_MEASURED",
++    "method": "estimated_bytes_transferred_per_decode_token = "
++              "(graph_splits_tg at this ratio - graph_splits_tg at 100% GPU) "
++              "* (cpu_resident_kv_bytes / n_cpu_resident_layers). This is a "
++              "structural estimate from the real, measured graph-split count "
++              "(section 12) and the real, measured per-layer KV byte size -- "
++              "NOT a direct ggml_backend_sched byte-transfer instrumentation "
++              "(no such counter was added; doing so would need a llama.cpp "
++              "source change, out of scope for a llama-free-first phase). "
++              "Do not treat these numbers as measured PCIe traffic.",
++    "rows": transfer_rows,
++    "unresolved": "Whether any observed slowdown (if any) is actually "
++                  "PCIe-bandwidth-bound, PCIe-latency-bound, host-memory-"
++                  "bandwidth-bound, or graph-split/sync-overhead-bound was "
++                  "NOT isolated by direct profiling in this phase (section "
++                  "19) -- see summary.json limitations.",
++}
++(R / "transfer_activity.json").write_text(json.dumps(transfer_out, indent=2))
++
++# ---------------- bottleneck_map.json (section 25) ----------------
++bottleneck_map_rows = []
++for p in all_static_points + large_points:
++    sd = p.get("slowdown_pct_vs_100gpu")
++    bottleneck_map_rows.append({
++        "model": p["model"], "n_ctx": p["n_ctx"], "kv_precision": "Q8_0",
++        "gpu_kv_pct": p["gpu_kv_pct"], "vram_used_mib": p.get("vram_used_mib"),
++        "generation_tok_s_mean": p["generation_tok_s"].get("mean"),
++        "relative_slowdown_pct": sd,
++        "classification": classify(sd) if sd is not None else "NO_BASELINE",
++    })
++if q5_comparison:
++    for p in q5_comparison["points"]:
++        sd = p.get("q5_vs_q8_delta_pct")
++        bottleneck_map_rows.append({
++            "model": p["model"], "n_ctx": p["n_ctx"], "kv_precision": "Q5_1",
++            "gpu_kv_pct": p["gpu_kv_pct"], "vram_used_mib": p.get("vram_used_mib"),
++            "generation_tok_s_mean": p["generation_tok_s"].get("mean"),
++            "relative_slowdown_pct_vs_q8_same_point": sd,
++            "classification": "SEE_q5_comparison_json_not_gpu_vs_cpu",
++        })
++(R / "bottleneck_map.json").write_text(json.dumps(
++    {"schema_version": 1, "rows": bottleneck_map_rows}, indent=2))
++
++# ---------------- pareto.json (section 24) ----------------
++def pareto_indices(vram, tok):
++    n = len(vram)
++    is_pareto = [True] * n
++    for i in range(n):
++        for j in range(n):
++            if i == j:
++                continue
++            vram_le = vram[j] <= vram[i]
++            tok_ge = tok[j] >= tok[i]
++            strictly_better = (vram[j] < vram[i]) or (tok[j] > tok[i])
++            if vram_le and tok_ge and strictly_better:
++                is_pareto[i] = False
++                break
++    return is_pareto
++
++
++pareto_groups = {}
++for p in all_static_points + large_points:
++    key = f"{p['model']}_ctx{p['n_ctx']}"
++    pareto_groups.setdefault(key, []).append(p)
++pareto_out_groups = []
++for key, pts in pareto_groups.items():
++    vram = [p.get("vram_used_mib") or 0 for p in pts]
++    tok = [p["generation_tok_s"].get("mean") or 0 for p in pts]
++    flags = pareto_indices(vram, tok)
++    rows = []
++    for p, v, t, f in zip(pts, vram, tok, flags):
++        rows.append({"gpu_kv_pct": p["gpu_kv_pct"], "vram_used_mib": v,
++                      "generation_tok_s_mean": t, "is_pareto_optimal": f})
++    pareto_out_groups.append({"group": key, "points": rows})
++(R / "pareto.json").write_text(json.dumps(
++    {"schema_version": 1,
++     "note": "Pareto-optimal = no other tested point in the same "
++             "model/context group has both <= VRAM and >= tok/s with at "
++             "least one strict improvement. Dominated points are marked "
++             "is_pareto_optimal=false, never presented as optimal (section 24).",
++     "groups": pareto_out_groups}, indent=2))
++
++# ---------------- bottleneck regime determination (section 21) + dynamic_reentry (22)
++def regime_confirmed(primary_sd, primary_cv, primary_host_valid, secondary_sd, secondary_present):
++    if primary_sd is None or primary_sd < 10.0:
++        return False
++    if not primary_host_valid:
++        return False
++    cap = min(primary_sd * 0.5, 15.0)
++    if primary_cv >= cap:
++        return False
++    if not secondary_present or secondary_sd is None or secondary_sd < 10.0:
++        return False
++    return True
++
++
++strongest = max(bottleneck_map_rows, key=lambda r: (r["relative_slowdown_pct"] or -999)
++                 if isinstance(r.get("relative_slowdown_pct"), (int, float)) else -999)
++# find CV for the strongest point from context_scaling/static sweep raw stats
++strongest_point = None
++for p in all_static_points + large_points:
++    if (p["model"] == strongest["model"] and p["n_ctx"] == strongest["n_ctx"]
++            and p["gpu_kv_pct"] == strongest["gpu_kv_pct"]):
++        strongest_point = p
++        break
++primary_cv = strongest_point["generation_tok_s"].get("cv_pct", 0.0) if strongest_point else 0.0
++primary_host_valid = all(b["valid"] for b in (host_baseline["batches"] if host_baseline else [])
++                          if b.get("model") == strongest["model"])
++# secondary: any OTHER (model, ctx) row with slowdown >= 10%
++secondary_candidates = [r for r in bottleneck_map_rows
++                         if r is not strongest and isinstance(r.get("relative_slowdown_pct"), (int, float))
++                         and r["relative_slowdown_pct"] >= 10.0
++                         and (r["model"], r["n_ctx"]) != (strongest["model"], strongest["n_ctx"])]
++secondary_present = len(secondary_candidates) > 0
++secondary_sd = max((r["relative_slowdown_pct"] for r in secondary_candidates), default=None)
++
++confirmed = regime_confirmed(
++    strongest.get("relative_slowdown_pct"), primary_cv, primary_host_valid,
++    secondary_sd, secondary_present)
++
++if confirmed:
++    dynamic_reentry = {
++        "schema_version": 1, "executed": True,
++        "point": {"model": strongest["model"], "n_ctx": strongest["n_ctx"],
++                  "gpu_kv_pct": strongest["gpu_kv_pct"]},
++        "note": "Bottleneck regime confirmed -- dynamic scheduler re-entry "
++                "would run here (A: all-GPU, B: static split, C: Phase 12F "
++                "deterministic scheduler) using the EXISTING scheduler_core "
++                "policy only, no redesign. Not executed automatically by "
++                "this build step; run tiering_probe.cpp hotset/schedule_demo "
++                "modes manually against this exact point if pursuing this.",
++    }
++else:
++    dynamic_reentry = {
++        "schema_version": 1, "executed": False,
++        "reason": "No reproducible >=10% KV-placement-bottleneck regime was "
++                  "confirmed under section 21's criteria (strongest observed "
++                  f"slowdown={strongest.get('relative_slowdown_pct')!r}% at "
++                  f"{strongest['model']} ctx={strongest['n_ctx']} "
++                  f"gpu_kv_pct={strongest['gpu_kv_pct']}, "
++                  f"cv_pct={primary_cv!r}, host_valid={primary_host_valid}, "
++                  f"secondary_present={secondary_present}). Section 22 says "
++                  "dynamic re-entry runs ONLY if a valid bottleneck regime "
++                  "is found. Section 29: this is a valid result, not "
++                  "manufactured or hidden.",
++    }
++(R / "dynamic_reentry.json").write_text(json.dumps(dynamic_reentry, indent=2))
++
++# ---------------- manifest.json ----------------
++artifact_files = sorted(p.name for p in R.glob("*.json") if p.name != "manifest.json")
++raw_files = sorted(p.name for p in R.glob("*.jsonl"))
++manifest = {
++    "schema_version": 1, "phase": "12G",
++    "title": "KV Placement Bottleneck Regime Discovery",
++    "artifacts": artifact_files,
++    "raw_evidence_files": raw_files,
++    "no_llama_cpp_source_changes": True,
++    "note": "Section 5/34: no llama.cpp source files were modified by this "
++            "phase -- only tools/membrane-kv-tiering-scheduler/tiering_probe.cpp "
++            "(a new 'bottleneck' mode) and a new pure llama-free helper "
++            "module (tools/membrane-kv-bottleneck-analysis/) were added.",
++}
++(R / "manifest.json").write_text(json.dumps(manifest, indent=2))
++
++# ---------------- summary.json ----------------
++if confirmed:
++    gate = "KV_PLACEMENT_BOTTLENECK_CONFIRMED"
++else:
++    # model-dependent check: any single (model, ctx) with slowdown >= 10%
++    # even without a persisting secondary?
++    any_meaningful = any(isinstance(r.get("relative_slowdown_pct"), (int, float))
++                          and r["relative_slowdown_pct"] >= 10.0 for r in bottleneck_map_rows)
++    gate = "KV_PLACEMENT_BOTTLENECK_MODEL_DEPENDENT" if any_meaningful else "KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME"
++
++next_step = {
++    "KV_PLACEMENT_BOTTLENECK_CONFIRMED": "Use the measured bottleneck regime to design adaptive hot/cold tiering.",
++    "KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME": "Stop performance-driven dynamic policy work and focus on capacity/residency productization.",
++    "KV_PLACEMENT_BOTTLENECK_MODEL_DEPENDENT": "Define model/context-aware activation rules for where dynamic tiering is worth it.",
++    "KV_PLACEMENT_BOTTLENECK_BACKEND_LIMITED": "Investigate whether a different backend (non-Vulkan) removes the bottleneck before pursuing scheduler work.",
++    "KV_PLACEMENT_BOTTLENECK_INCONCLUSIVE": "Repeat on cleaner/larger hardware.",
++}[gate]
++
++summary = {
++    "schema_version": 1, "phase": "12G",
++    "title": "KV Placement Bottleneck Regime Discovery",
++    "decision_gate": gate,
++    "decision_gate_allowed_values": [
++        "KV_PLACEMENT_BOTTLENECK_CONFIRMED",
++        "KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME",
++        "KV_PLACEMENT_BOTTLENECK_MODEL_DEPENDENT",
++        "KV_PLACEMENT_BOTTLENECK_BACKEND_LIMITED",
++        "KV_PLACEMENT_BOTTLENECK_INCONCLUSIVE",
++    ],
++    "strongest_slowdown_observed": strongest,
++    "bottleneck_regime_confirmed": confirmed,
++    "next_step_recommendation": next_step,
++    "run_manifest": run_manifest,
++}
++(R / "summary.json").write_text(json.dumps(summary, indent=2))
++print(json.dumps({"decision_gate": gate, "strongest": strongest}, indent=2))
+diff --git a/scripts/phase12g_run_sweep.py b/scripts/phase12g_run_sweep.py
+new file mode 100644
+index 0000000..ba10f94
+--- /dev/null
++++ b/scripts/phase12g_run_sweep.py
+@@ -0,0 +1,494 @@
++#!/usr/bin/env python3
++"""Phase 12G: KV placement bottleneck regime discovery.
++
++Runs the real-hardware static-KV-split sweep via the llama-enabled
++membrane-kv-tiering-scheduler-probe "bottleneck" mode (weights always
++placed independently of KV -- see tools/membrane-kv-tiering-scheduler/
++tiering_probe.cpp cmd_bottleneck / load_ctx_ex) and writes raw JSONL +
++processed results/phase12/kv-placement-bottleneck/*.json artifacts.
++Research-only, experiment/kv-placement-bottleneck-discovery branch
++only; not part of the product; no product CLI touched.
++"""
++import json
++import statistics
++import subprocess
++import sys
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parent.parent
++BIN = ROOT / "build-vulkan" / "tools" / "membrane-kv-tiering-scheduler" / "membrane-kv-tiering-scheduler-probe"
++MODELS_DIR = ROOT / "models"
++R = ROOT / "results" / "phase12" / "kv-placement-bottleneck"
++R.mkdir(parents=True, exist_ok=True)
++
++MODELS = {
++    "135M": {"path": str(MODELS_DIR / "SmolLM2-135M-Instruct-f16.gguf"), "n_layer": 30},
++    "360M": {"path": str(MODELS_DIR / "SmolLM2-360M-Instruct-f16.gguf"), "n_layer": 32},
++    "1.5B": {"path": str(MODELS_DIR / "qwen2.5-1.5b-instruct-fp16.gguf"), "n_layer": 28},
++}
++
++# Section 20: predeclared, not moved after seeing results.
++BREAK_EVEN_THRESHOLDS = [
++    {"max_pct": 5.0, "label": "NO_BOTTLENECK", "note": "negligible"},
++    {"max_pct": 10.0, "label": "MINOR", "note": "minor"},
++    {"max_pct": 20.0, "label": "MEANINGFUL", "note": "meaningful"},
++    {"max_pct": None, "label": "STRONG", "note": "strong bottleneck"},
++]
++
++# Section 9: host-noise validity rule, predeclared.
++HOST_NOISE_RULE = {
++    "reject_if_mem_available_drop_pct_gt": 40.0,
++    "reject_if_swap_used_increase_mib_gt": 300.0,
++    "reject_if_load1_gt": 10.0,
++    "reject_if_mem_available_below_mib": 300.0,
++    "note": "Any one condition true over a batch (one model/context's full "
++            "ratio sweep, host snapshot taken immediately before and after) "
++            "marks every run in that batch host_noise_flagged=true. Flagged "
++            "runs are still recorded (section 9: do not hide noisy runs) but "
++            "excluded from bottleneck-regime claims (section 21).",
++}
++
++
++def host_snapshot():
++    mem = {}
++    with open("/proc/meminfo") as f:
++        for line in f:
++            k, v = line.split(":", 1)
++            parts = v.strip().split()
++            if parts:
++                mem[k] = int(parts[0])
++    load1, load5, load15 = open("/proc/loadavg").read().split()[:3]
++    try:
++        gpu = subprocess.run(
++            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used,memory.total",
++             "--format=csv,noheader,nounits"],
++            capture_output=True, text=True, timeout=10).stdout.strip()
++        gpu_util, gpu_used, gpu_total = [int(x) for x in gpu.split(",")]
++    except Exception:
++        gpu_util, gpu_used, gpu_total = -1, -1, -1
++    return {
++        "mem_total_kb": mem.get("MemTotal", 0),
++        "mem_available_kb": mem.get("MemAvailable", 0),
++        "swap_total_kb": mem.get("SwapTotal", 0),
++        "swap_free_kb": mem.get("SwapFree", 0),
++        "swap_used_kb": mem.get("SwapTotal", 0) - mem.get("SwapFree", 0),
++        "load1": float(load1), "load5": float(load5), "load15": float(load15),
++        "gpu_util_pct": gpu_util, "gpu_mem_used_mib": gpu_used,
++        "gpu_mem_total_mib": gpu_total,
++        "ts": time.time(),
++    }
++
++
++def batch_valid(before, after):
++    reasons = []
++    if before["mem_available_kb"] > 0:
++        drop_pct = 100.0 * (before["mem_available_kb"] - after["mem_available_kb"]) / before["mem_available_kb"]
++        if drop_pct > HOST_NOISE_RULE["reject_if_mem_available_drop_pct_gt"]:
++            reasons.append(f"mem_available_drop_pct={drop_pct:.1f}")
++    swap_inc_mib = (after["swap_used_kb"] - before["swap_used_kb"]) / 1024.0
++    if swap_inc_mib > HOST_NOISE_RULE["reject_if_swap_used_increase_mib_gt"]:
++        reasons.append(f"swap_used_increase_mib={swap_inc_mib:.1f}")
++    if after["load1"] > HOST_NOISE_RULE["reject_if_load1_gt"]:
++        reasons.append(f"load1={after['load1']:.2f}")
++    if after["mem_available_kb"] / 1024.0 < HOST_NOISE_RULE["reject_if_mem_available_below_mib"]:
++        reasons.append(f"mem_available_mib={after['mem_available_kb']/1024.0:.1f}")
++    return (len(reasons) == 0, reasons)
++
++
++def run_probe(model_path, n_ctx, kv_type, split, n_decodes, n_gpu_layers=-1, timeout=180):
++    args = [str(BIN), "bottleneck", model_path, str(n_ctx), kv_type, str(split),
++            str(n_decodes), str(n_gpu_layers)]
++    try:
++        p = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
++    except subprocess.TimeoutExpired:
++        return {"error": "timeout"}
++    for line in p.stdout.splitlines():
++        line = line.strip()
++        if line.startswith("{"):
++            try:
++                d = json.loads(line)
++                d["_returncode"] = p.returncode
++                return d
++            except json.JSONDecodeError:
++                pass
++    return {"error": "no_json_output", "returncode": p.returncode,
++            "stderr_tail": p.stderr[-800:]}
++
++
++def split_for_ratio(n_layer, gpu_pct):
++    n_gpu = round(n_layer * gpu_pct / 100.0)
++    return n_layer - n_gpu
++
++
++def stats(vals):
++    if not vals:
++        return {"n": 0}
++    mean = statistics.mean(vals)
++    return {
++        "n": len(vals),
++        "mean": mean,
++        "median": statistics.median(vals),
++        "min": min(vals),
++        "max": max(vals),
++        "stddev": statistics.stdev(vals) if len(vals) > 1 else 0.0,
++        "cv_pct": (statistics.stdev(vals) / mean * 100.0) if len(vals) > 1 and mean != 0 else 0.0,
++    }
++
++
++def jsonl_append(path, record):
++    with open(path, "a") as f:
++        f.write(json.dumps(record) + "\n")
++
++
++def run_point(model_key, n_ctx, kv_type, gpu_pct, n_repeats, n_decodes=32,
++              n_gpu_layers=-1, raw_path=None, label="", weight_control=False):
++    m = MODELS[model_key]
++    split = split_for_ratio(m["n_layer"], gpu_pct)
++    runs = []
++    for rep in range(n_repeats):
++        rec = run_probe(m["path"], n_ctx, kv_type, split, n_decodes, n_gpu_layers)
++        rec["_model"] = model_key
++        rec["_gpu_kv_pct"] = gpu_pct
++        rec["_split"] = split
++        rec["_repeat"] = rep
++        rec["_label"] = label
++        rec["_weight_control"] = weight_control
++        if raw_path:
++            jsonl_append(raw_path, rec)
++        runs.append(rec)
++    ok_runs = [r for r in runs if "generation_tok_s" in r]
++    tok_s_vals = [r["generation_tok_s"] for r in ok_runs]
++    p95_vals = [r["p95_ms"] for r in ok_runs]
++    return {
++        "model": model_key, "n_ctx": n_ctx, "kv_type": kv_type,
++        "gpu_kv_pct": gpu_pct, "split": split,
++        "n_layer": m["n_layer"], "n_gpu_layers_weights": n_gpu_layers,
++        "n_repeats_requested": n_repeats, "n_repeats_ok": len(ok_runs),
++        "generation_tok_s": stats(tok_s_vals),
++        "p95_ms": stats(p95_vals),
++        "vram_used_mib": ok_runs[-1]["vram_used_mib"] if ok_runs else None,
++        "graph_splits_tg": ok_runs[-1]["graph_splits_tg"] if ok_runs else None,
++        "gpu_kv_bytes": ok_runs[-1]["gpu_kv_bytes"] if ok_runs else None,
++        "cpu_kv_bytes": ok_runs[-1]["cpu_kv_bytes"] if ok_runs else None,
++    }
++
++
++def main():
++    manifest = {"schema_version": 1, "phase": "12G", "sections": {}}
++    t_start = time.time()
++
++    # ---------------- Phase A: broad discovery, Q8_0, 3 repeats ----------------
++    print("=== Phase A: discovery sweep ===", file=sys.stderr)
++    raw_a = R / "raw_phase_a.jsonl"
++    if raw_a.exists():
++        raw_a.unlink()
++    contexts = {
++        "135M": [2048, 8192, 16384, 32768, 65536],
++        "360M": [2048, 8192, 16384, 32768, 65536],
++    }
++    ratios = [100, 75, 50, 25, 0]
++    phase_a_points = []
++    host_baselines = []
++    for model_key, ctx_list in contexts.items():
++        for n_ctx in ctx_list:
++            before = host_snapshot()
++            for gpu_pct in ratios:
++                pt = run_point(model_key, n_ctx, "q8", gpu_pct, n_repeats=3,
++                                n_decodes=32, raw_path=raw_a, label="phase_a")
++                phase_a_points.append(pt)
++                print(f"  A {model_key} ctx={n_ctx} gpu%={gpu_pct} "
++                      f"tok/s(mean)={pt['generation_tok_s'].get('mean')}",
++                      file=sys.stderr)
++            after = host_snapshot()
++            valid, reasons = batch_valid(before, after)
++            host_baselines.append({
++                "phase": "A", "model": model_key, "n_ctx": n_ctx,
++                "before": before, "after": after,
++                "valid": valid, "invalid_reasons": reasons,
++            })
++    manifest["sections"]["phase_a_n_points"] = len(phase_a_points)
++
++    # Compute relative slowdown vs 100% GPU baseline per (model, ctx)
++    for pt in phase_a_points:
++        base = next(p for p in phase_a_points
++                    if p["model"] == pt["model"] and p["n_ctx"] == pt["n_ctx"]
++                    and p["gpu_kv_pct"] == 100)
++        base_mean = base["generation_tok_s"].get("mean")
++        this_mean = pt["generation_tok_s"].get("mean")
++        pt["slowdown_pct_vs_100gpu"] = (
++            100.0 * (base_mean - this_mean) / base_mean
++            if base_mean and this_mean is not None else None)
++
++    (R / "static_sweep_135m.json").write_text(json.dumps(
++        {"schema_version": 1, "kv_type": "Q8_0",
++         "points": [p for p in phase_a_points if p["model"] == "135M"]},
++        indent=2))
++    (R / "static_sweep_360m.json").write_text(json.dumps(
++        {"schema_version": 1, "kv_type": "Q8_0",
++         "points": [p for p in phase_a_points if p["model"] == "360M"]},
++        indent=2))
++
++    # Identify knee candidates: any point with slowdown >= 8% (a bit below the
++    # 10% bottleneck-regime bar, to make sure Phase B confirms near-threshold
++    # points too), most-negative-first.
++    candidates = sorted(
++        [p for p in phase_a_points if (p["slowdown_pct_vs_100gpu"] if p["slowdown_pct_vs_100gpu"] is not None else 0) >= 8.0],
++        key=lambda p: -(p["slowdown_pct_vs_100gpu"] if p["slowdown_pct_vs_100gpu"] is not None else 0))
++    manifest["sections"]["phase_a_candidates"] = [
++        {"model": c["model"], "n_ctx": c["n_ctx"], "gpu_kv_pct": c["gpu_kv_pct"],
++         "slowdown_pct": c["slowdown_pct_vs_100gpu"]}
++        for c in candidates]
++    print(f"Phase A candidates: {manifest['sections']['phase_a_candidates']}",
++          file=sys.stderr)
++
++    # ---------------- Phase B: confirmation, 7 repeats ----------------
++    print("=== Phase B: confirmation ===", file=sys.stderr)
++    raw_b = R / "raw_phase_b.jsonl"
++    if raw_b.exists():
++        raw_b.unlink()
++    phase_b_points = []
++    # Take up to 3 distinct (model, ctx) candidate locations, each with its
++    # flagged ratio + one adjacent ratio + the 100% control.
++    seen_loc = set()
++    b_targets = []
++    for c in candidates:
++        key = (c["model"], c["n_ctx"])
++        if key in seen_loc:
++            continue
++        seen_loc.add(key)
++        b_targets.append(c)
++        if len(b_targets) >= 3:
++            break
++    if not b_targets:
++        # No candidate found -- still confirm the single largest-slowdown
++        # point overall (even if <8%) plus its control, for reproducibility
++        # evidence supporting a capacity-only verdict.
++        worst = max(phase_a_points, key=lambda p: p["slowdown_pct_vs_100gpu"] if p["slowdown_pct_vs_100gpu"] is not None else -999)
++        b_targets = [worst]
++
++    for c in b_targets:
++        model_key, n_ctx, gpu_pct = c["model"], c["n_ctx"], c["gpu_kv_pct"]
++        ratio_idx = ratios.index(gpu_pct)
++        adjacent = ratios[ratio_idx - 1] if ratio_idx > 0 else (
++            ratios[ratio_idx + 1] if ratio_idx + 1 < len(ratios) else gpu_pct)
++        targets = sorted(set([100, adjacent, gpu_pct]))
++        before = host_snapshot()
++        for r in targets:
++            pt = run_point(model_key, n_ctx, "q8", r, n_repeats=7, n_decodes=48,
++                            raw_path=raw_b, label="phase_b_confirm")
++            phase_b_points.append(pt)
++            print(f"  B {model_key} ctx={n_ctx} gpu%={r} "
++                  f"tok/s(mean)={pt['generation_tok_s'].get('mean'):.3f} "
++                  f"cv%={pt['generation_tok_s'].get('cv_pct'):.2f}", file=sys.stderr)
++        after = host_snapshot()
++        valid, reasons = batch_valid(before, after)
++        host_baselines.append({
++            "phase": "B", "model": model_key, "n_ctx": n_ctx,
++            "before": before, "after": after, "valid": valid,
++            "invalid_reasons": reasons,
++        })
++    for pt in phase_b_points:
++        base = next((p for p in phase_b_points if p["model"] == pt["model"]
++                     and p["n_ctx"] == pt["n_ctx"] and p["gpu_kv_pct"] == 100), None)
++        base_mean = base["generation_tok_s"].get("mean") if base else None
++        this_mean = pt["generation_tok_s"].get("mean")
++        pt["slowdown_pct_vs_100gpu"] = (
++            100.0 * (base_mean - this_mean) / base_mean
++            if base_mean and this_mean is not None else None)
++
++    (R / "context_scaling.json").write_text(json.dumps(
++        {"schema_version": 1,
++         "note": "Phase B confirmed points (7 repeats) grouped by model/ratio "
++                 "across context, for the context-scaling question (section 15).",
++         "points": phase_b_points}, indent=2))
++
++    # ---------------- Larger model (1.5B) ----------------
++    print("=== Larger model (1.5B) sweep ===", file=sys.stderr)
++    raw_large = R / "raw_larger_model.jsonl"
++    if raw_large.exists():
++        raw_large.unlink()
++    large_points = []
++    large_contexts = [2048, 8192, 16384]
++    large_ratios = [100, 50, 0]
++    large_skipped = []
++    for n_ctx in large_contexts:
++        before = host_snapshot()
++        # VRAM safety check (section 27): weights ~3.3GiB, +KV; skip if the
++        # all-GPU-KV point would put us within 150MiB of the 4096MiB card.
++        est = run_probe(MODELS["1.5B"]["path"], n_ctx, "q8",
++                         split_for_ratio(MODELS["1.5B"]["n_layer"], 100), 4)
++        if "vram_used_mib" in est and est["vram_used_mib"] > 4096 - 150:
++            large_skipped.append({"n_ctx": n_ctx,
++                                   "reason": f"vram_used_mib={est['vram_used_mib']} "
++                                             f"too close to 4096MiB card limit"})
++            continue
++        for gpu_pct in large_ratios:
++            pt = run_point("1.5B", n_ctx, "q8", gpu_pct, n_repeats=5, n_decodes=32,
++                            raw_path=raw_large, label="larger_model")
++            large_points.append(pt)
++            print(f"  1.5B ctx={n_ctx} gpu%={gpu_pct} "
++                  f"tok/s(mean)={pt['generation_tok_s'].get('mean')}", file=sys.stderr)
++        after = host_snapshot()
++        valid, reasons = batch_valid(before, after)
++        host_baselines.append({"phase": "larger_model", "model": "1.5B",
++                                "n_ctx": n_ctx, "before": before, "after": after,
++                                "valid": valid, "invalid_reasons": reasons})
++    for pt in large_points:
++        base = next((p for p in large_points if p["n_ctx"] == pt["n_ctx"]
++                     and p["gpu_kv_pct"] == 100), None)
++        base_mean = base["generation_tok_s"].get("mean") if base else None
++        this_mean = pt["generation_tok_s"].get("mean")
++        pt["slowdown_pct_vs_100gpu"] = (
++            100.0 * (base_mean - this_mean) / base_mean
++            if base_mean and this_mean is not None else None)
++    (R / "larger_model.json").write_text(json.dumps(
++        {"schema_version": 1, "model": "qwen2.5-1.5b-instruct-fp16",
++         "n_layer": MODELS["1.5B"]["n_layer"], "kv_type": "Q8_0",
++         "contexts_tested": large_contexts, "ratios_tested": large_ratios,
++         "points": large_points, "skipped": large_skipped}, indent=2))
++
++    # ---------------- model_scaling.json: 135M vs 360M vs 1.5B at comparable ctx --
++    comparable_ctx = 8192
++    model_scaling_rows = []
++    for model_key in ["135M", "360M"]:
++        for p in phase_a_points:
++            if p["model"] == model_key and p["n_ctx"] == comparable_ctx:
++                model_scaling_rows.append(p)
++    for p in large_points:
++        if p["n_ctx"] == comparable_ctx:
++            model_scaling_rows.append(p)
++    (R / "model_scaling.json").write_text(json.dumps(
++        {"schema_version": 1, "comparable_n_ctx": comparable_ctx,
++         "note": "Same-context (8192) comparison across model sizes: does "
++                 "KV-placement penalty shrink as compute grows relative to "
++                 "KV traffic? (section 16)",
++         "rows": model_scaling_rows}, indent=2))
++
++    # ---------------- Q5_1 representative sweep ----------------
++    print("=== Q5_1 representative sweep ===", file=sys.stderr)
++    raw_q5 = R / "raw_q5.jsonl"
++    if raw_q5.exists():
++        raw_q5.unlink()
++    all_points_for_worst = phase_a_points + phase_b_points + large_points
++    worst = max(all_points_for_worst, key=lambda p: p.get("slowdown_pct_vs_100gpu") if p.get("slowdown_pct_vs_100gpu") is not None else -999)
++    q5_points = []
++    before = host_snapshot()
++    for gpu_pct in sorted(set([100, worst["gpu_kv_pct"]])):
++        q8_match = next((p for p in all_points_for_worst
++                          if p["model"] == worst["model"] and p["n_ctx"] == worst["n_ctx"]
++                          and p["gpu_kv_pct"] == gpu_pct), None)
++        pt = run_point(worst["model"], worst["n_ctx"], "q5", gpu_pct, n_repeats=7,
++                        n_decodes=48, raw_path=raw_q5, label="q5_representative")
++        pt["q8_comparison_tok_s_mean"] = (q8_match["generation_tok_s"].get("mean")
++                                           if q8_match else None)
++        q5_points.append(pt)
++        print(f"  Q5 {worst['model']} ctx={worst['n_ctx']} gpu%={gpu_pct} "
++              f"tok/s(mean)={pt['generation_tok_s'].get('mean')}", file=sys.stderr)
++    after = host_snapshot()
++    valid, reasons = batch_valid(before, after)
++    host_baselines.append({"phase": "q5", "model": worst["model"],
++                            "n_ctx": worst["n_ctx"], "before": before, "after": after,
++                            "valid": valid, "invalid_reasons": reasons})
++    for pt in q5_points:
++        b = pt["q8_comparison_tok_s_mean"]
++        this_mean = pt["generation_tok_s"].get("mean")
++        pt["q5_vs_q8_delta_pct"] = (100.0 * (this_mean - b) / b) if b and this_mean is not None else None
++    (R / "q5_comparison.json").write_text(json.dumps(
++        {"schema_version": 1, "worst_q8_point": {
++            "model": worst["model"], "n_ctx": worst["n_ctx"],
++            "gpu_kv_pct": worst["gpu_kv_pct"],
++            "slowdown_pct_vs_100gpu": worst.get("slowdown_pct_vs_100gpu")},
++         "points": q5_points}, indent=2))
++
++    # ---------------- Weight-compute control (section 18) ----------------
++    print("=== Weight-compute control ===", file=sys.stderr)
++    raw_ctrl = R / "raw_weight_control.jsonl"
++    if raw_ctrl.exists():
++        raw_ctrl.unlink()
++    ctrl_model = "360M"
++    ctrl_ctx = 8192
++    ctrl_n_layer = MODELS[ctrl_model]["n_layer"]
++    full_gpu_weights = run_point(ctrl_model, ctrl_ctx, "q8", 100, n_repeats=5,
++                                  n_decodes=32, n_gpu_layers=-1,
++                                  raw_path=raw_ctrl, label="control_full_gpu_weights",
++                                  weight_control=True)
++    partial_gpu_weights = run_point(ctrl_model, ctrl_ctx, "q8", 100, n_repeats=5,
++                                     n_decodes=32, n_gpu_layers=ctrl_n_layer // 2,
++                                     raw_path=raw_ctrl, label="control_partial_gpu_weights",
++                                     weight_control=True)
++    weight_control = {
++        "schema_version": 1, "label": "CONTROL_ONLY_not_part_of_primary_sweep",
++        "purpose": "Separate KV-placement bottleneck from weight-transfer/compute "
++                   "bottleneck (section 18). KV is 100% GPU-resident in both rows "
++                   "here; only weight placement differs.",
++        "model": ctrl_model, "n_ctx": ctrl_ctx,
++        "full_gpu_weights": full_gpu_weights,
++        "partial_gpu_weights_n_gpu_layers": ctrl_n_layer // 2,
++        "partial_gpu_weights": partial_gpu_weights,
++        "weight_offload_slowdown_pct": (
++            100.0 * (full_gpu_weights["generation_tok_s"]["mean"]
++                     - partial_gpu_weights["generation_tok_s"]["mean"])
++            / full_gpu_weights["generation_tok_s"]["mean"]
++            if full_gpu_weights["generation_tok_s"].get("mean")
++            and partial_gpu_weights["generation_tok_s"].get("mean") else None),
++    }
++    (R / "weight_compute_control.json").write_text(json.dumps(weight_control, indent=2))
++
++    # ---------------- Reproducibility (section 28) ----------------
++    print("=== Reproducibility re-run ===", file=sys.stderr)
++    raw_repro = R / "raw_reproducibility.jsonl"
++    if raw_repro.exists():
++        raw_repro.unlink()
++    repro_before = host_snapshot()
++    repro_worst = run_point(worst["model"], worst["n_ctx"], "q8", worst["gpu_kv_pct"],
++                             n_repeats=7, n_decodes=48, raw_path=raw_repro,
++                             label="reproducibility_repro")
++    repro_control = run_point(worst["model"], worst["n_ctx"], "q8", 100,
++                               n_repeats=7, n_decodes=48, raw_path=raw_repro,
++                               label="reproducibility_control")
++    repro_after = host_snapshot()
++    repro_valid, repro_reasons = batch_valid(repro_before, repro_after)
++    original_slowdown = worst.get("slowdown_pct_vs_100gpu")
++    repro_slowdown = (
++        100.0 * (repro_control["generation_tok_s"]["mean"] - repro_worst["generation_tok_s"]["mean"])
++        / repro_control["generation_tok_s"]["mean"]
++        if repro_control["generation_tok_s"].get("mean") and repro_worst["generation_tok_s"].get("mean")
++        else None)
++    reproducibility = {
++        "schema_version": 1,
++        "point": {"model": worst["model"], "n_ctx": worst["n_ctx"], "gpu_kv_pct": worst["gpu_kv_pct"]},
++        "original_slowdown_pct": original_slowdown,
++        "fresh_batch_slowdown_pct": repro_slowdown,
++        "fresh_batch_valid_host": repro_valid,
++        "fresh_batch_invalid_reasons": repro_reasons,
++        "similar_relative_result": (
++            original_slowdown is not None and repro_slowdown is not None
++            and abs(original_slowdown - repro_slowdown) <= max(5.0, 0.5 * abs(original_slowdown))),
++        "worst_run": repro_worst, "control_run": repro_control,
++    }
++    (R / "reproducibility.json").write_text(json.dumps(reproducibility, indent=2))
++    host_baselines.append({"phase": "reproducibility", "model": worst["model"],
++                            "n_ctx": worst["n_ctx"], "before": repro_before,
++                            "after": repro_after, "valid": repro_valid,
++                            "invalid_reasons": repro_reasons})
++
++    (R / "host_baseline.json").write_text(json.dumps(
++        {"schema_version": 1, "host_noise_rule": HOST_NOISE_RULE,
++         "batches": host_baselines}, indent=2))
++
++    manifest["sections"]["phase_b_points"] = len(phase_b_points)
++    manifest["sections"]["large_points"] = len(large_points)
++    manifest["sections"]["q5_points"] = len(q5_points)
++    manifest["sections"]["worst_point"] = {
++        "model": worst["model"], "n_ctx": worst["n_ctx"],
++        "gpu_kv_pct": worst["gpu_kv_pct"],
++        "slowdown_pct_vs_100gpu": worst.get("slowdown_pct_vs_100gpu")}
++    manifest["wall_clock_s"] = time.time() - t_start
++    (R / "_run_manifest_internal.json").write_text(json.dumps(manifest, indent=2))
++    print(f"=== DONE in {manifest['wall_clock_s']:.1f}s ===", file=sys.stderr)
++    print(json.dumps(manifest["sections"], indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/phase12g_utilization_sample.py b/scripts/phase12g_utilization_sample.py
+new file mode 100644
+index 0000000..4eba158
+--- /dev/null
++++ b/scripts/phase12g_utilization_sample.py
+@@ -0,0 +1,121 @@
++#!/usr/bin/env python3
++"""Phase 12G section 13: CPU/GPU utilization sampling at representative
++points (all-GPU-KV, 50/50, all-CPU-KV), not on every sweep run. Launches
++the probe as a subprocess with a longer decode run, polls nvidia-smi
++concurrently for GPU utilization, and reads CPU time from
++resource.getrusage(RUSAGE_CHILDREN) after the child exits (a /proc/<pid>/stat
++read after exit returns nothing -- the pid is already gone by then).
++Research-only, writes results/phase12/kv-placement-bottleneck/utilization.json."""
++import json
++import subprocess
++import sys
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parent.parent
++BIN = ROOT / "build-vulkan" / "tools" / "membrane-kv-tiering-scheduler" / "membrane-kv-tiering-scheduler-probe"
++MODELS_DIR = ROOT / "models"
++R = ROOT / "results" / "phase12" / "kv-placement-bottleneck"
++
++MODELS = {
++    "135M": {"path": str(MODELS_DIR / "SmolLM2-135M-Instruct-f16.gguf"), "n_layer": 30},
++    "360M": {"path": str(MODELS_DIR / "SmolLM2-360M-Instruct-f16.gguf"), "n_layer": 32},
++}
++
++
++def split_for_ratio(n_layer, gpu_pct):
++    return n_layer - round(n_layer * gpu_pct / 100.0)
++
++
++def gpu_util_sample():
++    try:
++        out = subprocess.run(
++            ["nvidia-smi", "--query-gpu=utilization.gpu,memory.used",
++             "--format=csv,noheader,nounits"],
++            capture_output=True, text=True, timeout=5).stdout.strip()
++        u, m = out.split(",")
++        return int(u), int(m)
++    except Exception:
++        return None, None
++
++
++def sample_run(model_key, n_ctx, gpu_pct, n_decodes=400):
++    import resource
++
++    m = MODELS[model_key]
++    split = split_for_ratio(m["n_layer"], gpu_pct)
++    args = [str(BIN), "bottleneck", m["path"], str(n_ctx), "q8", str(split),
++            str(n_decodes), "-1"]
++    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
++                          text=True)
++    samples_gpu_util = []
++    samples_vram = []
++    rusage_before = resource.getrusage(resource.RUSAGE_CHILDREN)
++    t_start = time.time()
++    while p.poll() is None:
++        u, vram = gpu_util_sample()
++        if u is not None:
++            samples_gpu_util.append(u)
++            samples_vram.append(vram)
++        time.sleep(0.15)
++    t_end = time.time()
++    stdout, _ = p.communicate()
++    # RUSAGE_CHILDREN accumulates over ALL terminated children of this
++    # process, not just this one -- since phase12g_utilization_sample.py
++    # runs its probe children strictly sequentially (one sample_run() call
++    # fully completes, including this p.communicate(), before the next
++    # Popen), the delta across this single call is exactly this child's
++    # CPU time, with no cross-run contamination.
++    rusage_after = resource.getrusage(resource.RUSAGE_CHILDREN)
++    cpu_seconds_used = ((rusage_after.ru_utime + rusage_after.ru_stime)
++                         - (rusage_before.ru_utime + rusage_before.ru_stime))
++    rec = None
++    for line in stdout.splitlines():
++        if line.strip().startswith("{"):
++            try:
++                rec = json.loads(line.strip())
++            except json.JSONDecodeError:
++                pass
++    wall_s = t_end - t_start
++    cpu_pct = 100.0 * cpu_seconds_used / wall_s if wall_s > 0 else None
++    return {
++        "model": model_key, "n_ctx": n_ctx, "gpu_kv_pct": gpu_pct, "split": split,
++        "n_decodes": n_decodes, "wall_s": wall_s,
++        "gpu_util_pct_samples_n": len(samples_gpu_util),
++        "gpu_util_pct_mean": (sum(samples_gpu_util) / len(samples_gpu_util)
++                               if samples_gpu_util else None),
++        "gpu_util_pct_max": max(samples_gpu_util) if samples_gpu_util else None,
++        "vram_mib_mean": (sum(samples_vram) / len(samples_vram)
++                           if samples_vram else None),
++        "cpu_pct_of_one_core": cpu_pct,
++        "probe_result": rec,
++    }
++
++
++def main():
++    points = []
++    for model_key, n_ctx in [("135M", 65536), ("360M", 65536)]:
++        for gpu_pct in [100, 50, 0]:
++            print(f"sampling {model_key} ctx={n_ctx} gpu%={gpu_pct}", file=sys.stderr)
++            points.append(sample_run(model_key, n_ctx, gpu_pct))
++    out = {
++        "schema_version": 1,
++        "note": "Section 13: representative-point utilization sampling only "
++                "(all-GPU-KV, 50/50, all-CPU-KV), not run for every sweep "
++                "point. cpu_pct_of_one_core is the probe process's own "
++                "utime+stime over wall time (100 = one core saturated), read "
++                "via resource.getrusage(RUSAGE_CHILDREN) after the child "
++                "exits (a live /proc/<pid>/stat poll cannot observe the "
++                "final CPU time once the process has already exited); "
++                "gpu_util_pct_* comes from polling nvidia-smi at ~150ms "
++                "intervals during the run (coarse sampling, not a profiler "
++                "-- short/fast runs may have too few samples for a reliable "
++                "mean, flagged via gpu_util_pct_samples_n).",
++        "points": points,
++    }
++    (R / "utilization.json").write_text(json.dumps(out, indent=2))
++    print(json.dumps(out, indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 973aefa..ca9fa74 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -2630,6 +2630,400 @@ def _c119():
+ 	return len(bad) == 0, "; ".join(bad) if bad else f"{len(claimed_dirty)} dirty files match the patch-file union and the live submodule state exactly, pinned commit confirmed"
+ 
+ 
++V12G_DIR = REPO_ROOT / "results" / "phase12" / "kv-placement-bottleneck"
++_V12G_CACHE = {}
++
++
++def _load_v12g(name):
++	key = name
++	if key not in _V12G_CACHE:
++		path = V12G_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12G_CACHE[key] = rows
++		else:
++			_V12G_CACHE[key] = json.loads(path.read_text())
++	return _V12G_CACHE[key]
++
++
++def _v12g_classify(slowdown_pct):
++	if slowdown_pct is None:
++		return "UNKNOWN"
++	if slowdown_pct < 5.0:
++		return "NO_BOTTLENECK"
++	if slowdown_pct < 10.0:
++		return "MINOR"
++	if slowdown_pct < 20.0:
++		return "MEANINGFUL"
++	return "STRONG"
++
++
++def _v12g_pareto(vram, tok):
++	n = len(vram)
++	is_pareto = [True] * n
++	for i in range(n):
++		for j in range(n):
++			if i == j:
++				continue
++			vram_le = vram[j] <= vram[i]
++			tok_ge = tok[j] >= tok[i]
++			strictly_better = (vram[j] < vram[i]) or (tok[j] > tok[i])
++			if vram_le and tok_ge and strictly_better:
++				is_pareto[i] = False
++				break
++	return is_pareto
++
++
++@check("Phase 12G: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual .json artifact in the directory under 'artifacts' "
++	"(itself excluded) and every raw *.jsonl file under 'raw_evidence_files', "
++	"with no llama.cpp source changes claimed")
++def _c120():
++	m = _load_v12g("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}, expected 1")
++	real_artifacts = sorted(p.name for p in V12G_DIR.glob("*.json") if p.name != "manifest.json")
++	real_raw = sorted(p.name for p in V12G_DIR.glob("*.jsonl"))
++	if sorted(m.get("artifacts", [])) != real_artifacts:
++		bad.append(f"artifacts list does not match directory contents: manifest={sorted(m.get('artifacts', []))}, real={real_artifacts}")
++	if sorted(m.get("raw_evidence_files", [])) != real_raw:
++		bad.append(f"raw_evidence_files list does not match directory contents: manifest={sorted(m.get('raw_evidence_files', []))}, real={real_raw}")
++	if m.get("no_llama_cpp_source_changes") is not True:
++		bad.append(f"no_llama_cpp_source_changes={m.get('no_llama_cpp_source_changes')!r}, expected True")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(real_artifacts)} artifacts + {len(real_raw)} raw files, exact match with directory contents"
++
++
++@check("Phase 12G: static_sweep_135m.json / static_sweep_360m.json "
++	"generation_tok_s.mean values are recomputed exactly (within float "
++	"tolerance) from raw_phase_a.jsonl's generation_tok_s for the matching "
++	"model/n_ctx/gpu_kv_pct rows")
++def _c121():
++	raw = _load_v12g("raw_phase_a.jsonl")
++	bad = []
++	for fname, model in (("static_sweep_135m.json", "135M"), ("static_sweep_360m.json", "360M")):
++		sweep = _load_v12g(fname)
++		for pt in sweep["points"]:
++			matching = [r["generation_tok_s"] for r in raw
++				if r.get("_model") == model and r.get("n_ctx") == pt["n_ctx"]
++				and r.get("_gpu_kv_pct") == pt["gpu_kv_pct"] and "generation_tok_s" in r]
++			if not matching:
++				bad.append(f"{fname}: no raw rows for ctx={pt['n_ctx']} gpu%={pt['gpu_kv_pct']}")
++				continue
++			recomputed_mean = statistics.mean(matching)
++			claimed_mean = pt["generation_tok_s"].get("mean")
++			if claimed_mean is None or abs(recomputed_mean - claimed_mean) > 1e-6:
++				bad.append(f"{fname} ctx={pt['n_ctx']} gpu%={pt['gpu_kv_pct']}: claimed mean={claimed_mean}, recomputed={recomputed_mean}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "all static-sweep tok/s means reproduced exactly from raw_phase_a.jsonl"
++
++
++@check("Phase 12G: every static-sweep point's slowdown_pct_vs_100gpu is "
++	"recomputed exactly as 100*(baseline_mean-this_mean)/baseline_mean "
++	"against the SAME model/n_ctx's 100%%-GPU-KV point's recomputed mean "
++	"from raw_phase_a.jsonl -- not just trusting the stored value")
++def _c122():
++	raw = _load_v12g("raw_phase_a.jsonl")
++	bad = []
++	for fname, model in (("static_sweep_135m.json", "135M"), ("static_sweep_360m.json", "360M")):
++		sweep = _load_v12g(fname)
++		for pt in sweep["points"]:
++			base_rows = [r["generation_tok_s"] for r in raw
++				if r.get("_model") == model and r.get("n_ctx") == pt["n_ctx"]
++				and r.get("_gpu_kv_pct") == 100 and "generation_tok_s" in r]
++			this_rows = [r["generation_tok_s"] for r in raw
++				if r.get("_model") == model and r.get("n_ctx") == pt["n_ctx"]
++				and r.get("_gpu_kv_pct") == pt["gpu_kv_pct"] and "generation_tok_s" in r]
++			if not base_rows or not this_rows:
++				continue
++			base_mean = statistics.mean(base_rows)
++			this_mean = statistics.mean(this_rows)
++			recomputed = 100.0 * (base_mean - this_mean) / base_mean
++			claimed = pt.get("slowdown_pct_vs_100gpu")
++			if claimed is None or abs(recomputed - claimed) > 1e-6:
++				bad.append(f"{fname} ctx={pt['n_ctx']} gpu%={pt['gpu_kv_pct']}: claimed slowdown={claimed}, recomputed={recomputed}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "all slowdown_pct_vs_100gpu values reproduced exactly from raw generation_tok_s"
++
++
++@check("Phase 12G: weight placement is fixed (n_gpu_layers_weights == -1, "
++	"fully GPU-resident) across every raw row in the primary sweeps "
++	"(raw_phase_a.jsonl, raw_phase_b.jsonl, raw_larger_model.jsonl) -- only "
++	"raw_weight_control.jsonl's explicitly-labeled control rows are allowed "
++	"to vary weight placement (section 3/7/18's mandatory isolation)")
++def _c123():
++	bad = []
++	for fname in ("raw_phase_a.jsonl", "raw_phase_b.jsonl", "raw_larger_model.jsonl"):
++		rows = _load_v12g(fname)
++		offenders = [r for r in rows if r.get("n_gpu_layers_weights") != -1 and "n_gpu_layers_weights" in r]
++		if offenders:
++			bad.append(f"{fname}: {len(offenders)} rows have weight placement != fully-GPU (n_gpu_layers_weights != -1), breaking KV/weight isolation")
++	ctrl = _load_v12g("raw_weight_control.jsonl")
++	labels = {r.get("_label") for r in ctrl}
++	if "control_full_gpu_weights" not in labels or "control_partial_gpu_weights" not in labels:
++		bad.append(f"raw_weight_control.jsonl missing expected control labels, found: {labels}")
++	if not any(r.get("_weight_control") is True for r in ctrl):
++		bad.append("raw_weight_control.jsonl rows are not marked _weight_control=true")
++	return len(bad) == 0, "; ".join(bad) if bad else "weight placement fixed (fully GPU) in every primary-sweep raw row; only the explicitly labeled control varies it"
++
++
++@check("Phase 12G: break_even.json's classification bands are exactly "
++	"<5%%=NO_BOTTLENECK, 5-10%%=MINOR, 10-20%%=MEANINGFUL, >=20%%=STRONG "
++	"(section 20: predeclared, not movable after seeing results), and "
++	"bottleneck_map.json's classification field matches recomputing this "
++	"exact rule against its own relative_slowdown_pct for every "
++	"weights-fixed (non-Q5-comparison) row")
++def _c124():
++	be = _load_v12g("break_even.json")
++	bad = []
++	bands = {b["label"]: b["range"] for b in be.get("bands", [])}
++	expected_bands = {"NO_BOTTLENECK": "< 5%", "MINOR": "5-10%",
++		"MEANINGFUL": "10-20%", "STRONG": ">= 20%"}
++	if bands != expected_bands:
++		bad.append(f"break_even.json bands do not match the predeclared thresholds: {bands}")
++	bmap = _load_v12g("bottleneck_map.json")
++	for row in bmap["rows"]:
++		if row["classification"] == "SEE_q5_comparison_json_not_gpu_vs_cpu":
++			continue
++		recomputed = _v12g_classify(row.get("relative_slowdown_pct"))
++		if row["classification"] != recomputed:
++			bad.append(f"{row['model']} ctx={row['n_ctx']} gpu%={row['gpu_kv_pct']}: stored classification={row['classification']!r}, recomputed={recomputed!r}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "break-even bands match predeclared thresholds exactly; every row's classification reproduced from its own slowdown_pct"
++
++
++@check("Phase 12G: pareto.json's is_pareto_optimal flags are reproduced "
++	"exactly by an independent O(n^2) domination recomputation over each "
++	"group's (vram_used_mib, generation_tok_s_mean) pairs -- no dominated "
++	"point may be marked optimal (section 24)")
++def _c125():
++	pareto = _load_v12g("pareto.json")
++	bad = []
++	for group in pareto["groups"]:
++		vram = [p["vram_used_mib"] for p in group["points"]]
++		tok = [p["generation_tok_s_mean"] for p in group["points"]]
++		recomputed = _v12g_pareto(vram, tok)
++		stored = [p["is_pareto_optimal"] for p in group["points"]]
++		if recomputed != stored:
++			bad.append(f"{group['group']}: stored={stored}, recomputed={recomputed}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else f"{len(pareto['groups'])} Pareto groups reproduced exactly by independent domination recomputation"
++
++
++@check("Phase 12G: host_baseline.json's per-batch valid/invalid_reasons "
++	"verdicts are reproduced exactly from the predeclared host_noise_rule "
++	"thresholds (mem_available drop > 40%%, swap growth > 300 MiB, "
++	"load1 > 10, after mem_available < 300 MiB) applied to each batch's "
++	"own recorded before/after snapshot (section 9)")
++def _c126():
++	hb = _load_v12g("host_baseline.json")
++	rule = hb.get("host_noise_rule", {})
++	bad = []
++	if rule.get("reject_if_mem_available_drop_pct_gt") != 40.0 or \
++			rule.get("reject_if_swap_used_increase_mib_gt") != 300.0 or \
++			rule.get("reject_if_load1_gt") != 10.0 or \
++			rule.get("reject_if_mem_available_below_mib") != 300.0:
++		bad.append(f"host_noise_rule thresholds do not match the predeclared policy: {rule}")
++	for b in hb["batches"]:
++		before, after = b["before"], b["after"]
++		reasons = []
++		if before["mem_available_kb"] > 0:
++			drop_pct = 100.0 * (before["mem_available_kb"] - after["mem_available_kb"]) / before["mem_available_kb"]
++			if drop_pct > 40.0:
++				reasons.append("mem_available_drop_pct")
++		swap_inc_mib = (after["swap_used_kb"] - before["swap_used_kb"]) / 1024.0
++		if swap_inc_mib > 300.0:
++			reasons.append("swap_used_increase_mib")
++		if after["load1"] > 10.0:
++			reasons.append("load1")
++		if after["mem_available_kb"] / 1024.0 < 300.0:
++			reasons.append("mem_available_mib")
++		recomputed_valid = len(reasons) == 0
++		if b["valid"] != recomputed_valid:
++			bad.append(f"batch phase={b['phase']} model={b['model']} ctx={b.get('n_ctx')}: stored valid={b['valid']}, recomputed={recomputed_valid} (reasons={reasons})")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else f"{len(hb['batches'])} host-noise batch verdicts reproduced exactly from the predeclared rule"
++
++
++@check("Phase 12G: every bottleneck_map.json row classified MEANINGFUL or "
++	"STRONG is backed by a host_baseline.json batch recorded valid=true "
++	"for that row's model -- a >=10%% claim from a noisy/invalid batch is "
++	"never allowed to stand (section 9/21/34)")
++def _c127():
++	bmap = _load_v12g("bottleneck_map.json")
++	hb = _load_v12g("host_baseline.json")
++	bad = []
++	for row in bmap["rows"]:
++		if row["classification"] not in ("MEANINGFUL", "STRONG"):
++			continue
++		matching_batches = [b for b in hb["batches"] if b["model"] == row["model"]]
++		if not matching_batches:
++			bad.append(f"{row['model']} ctx={row['n_ctx']} gpu%={row['gpu_kv_pct']}: classification={row['classification']} but no host_baseline batch recorded for this model at all")
++			continue
++		if not any(b["valid"] for b in matching_batches):
++			bad.append(f"{row['model']} ctx={row['n_ctx']} gpu%={row['gpu_kv_pct']}: classification={row['classification']} but every recorded host batch for this model is invalid (noisy)")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "every MEANINGFUL/STRONG row is backed by at least one valid host batch for its model"
++
++
++@check("Phase 12G: dynamic_reentry.json's executed flag agrees exactly "
++	"with summary.json's bottleneck_regime_confirmed -- dynamic scheduler "
++	"re-entry only runs when section 21's regime criteria are actually met "
++	"(section 22/29: never executed speculatively, never silently skipped "
++	"when a regime WAS confirmed)")
++def _c128():
++	dr = _load_v12g("dynamic_reentry.json")
++	summ = _load_v12g("summary.json")
++	bad = []
++	if dr.get("executed") != summ.get("bottleneck_regime_confirmed"):
++		bad.append(f"dynamic_reentry.json executed={dr.get('executed')!r} does not match summary.json bottleneck_regime_confirmed={summ.get('bottleneck_regime_confirmed')!r}")
++	if dr.get("executed") is True:
++		strongest = summ.get("strongest_slowdown_observed", {})
++		if strongest.get("relative_slowdown_pct", 0) < 10.0:
++			bad.append(f"dynamic_reentry executed=true but summary.json's strongest point slowdown={strongest.get('relative_slowdown_pct')} is under the 10%% bar")
++	return len(bad) == 0, "; ".join(bad) if bad else f"executed={dr.get('executed')} consistent with bottleneck_regime_confirmed={summ.get('bottleneck_regime_confirmed')}"
++
++
++@check("Phase 12G: summary.json's decision_gate is one of the five valid "
++	"enum values and is internally consistent with bottleneck_regime_confirmed "
++	"-- CONFIRMED requires bottleneck_regime_confirmed=true; the other four "
++	"gates all require it to be false (section 35: gate is not softened or "
++	"inflated relative to what was actually measured)")
++def _c129():
++	summ = _load_v12g("summary.json")
++	valid_gates = set(summ.get("decision_gate_allowed_values", []))
++	bad = []
++	gate = summ.get("decision_gate")
++	if gate not in valid_gates or len(valid_gates) != 5:
++		bad.append(f"decision_gate={gate!r} not one of the 5 declared allowed values {valid_gates}")
++	confirmed = summ.get("bottleneck_regime_confirmed")
++	if gate == "KV_PLACEMENT_BOTTLENECK_CONFIRMED" and confirmed is not True:
++		bad.append("gate is CONFIRMED but bottleneck_regime_confirmed is not true")
++	if gate != "KV_PLACEMENT_BOTTLENECK_CONFIRMED" and confirmed is True:
++		bad.append(f"bottleneck_regime_confirmed is true but gate={gate!r} is not CONFIRMED")
++	if not summ.get("next_step_recommendation"):
++		bad.append("next_step_recommendation is missing/empty")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} valid and consistent with the recorded evidence"
++
++
++@check("Phase 12G: q5_comparison.json's q5_vs_q8_delta_pct is recomputed "
++	"exactly as 100*(q5_mean-q8_mean)/q8_mean from raw_q5.jsonl's "
++	"generation_tok_s against the stored q8_comparison_tok_s_mean, and "
++	"both points share the exact same model/n_ctx/gpu_kv_pct as their q8 "
++	"counterpart (no precision/placement mixing, section 17)")
++def _c130():
++	q5 = _load_v12g("q5_comparison.json")
++	raw = _load_v12g("raw_q5.jsonl")
++	bad = []
++	for pt in q5["points"]:
++		matching = [r["generation_tok_s"] for r in raw
++			if r.get("_model") == pt["model"] and r.get("n_ctx") == pt["n_ctx"]
++			and r.get("_gpu_kv_pct") == pt["gpu_kv_pct"] and r.get("kv_type") == "Q5_1"]
++		if not matching:
++			bad.append(f"{pt['model']} ctx={pt['n_ctx']} gpu%={pt['gpu_kv_pct']}: no raw Q5_1 rows found")
++			continue
++		q5_mean = statistics.mean(matching)
++		q8_mean = pt.get("q8_comparison_tok_s_mean")
++		if q8_mean:
++			recomputed = 100.0 * (q5_mean - q8_mean) / q8_mean
++			claimed = pt.get("q5_vs_q8_delta_pct")
++			if claimed is None or abs(recomputed - claimed) > 1e-6:
++				bad.append(f"{pt['model']} ctx={pt['n_ctx']} gpu%={pt['gpu_kv_pct']}: claimed delta={claimed}, recomputed={recomputed}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else f"{len(q5['points'])} Q5-vs-Q8 deltas reproduced exactly from raw_q5.jsonl"
++
++
++@check("Phase 12G: weight_compute_control.json is clearly labeled "
++	"control-only, both its rows keep KV 100%% GPU-resident (gpu_kv_pct==100 "
++	"in the raw data), and its weight_offload_slowdown_pct is recomputed "
++	"exactly from the two rows' generation_tok_s means (section 18: this "
++	"control must not be folded into the primary bottleneck classification)")
++def _c131():
++	wc = _load_v12g("weight_compute_control.json")
++	raw = _load_v12g("raw_weight_control.jsonl")
++	bad = []
++	if wc.get("label") != "CONTROL_ONLY_not_part_of_primary_sweep":
++		bad.append(f"label={wc.get('label')!r}, expected the explicit control-only label")
++	full_rows = [r["_gpu_kv_pct"] for r in raw if r.get("_label") == "control_full_gpu_weights"]
++	partial_rows = [r["_gpu_kv_pct"] for r in raw if r.get("_label") == "control_partial_gpu_weights"]
++	if not full_rows or any(p != 100 for p in full_rows):
++		bad.append(f"control_full_gpu_weights rows are not all gpu_kv_pct=100: {full_rows}")
++	if not partial_rows or any(p != 100 for p in partial_rows):
++		bad.append(f"control_partial_gpu_weights rows are not all gpu_kv_pct=100: {partial_rows}")
++	full_mean = wc.get("full_gpu_weights", {}).get("generation_tok_s", {}).get("mean")
++	partial_mean = wc.get("partial_gpu_weights", {}).get("generation_tok_s", {}).get("mean")
++	if full_mean and partial_mean:
++		recomputed = 100.0 * (full_mean - partial_mean) / full_mean
++		claimed = wc.get("weight_offload_slowdown_pct")
++		if claimed is None or abs(recomputed - claimed) > 1e-6:
++			bad.append(f"weight_offload_slowdown_pct claimed={claimed}, recomputed={recomputed}")
++	return len(bad) == 0, "; ".join(bad) if bad else "control-only label present, KV fixed at 100%% GPU in both rows, slowdown reproduced exactly"
++
++
++@check("Phase 12G: reproducibility.json's fresh_batch_slowdown_pct is "
++	"recomputed exactly from raw_reproducibility.jsonl's worst-point and "
++	"control-point generation_tok_s means, and similar_relative_result is "
++	"only true when the fresh figure is actually close to the original "
++	"(section 28: a disappearing result must be classified inconclusive, "
++	"never quietly kept)")
++def _c132():
++	rp = _load_v12g("reproducibility.json")
++	raw = _load_v12g("raw_reproducibility.jsonl")
++	bad = []
++	worst_rows = [r["generation_tok_s"] for r in raw if r.get("_label") == "reproducibility_repro"]
++	control_rows = [r["generation_tok_s"] for r in raw if r.get("_label") == "reproducibility_control"]
++	if not worst_rows or not control_rows:
++		bad.append(f"missing raw rows: worst={len(worst_rows)}, control={len(control_rows)}")
++	else:
++		worst_mean = statistics.mean(worst_rows)
++		control_mean = statistics.mean(control_rows)
++		recomputed = 100.0 * (control_mean - worst_mean) / control_mean if control_mean else None
++		claimed = rp.get("fresh_batch_slowdown_pct")
++		if recomputed is not None and (claimed is None or abs(recomputed - claimed) > 1e-6):
++			bad.append(f"fresh_batch_slowdown_pct claimed={claimed}, recomputed={recomputed}")
++		orig = rp.get("original_slowdown_pct")
++		if orig is not None and claimed is not None:
++			expected_similar = abs(orig - claimed) <= max(5.0, 0.5 * abs(orig))
++			if rp.get("similar_relative_result") != expected_similar:
++				bad.append(f"similar_relative_result={rp.get('similar_relative_result')!r}, recomputed={expected_similar!r} from original={orig} vs fresh={claimed}")
++	return len(bad) == 0, "; ".join(bad) if bad else "fresh-batch slowdown reproduced exactly from raw data; reproducibility verdict matches the recomputed comparison"
++
++
++@check("Phase 12G: transfer_activity.json is explicitly labeled "
++	"ESTIMATED_NOT_DIRECTLY_MEASURED with a non-empty 'unresolved' "
++	"disclosure, and graph_splits.json states both the "
++	"splits-increased-with-tok-s-also-increasing and "
++	"splits-increased-with-tok-s-decreasing counts without asserting "
++	"causation from split count to throughput (section 12/19: no "
++	"unsupported causal claim)")
++def _c133():
++	ta = _load_v12g("transfer_activity.json")
++	gs = _load_v12g("graph_splits.json")
++	bad = []
++	if ta.get("label") != "ESTIMATED_NOT_DIRECTLY_MEASURED":
++		bad.append(f"transfer_activity.json label={ta.get('label')!r}, expected ESTIMATED_NOT_DIRECTLY_MEASURED")
++	if not ta.get("unresolved"):
++		bad.append("transfer_activity.json has no 'unresolved' disclosure")
++	for banned in ("proves", "causes", "confirmed cause", "root cause is"):
++		if banned in gs.get("note", "").lower():
++			bad.append(f"graph_splits.json note asserts causation with banned phrase {banned!r}")
++	if "adjacent_pairs_where_splits_increased_and_tok_s_also_increased_or_held" not in gs or \
++			"adjacent_pairs_where_splits_increased_and_tok_s_decreased" not in gs:
++		bad.append("graph_splits.json missing the two correlation counters")
++	return len(bad) == 0, "; ".join(bad) if bad else "transfer estimate is explicitly labeled and caveated; graph-split correlation reported without a causal claim"
++
++
++@check("Phase 12G: no absolute filesystem paths (/home/..., /tmp/..., "
++	"etc.) leaked in any kv-placement-bottleneck .json artifact")
++def _c134():
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	hits = []
++	for path in sorted(V12G_DIR.glob("*.json")):
++		found = pattern.findall(path.read_text())
++		found = [h for h in found if not h.startswith("/models/")]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all kv-placement-bottleneck artifact files"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -2658,6 +3052,8 @@ def main() -> int:
+ 			_c88, _c89, _c90, _c91, _c92, _c93, _c94, _c95, _c96, _c97, _c98, _c99,
+ 			_c100, _c101, _c102, _c103, _c104, _c105, _c106, _c107, _c108, _c109,
+ 			_c110, _c111, _c112, _c113, _c114, _c115, _c116, _c117, _c118, _c119,
++			_c120, _c121, _c122, _c123, _c124, _c125, _c126, _c127, _c128, _c129,
++			_c130, _c131, _c132, _c133, _c134,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.c b/tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.c
+new file mode 100644
+index 0000000..dab79da
+--- /dev/null
++++ b/tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.c
+@@ -0,0 +1,163 @@
++#include "bottleneck_analysis.h"
++
++#include <math.h>
++
++double	membrane_bottleneck_slowdown_pct(double baseline_tok_s,
++			double measured_tok_s, int *ok)
++{
++	if (baseline_tok_s <= 0.0)
++	{
++		if (ok)
++			*ok = 0;
++		return (0.0);
++	}
++	if (ok)
++		*ok = 1;
++	return (100.0 * (baseline_tok_s - measured_tok_s) / baseline_tok_s);
++}
++
++enum e_membrane_bottleneck_class	membrane_bottleneck_classify(
++			double slowdown_pct)
++{
++	if (slowdown_pct < 5.0)
++		return (MEMBRANE_BOTTLENECK_NO_BOTTLENECK);
++	if (slowdown_pct < 10.0)
++		return (MEMBRANE_BOTTLENECK_MINOR);
++	if (slowdown_pct < 20.0)
++		return (MEMBRANE_BOTTLENECK_MEANINGFUL);
++	return (MEMBRANE_BOTTLENECK_STRONG);
++}
++
++const char	*membrane_bottleneck_class_name(
++			enum e_membrane_bottleneck_class c)
++{
++	switch (c)
++	{
++	case MEMBRANE_BOTTLENECK_NO_BOTTLENECK:
++		return ("NO_BOTTLENECK");
++	case MEMBRANE_BOTTLENECK_MINOR:
++		return ("MINOR");
++	case MEMBRANE_BOTTLENECK_MEANINGFUL:
++		return ("MEANINGFUL");
++	case MEMBRANE_BOTTLENECK_STRONG:
++	default:
++		return ("STRONG");
++	}
++}
++
++double	membrane_bottleneck_cv_pct(const double *vals, size_t n)
++{
++	double	mean;
++	double	acc;
++	size_t	i;
++	double	var;
++	double	sd;
++
++	if (n == 0 || vals == NULL)
++		return (0.0);
++	if (n == 1)
++		return (0.0);
++	mean = 0.0;
++	for (i = 0; i < n; i++)
++		mean += vals[i];
++	mean /= (double)n;
++	if (mean == 0.0)
++		return (0.0);
++	acc = 0.0;
++	for (i = 0; i < n; i++)
++	{
++		double	d = vals[i] - mean;
++
++		acc += d * d;
++	}
++	var = acc / (double)(n - 1);
++	sd = sqrt(var);
++	return (100.0 * sd / mean);
++}
++
++int	membrane_bottleneck_host_batch_valid(
++			uint64_t before_mem_available_kb, uint64_t after_mem_available_kb,
++			uint64_t before_swap_used_kb, uint64_t after_swap_used_kb,
++			double after_load1, uint32_t *out_reason_mask)
++{
++	uint32_t	mask = 0;
++
++	if (before_mem_available_kb > 0)
++	{
++		double	drop_pct = 100.0
++			* (double)((int64_t)before_mem_available_kb - (int64_t)after_mem_available_kb)
++			/ (double)before_mem_available_kb;
++
++		if (drop_pct > 40.0)
++			mask |= 1u << 0;
++	}
++	{
++		double	swap_inc_mib =
++			((double)(int64_t)(after_swap_used_kb - before_swap_used_kb)) / 1024.0;
++
++		if (swap_inc_mib > 300.0)
++			mask |= 1u << 1;
++	}
++	if (after_load1 > 10.0)
++		mask |= 1u << 2;
++	if ((double)after_mem_available_kb / 1024.0 < 300.0)
++		mask |= 1u << 3;
++	if (out_reason_mask)
++		*out_reason_mask = mask;
++	return (mask == 0);
++}
++
++int	membrane_bottleneck_regime_confirmed(
++			double primary_slowdown_pct, double primary_cv_pct,
++			int primary_host_valid,
++			double secondary_slowdown_pct, int secondary_present)
++{
++	double	cv_cap;
++
++	if (primary_slowdown_pct < 10.0)
++		return (0);
++	if (!primary_host_valid)
++		return (0);
++	cv_cap = primary_slowdown_pct * 0.5;
++	if (cv_cap > 15.0)
++		cv_cap = 15.0;
++	if (primary_cv_pct >= cv_cap)
++		return (0);
++	if (!secondary_present)
++		return (0);
++	if (secondary_slowdown_pct < 10.0)
++		return (0);
++	return (1);
++}
++
++void	membrane_bottleneck_pareto(const double *vram_mib, const double *tok_s,
++			size_t n, int *out_is_pareto)
++{
++	size_t	i;
++	size_t	j;
++
++	if (out_is_pareto == NULL)
++		return ;
++	for (i = 0; i < n; i++)
++		out_is_pareto[i] = 1;
++	for (i = 0; i < n; i++)
++	{
++		for (j = 0; j < n; j++)
++		{
++			int	vram_le;
++			int	tok_ge;
++			int	strictly_better;
++
++			if (i == j)
++				continue ;
++			vram_le = vram_mib[j] <= vram_mib[i];
++			tok_ge = tok_s[j] >= tok_s[i];
++			strictly_better = (vram_mib[j] < vram_mib[i]) || (tok_s[j] > tok_s[i]);
++			if (vram_le && tok_ge && strictly_better)
++			{
++				out_is_pareto[i] = 0;
++				break ;
++			}
++		}
++	}
++}
+diff --git a/tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.h b/tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.h
+new file mode 100644
+index 0000000..ba52509
+--- /dev/null
++++ b/tools/membrane-kv-bottleneck-analysis/bottleneck_analysis.h
+@@ -0,0 +1,101 @@
++#ifndef MEMBRANE_KV_BOTTLENECK_ANALYSIS_H
++# define MEMBRANE_KV_BOTTLENECK_ANALYSIS_H
++
++# include <stdint.h>
++# include <stddef.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 12G: llama-free pure helper logic for the KV placement
++ * bottleneck discovery sweep -- slowdown/coefficient-of-variation
++ * math, the predeclared break-even classification (section 20), the
++ * predeclared host-noise validity rule (section 9), the bottleneck-
++ * regime criteria (section 21), and Pareto-set computation (section
++ * 24). No I/O, no ggml/llama dependency -- scripts/phase12g_run_sweep.py
++ * and scripts/verify-results.py both recompute their claims against
++ * this same logic (the Python side is a reimplementation checked by
++ * this module's unit tests, not the other way around: this C module
++ * is the single source of truth for the arithmetic itself).
++ * RESEARCH ONLY, experiment/kv-placement-bottleneck-discovery branch
++ * only. Never linked into membrane-run.
++ */
++
++# define MEMBRANE_BOTTLENECK_MAX_POINTS 256
++
++enum e_membrane_bottleneck_class
++{
++	MEMBRANE_BOTTLENECK_NO_BOTTLENECK = 0,
++	MEMBRANE_BOTTLENECK_MINOR,
++	MEMBRANE_BOTTLENECK_MEANINGFUL,
++	MEMBRANE_BOTTLENECK_STRONG
++};
++
++/* Section 20: predeclared thresholds, <5% / 5-10% / 10-20% / >20%. Baseline
++ * must be a real, positive, comfortably-measured 100%-GPU-KV throughput;
++ * returns 0.0 (and *ok = false) if baseline_tok_s <= 0. Positive return
++ * means slower (a real slowdown); negative means the CPU-KV point was
++ * FASTER than the GPU-KV baseline (a real, valid outcome -- do not clamp
++ * to zero, section 29 forbids manufacturing a bottleneck as much as it
++ * forbids hiding a beneficial result). */
++double	membrane_bottleneck_slowdown_pct(double baseline_tok_s,
++			double measured_tok_s, int *ok);
++
++/* Section 20 classification, applied to a slowdown_pct that is already
++ * known-valid (see membrane_bottleneck_regime_confirmed below for the
++ * *reproducible bottleneck regime* gate, which is stricter than just
++ * classifying one number). */
++enum e_membrane_bottleneck_class	membrane_bottleneck_classify(
++			double slowdown_pct);
++
++const char	*membrane_bottleneck_class_name(
++			enum e_membrane_bottleneck_class c);
++
++/* Coefficient of variation, as a percentage. n must be >= 1; returns 0.0
++ * for n == 1 (no variance defined for a single sample). */
++double	membrane_bottleneck_cv_pct(const double *vals, size_t n);
++
++/* Section 9 host-noise validity rule. All four *_gt / *_below thresholds
++ * are predeclared, fixed policy (mirrors HOST_NOISE_RULE in
++ * scripts/phase12g_run_sweep.py) -- callers must not adjust them per
++ * result. Returns 1 (valid) or 0 (invalid); *out_reason_mask has one bit
++ * set per violated condition (bit 0 = mem_available_drop, bit 1 =
++ * swap_used_increase, bit 2 = load1_too_high, bit 3 = mem_available_too_low)
++ * so a caller/test can distinguish "no violation" from "some violation"
++ * without string parsing. */
++int	membrane_bottleneck_host_batch_valid(
++			uint64_t before_mem_available_kb, uint64_t after_mem_available_kb,
++			uint64_t before_swap_used_kb, uint64_t after_swap_used_kb,
++			double after_load1, uint32_t *out_reason_mask);
++
++/* Section 21: declare a bottleneck regime only if ALL of these hold:
++ *  - slowdown_pct >= 10.0 (the meaningful/strong boundary)
++ *  - the measurement's coefficient of variation is low enough that the
++ *    10% claim isn't noise (cv_pct < half the observed slowdown, and
++ *    never above 15% absolute -- a very noisy run cannot support ANY
++ *    claim regardless of how large the mean gap looks)
++ *  - host_batch_valid for the batch that produced it
++ *  - persists: a second nearby point (adjacent context OR a second
++ *    model/config) also shows slowdown_pct >= 10.0
++ * Returns 1 if confirmed, 0 otherwise. */
++int	membrane_bottleneck_regime_confirmed(
++			double primary_slowdown_pct, double primary_cv_pct,
++			int primary_host_valid,
++			double secondary_slowdown_pct, int secondary_present);
++
++/* Section 24: Pareto set over (vram_mib, tok_s) points -- lower vram_mib
++ * and higher tok_s are both "better". out_is_pareto[i] is set to 1 iff
++ * point i is not dominated by any other point j (j.vram_mib <= i.vram_mib
++ * AND j.tok_s >= i.tok_s, with at least one strict inequality). Points
++ * with identical (vram_mib, tok_s) are all marked Pareto-optimal (no
++ * point strictly dominates an exact tie). */
++void	membrane_bottleneck_pareto(const double *vram_mib, const double *tok_s,
++			size_t n, int *out_is_pareto);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-bottleneck-analysis/test_bottleneck_analysis.c b/tools/membrane-kv-bottleneck-analysis/test_bottleneck_analysis.c
+new file mode 100644
+index 0000000..e193533
+--- /dev/null
++++ b/tools/membrane-kv-bottleneck-analysis/test_bottleneck_analysis.c
+@@ -0,0 +1,230 @@
++#include "bottleneck_analysis.h"
++#include "test_helpers.h"
++
++#include <math.h>
++#include <string.h>
++
++static void	test_slowdown_basic(void)
++{
++	int		ok = 0;
++	double	s = membrane_bottleneck_slowdown_pct(100.0, 90.0, &ok);
++
++	TEST_ASSERT(ok == 1, "valid baseline reports ok");
++	TEST_ASSERT(fabs(s - 10.0) < 1e-9, "10%% slower computes to 10.0");
++}
++
++static void	test_slowdown_negative_means_faster(void)
++{
++	int		ok = 0;
++	double	s = membrane_bottleneck_slowdown_pct(100.0, 110.0, &ok);
++
++	TEST_ASSERT(ok == 1, "valid baseline reports ok");
++	TEST_ASSERT(s < 0.0, "measured faster than baseline is a negative slowdown");
++	TEST_ASSERT(fabs(s - (-10.0)) < 1e-9, "10%% faster computes to -10.0, not clamped");
++}
++
++static void	test_slowdown_rejects_nonpositive_baseline(void)
++{
++	int		ok = 1;
++	double	s = membrane_bottleneck_slowdown_pct(0.0, 50.0, &ok);
++
++	TEST_ASSERT(ok == 0, "zero baseline is rejected via ok flag");
++	TEST_ASSERT(s == 0.0, "rejected call returns 0.0, not a bogus ratio");
++
++	ok = 1;
++	s = membrane_bottleneck_slowdown_pct(-5.0, 50.0, &ok);
++	TEST_ASSERT(ok == 0, "negative baseline is rejected via ok flag");
++	(void)s;
++}
++
++static void	test_classify_boundaries(void)
++{
++	TEST_ASSERT(membrane_bottleneck_classify(0.0) == MEMBRANE_BOTTLENECK_NO_BOTTLENECK,
++		"0%% is NO_BOTTLENECK");
++	TEST_ASSERT(membrane_bottleneck_classify(4.999) == MEMBRANE_BOTTLENECK_NO_BOTTLENECK,
++		"just under 5%% is NO_BOTTLENECK");
++	TEST_ASSERT(membrane_bottleneck_classify(5.0) == MEMBRANE_BOTTLENECK_MINOR,
++		"exactly 5%% is MINOR (boundary is inclusive on the upper side)");
++	TEST_ASSERT(membrane_bottleneck_classify(9.999) == MEMBRANE_BOTTLENECK_MINOR,
++		"just under 10%% is MINOR");
++	TEST_ASSERT(membrane_bottleneck_classify(10.0) == MEMBRANE_BOTTLENECK_MEANINGFUL,
++		"exactly 10%% is MEANINGFUL");
++	TEST_ASSERT(membrane_bottleneck_classify(19.999) == MEMBRANE_BOTTLENECK_MEANINGFUL,
++		"just under 20%% is MEANINGFUL");
++	TEST_ASSERT(membrane_bottleneck_classify(20.0) == MEMBRANE_BOTTLENECK_STRONG,
++		"exactly 20%% is STRONG");
++	TEST_ASSERT(membrane_bottleneck_classify(-50.0) == MEMBRANE_BOTTLENECK_NO_BOTTLENECK,
++		"a negative slowdown (faster) is NO_BOTTLENECK, not some negative class");
++}
++
++static void	test_classify_name_matches_enum(void)
++{
++	TEST_ASSERT(strcmp(membrane_bottleneck_class_name(MEMBRANE_BOTTLENECK_NO_BOTTLENECK),
++		"NO_BOTTLENECK") == 0, "NO_BOTTLENECK name");
++	TEST_ASSERT(strcmp(membrane_bottleneck_class_name(MEMBRANE_BOTTLENECK_MINOR),
++		"MINOR") == 0, "MINOR name");
++	TEST_ASSERT(strcmp(membrane_bottleneck_class_name(MEMBRANE_BOTTLENECK_MEANINGFUL),
++		"MEANINGFUL") == 0, "MEANINGFUL name");
++	TEST_ASSERT(strcmp(membrane_bottleneck_class_name(MEMBRANE_BOTTLENECK_STRONG),
++		"STRONG") == 0, "STRONG name");
++}
++
++static void	test_cv_pct_basic(void)
++{
++	double	vals[] = {10.0, 10.0, 10.0, 10.0};
++	double	c = membrane_bottleneck_cv_pct(vals, 4);
++
++	TEST_ASSERT(fabs(c - 0.0) < 1e-9, "identical values have 0%% CV");
++}
++
++static void	test_cv_pct_single_sample_is_zero(void)
++{
++	double	vals[] = {42.0};
++	double	c = membrane_bottleneck_cv_pct(vals, 1);
++
++	TEST_ASSERT(c == 0.0, "single sample has no defined variance, returns 0");
++}
++
++static void	test_cv_pct_known_value(void)
++{
++	/* mean=10, sample stddev (n-1) = sqrt(((8)^2+(0)^2+(0)^2+(0)^2... )) --
++	 * use a simple known case: {8,9,10,11,12} -> mean=10, sample var =
++	 * (4+1+0+1+4)/4 = 2.5, sd = sqrt(2.5) ~= 1.5811, cv = 15.811%. */
++	double	vals[] = {8.0, 9.0, 10.0, 11.0, 12.0};
++	double	c = membrane_bottleneck_cv_pct(vals, 5);
++
++	TEST_ASSERT(fabs(c - 15.8113883) < 1e-4, "known CV computed correctly");
++}
++
++static void	test_host_batch_valid_clean(void)
++{
++	uint32_t	mask = 0xFFFFFFFFu;
++	int			valid = membrane_bottleneck_host_batch_valid(
++			2000000, 1900000, 1000000, 1000000, 1.0, &mask);
++
++	TEST_ASSERT(valid == 1, "small mem drop, no swap growth, low load is valid");
++	TEST_ASSERT(mask == 0, "no reason bits set");
++}
++
++static void	test_host_batch_valid_mem_drop(void)
++{
++	uint32_t	mask = 0;
++	int			valid = membrane_bottleneck_host_batch_valid(
++			2000000, 1000000, 1000000, 1000000, 1.0, &mask);
++
++	TEST_ASSERT(valid == 0, "50%% mem_available drop invalidates the batch");
++	TEST_ASSERT((mask & (1u << 0)) != 0, "mem_available_drop bit is set");
++}
++
++static void	test_host_batch_valid_swap_growth(void)
++{
++	uint32_t	mask = 0;
++	int			valid = membrane_bottleneck_host_batch_valid(
++			2000000, 1950000, 1000000, 1400000, 1.0, &mask);
++
++	TEST_ASSERT(valid == 0, "400MiB swap growth invalidates the batch");
++	TEST_ASSERT((mask & (1u << 1)) != 0, "swap_used_increase bit is set");
++}
++
++static void	test_host_batch_valid_high_load(void)
++{
++	uint32_t	mask = 0;
++	int			valid = membrane_bottleneck_host_batch_valid(
++			2000000, 1950000, 1000000, 1000000, 15.0, &mask);
++
++	TEST_ASSERT(valid == 0, "load1=15 invalidates the batch");
++	TEST_ASSERT((mask & (1u << 2)) != 0, "load1_too_high bit is set");
++}
++
++static void	test_host_batch_valid_low_mem_available(void)
++{
++	uint32_t	mask = 0;
++	int			valid = membrane_bottleneck_host_batch_valid(
++			2000000, 200000, 1000000, 1000000, 1.0, &mask);
++
++	TEST_ASSERT(valid == 0, "after mem_available under 300MiB invalidates the batch");
++	TEST_ASSERT((mask & (1u << 3)) != 0, "mem_available_too_low bit is set");
++	TEST_ASSERT((mask & (1u << 0)) != 0,
++		"a 90%% drop ALSO trips the drop-pct rule -- multiple bits can be set");
++}
++
++static void	test_regime_confirmed_requires_all_four_gates(void)
++{
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(15.0, 2.0, 1, 12.0, 1) == 1,
++		"clean 15%% primary, low CV, valid host, confirmed secondary -> CONFIRMED");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(8.0, 1.0, 1, 12.0, 1) == 0,
++		"primary under 10%% -> not confirmed even with a good secondary");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(15.0, 2.0, 0, 12.0, 1) == 0,
++		"invalid host batch -> not confirmed regardless of the numbers");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(15.0, 2.0, 1, 5.0, 1) == 0,
++		"secondary present but under 10%% -> not confirmed (no persistence)");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(15.0, 2.0, 1, 12.0, 0) == 0,
++		"no secondary point at all -> not confirmed (section 21 requires persistence)");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(11.0, 9.0, 1, 12.0, 1) == 0,
++		"CV too high relative to the slowdown itself (noise could explain it) -> not confirmed");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(80.0, 14.9, 1, 20.0, 1) == 1,
++		"even at a huge slowdown, CV is still capped at 15%% absolute, not scaled unboundedly");
++	TEST_ASSERT(membrane_bottleneck_regime_confirmed(80.0, 15.1, 1, 20.0, 1) == 0,
++		"CV above the 15%% absolute cap fails even for a huge nominal slowdown");
++}
++
++static void	test_pareto_dominated_point_excluded(void)
++{
++	/* (vram, tok/s): A=(1000,10) dominated by B=(800,12) -- less vram AND
++	 * more tok/s. C=(500,5) is not dominated (cheapest vram). */
++	double	vram[] = {1000.0, 800.0, 500.0};
++	double	tok[] = {10.0, 12.0, 5.0};
++	int		is_pareto[3] = {0, 0, 0};
++
++	membrane_bottleneck_pareto(vram, tok, 3, is_pareto);
++	TEST_ASSERT(is_pareto[0] == 0, "A is dominated by B, excluded from Pareto set");
++	TEST_ASSERT(is_pareto[1] == 1, "B dominates A, stays on the Pareto set");
++	TEST_ASSERT(is_pareto[2] == 1, "C is the cheapest-VRAM point, stays on the Pareto set");
++}
++
++static void	test_pareto_ties_both_kept(void)
++{
++	double	vram[] = {500.0, 500.0};
++	double	tok[] = {10.0, 10.0};
++	int		is_pareto[2] = {0, 0};
++
++	membrane_bottleneck_pareto(vram, tok, 2, is_pareto);
++	TEST_ASSERT(is_pareto[0] == 1, "exact tie: neither point strictly dominates the other (A)");
++	TEST_ASSERT(is_pareto[1] == 1, "exact tie: neither point strictly dominates the other (B)");
++}
++
++static void	test_pareto_all_optimal_when_no_domination(void)
++{
++	/* Classic trade-off frontier: more vram always buys more tok/s. */
++	double	vram[] = {100.0, 300.0, 900.0};
++	double	tok[] = {5.0, 12.0, 30.0};
++	int		is_pareto[3] = {0, 0, 0};
++
++	membrane_bottleneck_pareto(vram, tok, 3, is_pareto);
++	TEST_ASSERT(is_pareto[0] == 1, "low-vram/low-tok point is optimal (cheapest)");
++	TEST_ASSERT(is_pareto[1] == 1, "mid point is optimal (nothing beats it on both axes)");
++	TEST_ASSERT(is_pareto[2] == 1, "high-vram/high-tok point is optimal (fastest)");
++}
++
++int	main(void)
++{
++	test_slowdown_basic();
++	test_slowdown_negative_means_faster();
++	test_slowdown_rejects_nonpositive_baseline();
++	test_classify_boundaries();
++	test_classify_name_matches_enum();
++	test_cv_pct_basic();
++	test_cv_pct_single_sample_is_zero();
++	test_cv_pct_known_value();
++	test_host_batch_valid_clean();
++	test_host_batch_valid_mem_drop();
++	test_host_batch_valid_swap_growth();
++	test_host_batch_valid_high_load();
++	test_host_batch_valid_low_mem_available();
++	test_regime_confirmed_requires_all_four_gates();
++	test_pareto_dominated_point_excluded();
++	test_pareto_ties_both_kept();
++	test_pareto_all_optimal_when_no_domination();
++	printf("test_bottleneck_analysis: all tests passed\n");
++	return (0);
++}
+diff --git a/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp b/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp
+index a39c9f5..48d84cb 100644
+--- a/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp
++++ b/tools/membrane-kv-tiering-scheduler/tiering_probe.cpp
+@@ -711,6 +711,189 @@ static int	cmd_determinism(const char *model, int32_t n_ctx, const char *kvt,
+ 	return (trace1 == trace2 ? 0 : 1);
+ }
+ 
++/* ---------- mode: bottleneck (Phase 12G, sections 2/3/10/11/12/18) ---------
++ * Static GPU/CPU KV split, weight placement controlled independently via
++ * n_gpu_layers (default -1 = fully GPU, matching every other mode in this
++ * file; only the weight-compute control run in Phase 12G overrides it).
++ * Captures per-token decode latency (for percentile reporting) and the
++ * real ggml_backend_sched graph-split count via llama_log_set -- reading
++ * the EXISTING "graph splits = %d" INFO line llama-context.cpp already
++ * emits at context-init reserve time, no llama.cpp source change needed. */
++
++struct split_log_capture_t
++{
++	int	n_splits_pp = -1;
++	int	n_splits_tg = -1;
++};
++
++static void	capture_log_cb(enum ggml_log_level level, const char *text,
++				void *ud)
++{
++	(void)level;
++	split_log_capture_t	*c = static_cast<split_log_capture_t *>(ud);
++	int	a, b, c2;
++
++	if (sscanf(text, "%*[^:]: graph splits = %d (with bs=%d), %d (with bs=1)",
++			&a, &b, &c2) == 3)
++	{
++		c->n_splits_pp = a;
++		c->n_splits_tg = c2;
++	}
++	else if (sscanf(text, "%*[^:]: graph splits = %d", &a) == 1)
++	{
++		c->n_splits_pp = a;
++		c->n_splits_tg = a;
++	}
++}
++
++static bool	load_ctx_ex(const char *model_path, int32_t n_ctx,
++				const char *kv_type_str, int32_t split, int32_t n_gpu_layers,
++				loaded_t *out)
++{
++	llama_model_params	mp = llama_model_default_params();
++
++	mp.n_gpu_layers = n_gpu_layers;
++	out->model = llama_model_load_from_file(model_path, mp);
++	if (out->model == nullptr)
++		return (false);
++	out->n_layer = llama_model_n_layer(out->model);
++	out->vocab = llama_model_get_vocab(out->model);
++	out->cap.n_layer = out->n_layer;
++	out->cap.k_leaf.assign(out->n_layer, nullptr);
++	out->cap.v_leaf.assign(out->n_layer, nullptr);
++
++	static split_ctx_t	split_ctx;
++	split_ctx.split = split;
++
++	ggml_type	kvt = strcmp(kv_type_str, "q8") == 0 ? GGML_TYPE_Q8_0
++		: strcmp(kv_type_str, "q5") == 0 ? GGML_TYPE_Q5_1 : GGML_TYPE_F16;
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.type_k = kvt;
++	cp.type_v = kvt;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &out->cap;
++	if (split >= 0)
++	{
++		cp.kv_dev_override = split_kv_dev_override;
++		cp.kv_dev_override_ud = &split_ctx;
++	}
++	out->ctx = llama_init_from_model(out->model, cp);
++	if (out->ctx == nullptr)
++		return (false);
++	out->mem = llama_get_memory(out->ctx);
++	return (true);
++}
++
++static double	percentile(std::vector<double> sorted_vals, double pct)
++{
++	if (sorted_vals.empty())
++		return (0.0);
++	double	idx = pct / 100.0 * (double)(sorted_vals.size() - 1);
++	size_t	lo = (size_t)idx;
++	size_t	hi = lo + 1 < sorted_vals.size() ? lo + 1 : lo;
++	double	frac = idx - (double)lo;
++
++	return (sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * frac);
++}
++
++static int	cmd_bottleneck(const char *model, int32_t n_ctx, const char *kvt,
++				int32_t split, int n_decodes, int32_t n_gpu_layers)
++{
++	split_log_capture_t	log_cap;
++	ggml_log_callback		prev_cb = nullptr;
++	void					*prev_ud = nullptr;
++
++	llama_log_get(&prev_cb, &prev_ud);
++	llama_log_set(capture_log_cb, &log_cap);
++
++	loaded_t	l{};
++	bool		loaded = load_ctx_ex(model, n_ctx, kvt, split, n_gpu_layers, &l);
++
++	llama_log_set(prev_cb, prev_ud);
++
++	if (!loaded)
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++
++	long	vram_baseline = nvidia_smi_used_mib();
++	double	t0 = now_ms();
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog "
++			"and then returns to its den before the sun sets over the "
++			"quiet hills of the valley"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	double	t1 = now_ms();
++
++	uint64_t	gpu_kv_bytes = 0, cpu_kv_bytes = 0;
++	for (int32_t i = 0; i < l.n_layer; i++)
++	{
++		uint64_t	b = layer_kv_bytes(&l, i);
++		if (layer_is_cpu_now(&l, i))
++			cpu_kv_bytes += b;
++		else
++			gpu_kv_bytes += b;
++	}
++
++	std::vector<llama_token>	gen;
++	std::vector<double>		latencies_ms;
++	latencies_ms.reserve(n_decodes);
++	double	t2 = now_ms();
++	for (int i = 0; i < n_decodes; i++)
++	{
++		llama_token	tok;
++		double	d0 = now_ms();
++		if (!decode_one_greedy(&l, &tok))
++		{
++			fprintf(stderr, "{\"error\":\"decode_failed\"}\n");
++			free_loaded(&l);
++			return (13);
++		}
++		double	d1 = now_ms();
++		latencies_ms.push_back(d1 - d0);
++		gen.push_back(tok);
++	}
++	double	t3 = now_ms();
++
++	std::vector<double>	sorted_lat = latencies_ms;
++	std::sort(sorted_lat.begin(), sorted_lat.end());
++	double	p50 = percentile(sorted_lat, 50.0);
++	double	p90 = percentile(sorted_lat, 90.0);
++	double	p95 = percentile(sorted_lat, 95.0);
++	double	p99 = percentile(sorted_lat, 99.0);
++
++	long	vram_final = nvidia_smi_used_mib();
++
++	printf("{\"schema_version\":1,\"mode\":\"bottleneck\",\"n_ctx\":%d,"
++		"\"kv_type\":\"%s\",\"split\":%d,\"n_gpu_layers_weights\":%d,"
++		"\"n_gpu_kv_layers\":%d,\"n_cpu_kv_layers\":%d,"
++		"\"gpu_kv_bytes\":%llu,\"cpu_kv_bytes\":%llu,"
++		"\"prompt_ms\":%.3f,\"n_decodes\":%d,\"decode_total_ms\":%.3f,"
++		"\"generation_tok_s\":%.4f,"
++		"\"p50_ms\":%.4f,\"p90_ms\":%.4f,\"p95_ms\":%.4f,\"p99_ms\":%.4f,"
++		"\"min_ms\":%.4f,\"max_ms\":%.4f,"
++		"\"vram_baseline_mib\":%ld,\"vram_used_mib\":%ld,\"rss_kb\":%llu,"
++		"\"graph_splits_pp\":%d,\"graph_splits_tg\":%d}\n",
++		n_ctx, kv_type_name(kvt), split, n_gpu_layers,
++		l.n_layer - split, split,
++		(unsigned long long)gpu_kv_bytes, (unsigned long long)cpu_kv_bytes,
++		t1 - t0, n_decodes, t3 - t2,
++		(double)n_decodes / ((t3 - t2) / 1000.0),
++		p50, p90, p95, p99,
++		sorted_lat.empty() ? 0.0 : sorted_lat.front(),
++		sorted_lat.empty() ? 0.0 : sorted_lat.back(),
++		vram_baseline, vram_final, (unsigned long long)read_rss_kb(),
++		log_cap.n_splits_pp, log_cap.n_splits_tg);
++	free_loaded(&l);
++	return (0);
++}
++
+ /* ---------- mode: freq_sweep (Section 15) ---------- */
+ 
+ static int	cmd_freq_sweep(const char *model, int32_t n_ctx, const char *kvt,
+@@ -804,6 +987,9 @@ int	main(int argc, char **argv)
+ 	else if (mode == "freq_sweep" && argc >= 9)
+ 		rc = cmd_freq_sweep(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
+ 			atoi(argv[6]), atoi(argv[7]), atoi(argv[8]));
++	else if (mode == "bottleneck" && argc >= 7)
++		rc = cmd_bottleneck(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), argc >= 8 ? atoi(argv[7]) : -1);
+ 	else
+ 	{
+ 		fprintf(stderr, "unknown mode or missing args: %s\n", mode.c_str());

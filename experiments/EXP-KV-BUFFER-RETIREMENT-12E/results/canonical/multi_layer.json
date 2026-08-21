@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 19,
+  "method": "membrane-kv-runtime-relocate-probe 'multi_retire' mode (new this phase): relocate a deterministic, predeclared group of N layers CPU->GPU (llama_synchronize before each call), invalidate_graph_cache ONCE after the whole group, decode+generate; then relocate the SAME group back GPU->CPU (real free attempted for each, since every layer's SECOND move now targets its own dedicated backing), invalidate_graph_cache ONCE, decode+generate. No adaptive scheduling -- the group membership is a fixed, predeclared list.",
+  "results": [
+    {
+      "n_layers": 1,
+      "promote_ok": true,
+      "decode_after_promote_ok": true,
+      "retire_ok": true,
+      "decode_after_retire_ok": true,
+      "vram_reclaimed_mib": 6
+    },
+    {
+      "n_layers": 2,
+      "promote_ok": true,
+      "decode_after_promote_ok": true,
+      "retire_ok": true,
+      "decode_after_retire_ok": true,
+      "vram_reclaimed_mib": 9
+    },
+    {
+      "n_layers": 4,
+      "promote_ok": true,
+      "decode_after_promote_ok": true,
+      "retire_ok": true,
+      "decode_after_retire_ok": true,
+      "vram_reclaimed_mib": 15
+    },
+    {
+      "n_layers": 8,
+      "promote_ok": true,
+      "decode_after_promote_ok": true,
+      "retire_ok": true,
+      "decode_after_retire_ok": true,
+      "vram_reclaimed_mib": 28
+    }
+  ],
+  "all_groups_passed": true,
+  "conclusion": "A SINGLE llama_invalidate_graph_cache() call correctly covers an entire batch of relocations, not just one layer at a time -- VRAM reclamation scales cleanly with group size (6/9/15/28 MiB for 1/2/4/8 layers).",
+  "raw_data": "raw_multi_layer_retirement.jsonl"
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "phase": "12G",
+  "title": "KV Placement Bottleneck Regime Discovery",
+  "artifacts": [
+    "_run_manifest_internal.json",
+    "benchmark_validity.json",
+    "bottleneck_map.json",
+    "break_even.json",
+    "context_scaling.json",
+    "dynamic_reentry.json",
+    "graph_splits.json",
+    "host_baseline.json",
+    "larger_model.json",
+    "model_scaling.json",
+    "pareto.json",
+    "q5_comparison.json",
+    "reproducibility.json",
+    "static_sweep_135m.json",
+    "static_sweep_360m.json",
+    "summary.json",
+    "transfer_activity.json",
+    "utilization.json",
+    "weight_compute_control.json"
+  ],
+  "raw_evidence_files": [
+    "raw_larger_model.jsonl",
+    "raw_phase_a.jsonl",
+    "raw_phase_b.jsonl",
+    "raw_q5.jsonl",
+    "raw_reproducibility.jsonl",
+    "raw_weight_control.jsonl"
+  ],
+  "no_llama_cpp_source_changes": true,
+  "note": "Section 5/34: no llama.cpp source files were modified by this phase -- only tools/membrane-kv-tiering-scheduler/tiering_probe.cpp (a new 'bottleneck' mode) and a new pure llama-free helper module (tools/membrane-kv-bottleneck-analysis/) were added."
+}

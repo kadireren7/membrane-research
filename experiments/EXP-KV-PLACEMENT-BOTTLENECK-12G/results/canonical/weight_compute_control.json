@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "label": "CONTROL_ONLY_not_part_of_primary_sweep",
+  "purpose": "Separate KV-placement bottleneck from weight-transfer/compute bottleneck (section 18). KV is 100% GPU-resident in both rows here; only weight placement differs.",
+  "model": "360M",
+  "n_ctx": 8192,
+  "full_gpu_weights": {
+    "model": "360M",
+    "n_ctx": 8192,
+    "kv_type": "q8",
+    "gpu_kv_pct": 100,
+    "split": 0,
+    "n_layer": 32,
+    "n_gpu_layers_weights": -1,
+    "n_repeats_requested": 5,
+    "n_repeats_ok": 5,
+    "generation_tok_s": {
+      "n": 5,
+      "mean": 20.77726,
+      "median": 20.7605,
+      "min": 20.537,
+      "max": 21.0707,
+      "stddev": 0.24667205557176552,
+      "cv_pct": 1.187221296608723
+    },
+    "p95_ms": {
+      "n": 5,
+      "mean": 50.99098,
+      "median": 51.1988,
+      "min": 48.7496,
+      "max": 53.3477,
+      "stddev": 2.0274222912358444,
+      "cv_pct": 3.976041039485502
+    },
+    "vram_used_mib": 966,
+    "graph_splits_tg": 2,
+    "gpu_kv_bytes": 178257920,
+    "cpu_kv_bytes": 0
+  },
+  "partial_gpu_weights_n_gpu_layers": 16,
+  "partial_gpu_weights": {
+    "model": "360M",
+    "n_ctx": 8192,
+    "kv_type": "q8",
+    "gpu_kv_pct": 100,
+    "split": 0,
+    "n_layer": 32,
+    "n_gpu_layers_weights": 16,
+    "n_repeats_requested": 5,
+    "n_repeats_ok": 5,
+    "generation_tok_s": {
+      "n": 5,
+      "mean": 23.5934,
+      "median": 23.7295,
+      "min": 22.9278,
+      "max": 24.0744,
+      "stddev": 0.42645138644398844,
+      "cv_pct": 1.8075028882822672
+    },
+    "p95_ms": {
+      "n": 5,
+      "mean": 45.17402,
+      "median": 45.0228,
+      "min": 44.1379,
+      "max": 46.5519,
+      "stddev": 0.881555300023771,
+      "cv_pct": 1.951465244899106
+    },
+    "vram_used_mib": 565,
+    "graph_splits_tg": 2,
+    "gpu_kv_bytes": 83558400,
+    "cpu_kv_bytes": 94699520
+  },
+  "weight_offload_slowdown_pct": -13.55395273486495
+}

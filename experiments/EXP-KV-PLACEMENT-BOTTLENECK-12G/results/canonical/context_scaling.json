@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "note": "Phase B confirmed points (7 repeats) grouped by model/ratio across context, for the context-scaling question (section 15).",
+  "points": [
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "kv_type": "q8",
+      "gpu_kv_pct": 75,
+      "split": 8,
+      "n_layer": 32,
+      "n_gpu_layers_weights": -1,
+      "n_repeats_requested": 7,
+      "n_repeats_ok": 7,
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 21.594728571428572,
+        "median": 21.6041,
+        "min": 21.4847,
+        "max": 21.7042,
+        "stddev": 0.07269763210920761,
+        "cv_pct": 0.3366452690930877
+      },
+      "p95_ms": {
+        "n": 7,
+        "mean": 47.86141428571429,
+        "median": 47.7533,
+        "min": 47.3517,
+        "max": 48.5037,
+        "stddev": 0.40337207566782834,
+        "cv_pct": 0.842791801470495
+      },
+      "vram_used_mib": 1306,
+      "graph_splits_tg": 18,
+      "gpu_kv_bytes": 534773760,
+      "cpu_kv_bytes": 178257920,
+      "slowdown_pct_vs_100gpu": -2.0930124182701904
+    },
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "kv_type": "q8",
+      "gpu_kv_pct": 100,
+      "split": 0,
+      "n_layer": 32,
+      "n_gpu_layers_weights": -1,
+      "n_repeats_requested": 7,
+      "n_repeats_ok": 7,
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 21.152014285714287,
+        "median": 21.1564,
+        "min": 20.9264,
+        "max": 21.266,
+        "stddev": 0.11524209920238015,
+        "cv_pct": 0.5448280132838825
+      },
+      "p95_ms": {
+        "n": 7,
+        "mean": 48.770114285714286,
+        "median": 48.7618,
+        "min": 48.3886,
+        "max": 49.3308,
+        "stddev": 0.3167298345518446,
+        "cv_pct": 0.6494342676671171
+      },
+      "vram_used_mib": 1476,
+      "graph_splits_tg": 2,
+      "gpu_kv_bytes": 713031680,
+      "cpu_kv_bytes": 0,
+      "slowdown_pct_vs_100gpu": 0.0
+    }
+  ]
+}

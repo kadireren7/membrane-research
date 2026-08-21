@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 17,
+  "note": "Reuses the exact real hardware boundary established in Phase 12B (results/phase12/kv-device-override/pressure_test.json): SmolLM2-360M, ctx=200000, GTX 1650. At this context, full-GPU KV allocation genuinely FAILS (real, hard allocation error) while a 16/16 CPU/GPU KV split SUCCEEDS, with weights unchanged (mp.n_gpu_layers=-1, all 32 weight layers Vulkan1-resident in both cases). Phase 12C adds: does a manual promotion of a CPU-KV group work in this exact constrained regime, without destabilizing the host?",
+  "baseline_config": {
+    "model": "SmolLM2-360M-Instruct-f16.gguf",
+    "n_ctx": 200000,
+    "kv_type": "Q8_0",
+    "split": 16,
+    "n_cpu_kv_layers": 16,
+    "n_gpu_kv_layers": 16,
+    "vram_used_mib_before_promotion": 3107,
+    "vram_total_mib": 4096,
+    "single_layer_kv_bytes": 136130560
+  },
+  "promotion_attempt": {
+    "layer": 12,
+    "ok": true,
+    "vram_before_mib": 3107,
+    "vram_during_mib": 3237,
+    "vram_after_scratch_free_mib": 3237,
+    "vram_delta_during_mib": 130,
+    "roundtrip_byte_equal": true,
+    "poison_had_no_effect_on_output": true,
+    "process_crashed_or_destabilized_host": false,
+    "external_vram_after_process_exit_mib": 2
+  },
+  "answer": "Yes: a manual promotion of a CPU-KV group can be temporarily executed in this exact constrained regime (ctx=200000, where full-GPU KV hard-fails) without destabilizing the host -- byte-correct, weights remained GPU-resident throughout, and process/host were stable. This is the SAME classification-B copy-only mechanism as everywhere else in this phase, now confirmed to also work at the real memory-pressure boundary, not just at comfortable low-ctx configs.",
+  "raw_data": [
+    "raw_pressure_info_360m_ctx200000_split16.json",
+    "raw_pressure_promote_360m_layer12.json"
+  ]
+}

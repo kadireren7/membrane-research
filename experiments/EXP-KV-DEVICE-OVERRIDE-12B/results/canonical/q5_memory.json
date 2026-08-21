@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 13: Q5_1 compatibility, SmolLM2-135M ctx=16384, weights full-GPU throughout. Raw data: raw_q5_vram_16384.jsonl.",
+  "results": {
+    "full_gpu_kv_mib": 496,
+    "half_cpu_kv_mib": 429,
+    "kv_only_saving": 67,
+    "layer_counts": {"full_gpu": {"cpu": 0, "gpu": 30}, "half_cpu": {"cpu": 15, "gpu": 15}}
+  },
+  "comparison_to_q8_same_point": {"q8_full": 553, "q8_half": 457, "q8_saving": 96, "q5_full": 496, "q5_half": 429, "q5_saving": 67},
+  "orthogonality_confirmed": true,
+  "orthogonality_reasoning": "Q5 KV placement works exactly like Q8 KV placement (clean split, correct layer counts, no fallback) -- precision (Q8_0 vs Q5_1) and placement (CPU vs GPU) are independent, composable choices, exactly as the patch design intends (kv_dev_override and the existing kv_type_override are two completely separate, non-interacting callbacks). No adaptive logic was added -- both precision and placement remain fixed, deterministic, caller-chosen values in this phase's research tool.",
+  "absolute_saving_smaller_for_q5_than_q8": "67 MiB (Q5) vs 96 MiB (Q8) at the same split/ctx -- expected, since Q5 KV bytes per layer are already smaller than Q8's, so the SAME 15 layers moved to CPU carry proportionally fewer bytes to save"
+}

@@ -104,7 +104,30 @@ preserves Phase 12A: a real, working GPU↔host KV copy mechanism was
 proven, but true KV-only placement (independent of weight placement)
 was proven *not* achievable with the public API available at the time
 (`TIERING_REQUIRES_UPSTREAM_CHANGE`) — this finding directly motivated
-the later Phase 12B device-override patch (not yet migrated here).
+the six-phase KV residency chain that follows it.
+
+That chain — [`EXP-KV-DEVICE-OVERRIDE-12B`](experiments/EXP-KV-DEVICE-OVERRIDE-12B/README.md)
+through [`EXP-KV-PLACEMENT-BOTTLENECK-12G`](experiments/EXP-KV-PLACEMENT-BOTTLENECK-12G/README.md)
+(12B → 12C → 12D → 12E → 12F → 12G, each branch a strict superset of
+its predecessor, migrated with one incremental `git diff`-format patch
+per phase rather than six overlapping full-tree patches) — took KV
+device placement from "not independently controllable" (12A) through a
+minimal viable device-override patch (12B, `KV_DEVICE_OVERRIDE_VIABLE`),
+live copy (12C, static rebind only), true runtime relocation (12D, real
+release-crash disclosed), safe buffer retirement (12E, root-caused and
+fixed), a deterministic dynamic scheduler (12F, correct but no measured
+throughput win), to a systematic bottleneck sweep (12G) that found KV
+placement's real, tested-regime value is VRAM *capacity*, not speed.
+Phases 12B and 12G are the direct research inputs to
+[`kadireren7/membrane` PR #21](https://github.com/kadireren7/membrane/pull/21)
+("feat: add static KV residency planner (--kv-placement)"), which ships
+only Phase 12B's minimal device-override capability as a **static,
+pre-context-only** placement decision — the live-relocation, graph-
+invalidation/retirement, and dynamic-scheduler mechanisms built in
+12C–12F remain validated, safe, **research-only** primitives, verified
+absent from product `main` by direct `git grep`. See
+[`experiments/README.md`](experiments/README.md)'s "Phase 12
+progression" table for the short version.
 
 ## How canonical results work
 

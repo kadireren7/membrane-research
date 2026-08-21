@@ -1,0 +1,188 @@
+{
+  "experiment_id": "EXP-KV-DEVICE-OVERRIDE-12B",
+  "phase": "12B",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/kv-device-override",
+  "source_head_sha": "a1ebd9e285bd763cfb448c8d8202536802783bb9",
+  "parent_experiment": null,
+  "parent_head_sha": null,
+  "base_sha": "d6e6189d0417858bfcf3d51c766eaa4be5fe46e1",
+  "date": "2026-08-16",
+  "purpose": "Determine whether llama.cpp's KV cache can be placed on a different backend device than a layer's own model weights, via a minimal, additive llama.cpp patch (kv_dev_override), closing the coupling gap Phase 12A identified (12A precedes this chain and is not an ancestor of it).",
+  "literal_verdict": "KV_DEVICE_OVERRIDE_VIABLE",
+  "verdict_summary": "A minimal (68 insertions/7 deletions, 6 files) additive llama.cpp patch adding a kv_dev_override callback makes KV cache device placement independently selectable from weight placement. Default behavior is provably byte-identical when unset (verified null/always-null/always-default-callback equivalence). Per-layer placement was cross-validated three independent ways with zero mismatches. Real, KV-attributable external VRAM reduction was measured (12-96 MiB depending on context) and a previously-unrunnable configuration (ctx=200000 on GTX 1650) became runnable with zero weight movement. Correctness (token-identical generation across placement ratios) and orthogonality to KV precision (Q8_0/Q5_1) were both confirmed.",
+  "verdict_source": "results/phase12/kv-device-override/summary.json:decision_gate / decision_gate_rationale (literal source fields, not synthesized)",
+  "productized": true,
+  "product_pr": 21,
+  "product_commit": "8287e8c14f1b5af2e9e17fa95e85663e94697d85",
+  "productization_note": "The llama.cpp-side patch itself (patches/llama.cpp-membrane-kv-device-override.patch) is byte-for-byte identical between this research branch and product main (verified: diff exit 0) -- the kv_dev_override callback shipped in PR #21 unchanged. The research-side policy code (tools/membrane-kv-device-override/split_policy.c, a minimal fixed-split decider) is NOT byte-identical to the product's planner (tools/membrane-run/kv_residency_policy.c, a full VRAM-budget-based per-layer planner) -- the product planner is a materially more sophisticated, independently-written module that consumes the same kv_dev_override capability this phase proved viable. Do not treat the two C policy files as the same code.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "NVIDIA GTX 1650 (4096 MiB VRAM), Vulkan backend",
+  "models": [
+    "SmolLM2-135M-Instruct",
+    "SmolLM2-360M-Instruct"
+  ],
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/patches/phase12b-kv-device-override.patch",
+      "source_path": "(derived) git diff d6e6189d0417858bfcf3d51c766eaa4be5fe46e1..a1ebd9e285bd763cfb448c8d8202536802783bb9 -- . ':(exclude)results/phase12/kv-device-override/*'",
+      "source_sha256": "8ae6571bd687249dcdad1c9d75195082655ed4fe126e25cd8aaf7e0c3ebf3f1f",
+      "migrated_sha256": "8ae6571bd687249dcdad1c9d75195082655ed4fe126e25cd8aaf7e0c3ebf3f1f",
+      "size_bytes": 44731,
+      "category": "B_experiment_implementation"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/correctness.json",
+      "source_path": "results/phase12/kv-device-override/correctness.json",
+      "source_sha256": "5f34e6979aa82975873fb94ef26078c786d42ae16d4c60a4359cf030c4eb58c2",
+      "migrated_sha256": "5f34e6979aa82975873fb94ef26078c786d42ae16d4c60a4359cf030c4eb58c2",
+      "size_bytes": 2499,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/default_regression.json",
+      "source_path": "results/phase12/kv-device-override/default_regression.json",
+      "source_sha256": "07d269adbb48053cb75a28e72510d0045d57ca288a1a50508ef67d8b94a724fb",
+      "migrated_sha256": "07d269adbb48053cb75a28e72510d0045d57ca288a1a50508ef67d8b94a724fb",
+      "size_bytes": 2906,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/graph_behavior.json",
+      "source_path": "results/phase12/kv-device-override/graph_behavior.json",
+      "source_sha256": "13e72925e66122cda3d200248aee05d5e73de6dbab3b70a1ddfff30b2c79d823",
+      "migrated_sha256": "13e72925e66122cda3d200248aee05d5e73de6dbab3b70a1ddfff30b2c79d823",
+      "size_bytes": 3971,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/maintenance.json",
+      "source_path": "results/phase12/kv-device-override/maintenance.json",
+      "source_sha256": "e1d73508f0c6971a9b1af65015adee54bb004e27f81bc3b6190861445d3c82ed",
+      "migrated_sha256": "e1d73508f0c6971a9b1af65015adee54bb004e27f81bc3b6190861445d3c82ed",
+      "size_bytes": 3860,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/manifest.json",
+      "source_path": "results/phase12/kv-device-override/manifest.json",
+      "source_sha256": "f2541075348a176d76c8525b21cfd3ca14e9554effef8381f1a1e6d1e5d2d357",
+      "migrated_sha256": "f2541075348a176d76c8525b21cfd3ca14e9554effef8381f1a1e6d1e5d2d357",
+      "size_bytes": 1883,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/patch_scope.json",
+      "source_path": "results/phase12/kv-device-override/patch_scope.json",
+      "source_sha256": "21aafbb366d6da0ba39afe68efd20fdf0b84cbd54b2af011a87f52fdd63146b7",
+      "migrated_sha256": "21aafbb366d6da0ba39afe68efd20fdf0b84cbd54b2af011a87f52fdd63146b7",
+      "size_bytes": 4792,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/performance.json",
+      "source_path": "results/phase12/kv-device-override/performance.json",
+      "source_sha256": "414007f698278419cd6c9df6fb5fcc39f6fec74c3d21584052f19d085a948464",
+      "migrated_sha256": "414007f698278419cd6c9df6fb5fcc39f6fec74c3d21584052f19d085a948464",
+      "size_bytes": 2529,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/placement_maps.json",
+      "source_path": "results/phase12/kv-device-override/placement_maps.json",
+      "source_sha256": "2bb4b266af1fd301ce6a5218a91d084bb6ef524caa952e49519272fda453b6f7",
+      "migrated_sha256": "2bb4b266af1fd301ce6a5218a91d084bb6ef524caa952e49519272fda453b6f7",
+      "size_bytes": 2882,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/pressure_test.json",
+      "source_path": "results/phase12/kv-device-override/pressure_test.json",
+      "source_sha256": "6c8ba9f73f3e1addfb9b0e2d9e744d59dba2f12b9db2649d44e825a63a068ea2",
+      "migrated_sha256": "6c8ba9f73f3e1addfb9b0e2d9e744d59dba2f12b9db2649d44e825a63a068ea2",
+      "size_bytes": 2031,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/q5_memory.json",
+      "source_path": "results/phase12/kv-device-override/q5_memory.json",
+      "source_sha256": "ed1c34a4c6fa24bbd0fc1967a05e68f006e59a505e20271a43c8eb0d5df3a560",
+      "migrated_sha256": "ed1c34a4c6fa24bbd0fc1967a05e68f006e59a505e20271a43c8eb0d5df3a560",
+      "size_bytes": 1292,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/q8_memory.json",
+      "source_path": "results/phase12/kv-device-override/q8_memory.json",
+      "source_sha256": "baf8cd2070f38e16d0ca4aa3408a669a1a608e77eec3ecf428d74c498bb9ee54",
+      "migrated_sha256": "baf8cd2070f38e16d0ca4aa3408a669a1a608e77eec3ecf428d74c498bb9ee54",
+      "size_bytes": 2489,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_context_matrix_135m.jsonl",
+      "source_path": "results/phase12/kv-device-override/raw_context_matrix_135m.jsonl",
+      "source_sha256": "8b89dadec05d75287223b666f36f6f31e5d20243f9ab02b1512b87d5369b0f2a",
+      "migrated_sha256": "8b89dadec05d75287223b666f36f6f31e5d20243f9ab02b1512b87d5369b0f2a",
+      "size_bytes": 31507,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_perf_curve_vram_split8.json",
+      "source_path": "results/phase12/kv-device-override/raw_perf_curve_vram_split8.json",
+      "source_sha256": "b394f8ce7d9cf63de02de8abd22e95e2ec602062d0ba4063f1c2628d5e4a967c",
+      "migrated_sha256": "b394f8ce7d9cf63de02de8abd22e95e2ec602062d0ba4063f1c2628d5e4a967c",
+      "size_bytes": 5227,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_performance_curve.json",
+      "source_path": "results/phase12/kv-device-override/raw_performance_curve.json",
+      "source_sha256": "c05631263fd24db6df2368d0aa0173e4f94697a96476297343c5a849b45a4b5b",
+      "migrated_sha256": "c05631263fd24db6df2368d0aa0173e4f94697a96476297343c5a849b45a4b5b",
+      "size_bytes": 2401,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_pressure_test.jsonl",
+      "source_path": "results/phase12/kv-device-override/raw_pressure_test.jsonl",
+      "source_sha256": "d1c5600101d5e2d5062a7caf466e7b8d263bbe7acba1474454bd82480894a2af",
+      "migrated_sha256": "d1c5600101d5e2d5062a7caf466e7b8d263bbe7acba1474454bd82480894a2af",
+      "size_bytes": 624,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_q5_vram_16384.jsonl",
+      "source_path": "results/phase12/kv-device-override/raw_q5_vram_16384.jsonl",
+      "source_sha256": "8603af54c29b40b6513b05629de61d8807d20c13c075740762b39881f7201538",
+      "migrated_sha256": "8603af54c29b40b6513b05629de61d8807d20c13c075740762b39881f7201538",
+      "size_bytes": 6904,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_q8_vram_16384.jsonl",
+      "source_path": "results/phase12/kv-device-override/raw_q8_vram_16384.jsonl",
+      "source_sha256": "91079e2cc57bc0731f7aedfd154772814ebfcb1ac59931182e605429a0960939",
+      "migrated_sha256": "91079e2cc57bc0731f7aedfd154772814ebfcb1ac59931182e605429a0960939",
+      "size_bytes": 5837,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/raw_second_model_360m.jsonl",
+      "source_path": "results/phase12/kv-device-override/raw_second_model_360m.jsonl",
+      "source_sha256": "8fb25a28e38db0d854c51d8dc3015a0928e47d8054bbdac1c26e27537e9bc60f",
+      "migrated_sha256": "8fb25a28e38db0d854c51d8dc3015a0928e47d8054bbdac1c26e27537e9bc60f",
+      "size_bytes": 7282,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-KV-DEVICE-OVERRIDE-12B/results/canonical/summary.json",
+      "source_path": "results/phase12/kv-device-override/summary.json",
+      "source_sha256": "25d4fe825ae7aa8ccfb95a9863c28aa6f3a54439534456c4718e7e629b223598",
+      "migrated_sha256": "25d4fe825ae7aa8ccfb95a9863c28aa6f3a54439534456c4718e7e629b223598",
+      "size_bytes": 8485,
+      "category": "A_essential_evidence"
+    }
+  ],
+  "follow_up": "This phase's own next_step_recommendation named exactly what Phase 12C built: a promotion/prefetch prototype combining Phase 12A's proven copy mechanism with this phase's kv_dev_override to explore genuinely dynamic (not just load-time-static) placement."
+}

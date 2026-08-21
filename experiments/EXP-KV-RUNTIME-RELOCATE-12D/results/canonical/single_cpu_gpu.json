@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": "3A",
+  "method": "membrane-kv-runtime-relocate-probe 'relocate' mode with poison: real llama_kv_cache_relocate_layer() call (retain_old_backing_for_research defaulted to false, i.e. real release attempted), SmolLM2-135M, ctx=2048, Q8_0, split=8, layer 4 (initially CPU-resident).",
+  "ok": true,
+  "pointer_changed": true,
+  "device_matches_target": true,
+  "new_device": "Vulkan1",
+  "k_bytes": 417792,
+  "v_bytes": 417792,
+  "relocate_ms": 0.5076,
+  "poison_ran": true,
+  "poison_had_no_effect_on_output": true,
+  "generated_control": [
+    338,
+    6285,
+    1701,
+    260,
+    16438,
+    314,
+    260,
+    2365
+  ],
+  "generated_poisoned": [
+    338,
+    6285,
+    1701,
+    260,
+    16438,
+    314,
+    260,
+    2365
+  ],
+  "verdict": "live rebind confirmed (classification A) -- decode reads the new GPU tensor, poisoning the old CPU-shared-bulk tensor (still valid/unfreed on a layer's first move) has no effect",
+  "raw_data": "raw_relocate_135m_layer4_cpu_to_gpu.json"
+}

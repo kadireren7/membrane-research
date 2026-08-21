@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 4,
+  "note": "Source-only investigation (no additional live experiment needed -- the root cause was fully explained one level higher, see scheduler_lifetime.json).",
+  "views_derived_from_layers_il_k_v": {
+    "get_k_get_v": "Build a FRESH ggml_view_4d over the CURRENT layers[ikv].k/.v every time they are called (llama-kv-cache.cpp get_k ~L1285, get_v ~L1450), using the caller-supplied temporary ggml_context (ctx0, owned by whatever code is building THIS graph).",
+    "cpy_k_cpy_v": "Build a ggml_set_rows() result (an in-place-style write into the CURRENT layers[ikv].k/.v) every time they are called (llama-kv-cache.cpp cpy_k ~L1500, cpy_v ~L1517), also in the caller's ctx0.",
+    "creation_point": "inside llm_graph_context::build_attn (llama-graph.cpp), called once per layer during graph construction.",
+    "lifetime": "Tied to ctx0's lifetime -- ctx0 is a transient, per-graph-build ggml_context. Once graph construction for a given llama_decode() call completes, these view objects are only referenced by the resulting ggml_cgraph's node/leaf arrays.",
+    "does_the_view_survive_beyond_one_decode": "Only if the OWNING ggml_cgraph itself survives -- and it does, when llama_context's graph-reuse optimization (res->can_reuse(gparams), llama-context.cpp:1336) decides to skip rebuilding entirely and re-execute the PREVIOUS decode's graph as-is. In that case the view tensors from the prior graph build (including views over what was, at that time, the correct layers[ikv].k/.v) are executed again UNCHANGED -- this is the actual mechanism, traced in full in scheduler_lifetime.json.",
+    "does_the_scheduler_store_the_view": "The scheduler (ggml_backend_sched) does copy leaf/node pointers from the graph it is given into its own persistent sched->graph struct (ggml-backend.cpp) every time ggml_backend_sched_split_graph runs -- but this only matters when a REBUILD happens; on a REUSE decision, ggml_backend_sched_split_graph is never called at all for that decode (see scheduler_lifetime.json), so the scheduler's own state is not the mechanism keeping the stale view alive -- llama_context's gf_res_prev (holding the entire llm_graph_result, including the ggml_cgraph and its input objects) is.",
+    "does_vulkan_attach_persistent_extra_metadata": "No -- see vulkan_extra_lifetime.json."
+  },
+  "does_freeing_the_base_buffer_invalidate_a_view_still_stored_elsewhere": "Yes, definitively -- this IS the bug. When llama_context reuses gf_res_prev's cached ggml_cgraph (containing views built from the layer's PREVIOUS backing), and that previous backing's ggml_backend_buffer_t has since been freed by relocate_layer's cleanup, the reused view's tensor->buffer field now dangles."
+}

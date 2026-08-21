@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "generous_budget": {
+    "schema_version": 1,
+    "mode": "budget_test",
+    "reserve_mib": 32,
+    "margin_mib": 16,
+    "apply_ok": true,
+    "vram_before_mib": 369,
+    "vram_after_mib": 370,
+    "layer_still_cpu": false,
+    "trace": [
+      {
+        "decode_idx": 0,
+        "layer": 0,
+        "action": "PROMOTE",
+        "reason": "SCHEDULED_PROMOTION",
+        "bytes": 835584,
+        "before_device": "CPU",
+        "after_device": "GPU",
+        "duration_us": 471.5,
+        "result": "ok"
+      }
+    ]
+  },
+  "impossible_budget_fail_closed": {
+    "schema_version": 1,
+    "mode": "budget_test",
+    "reserve_mib": 999999999,
+    "margin_mib": 999999999,
+    "apply_ok": true,
+    "vram_before_mib": 369,
+    "vram_after_mib": 369,
+    "layer_still_cpu": true,
+    "trace": [
+      {
+        "decode_idx": 0,
+        "layer": 0,
+        "action": "PROMOTE",
+        "reason": "PROMOTION_SKIPPED_BUDGET",
+        "bytes": 835584,
+        "before_device": "CPU",
+        "after_device": "CPU",
+        "duration_us": 0,
+        "result": "skipped"
+      }
+    ]
+  },
+  "fail_closed_verified": true
+}

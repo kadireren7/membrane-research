@@ -1,0 +1,4 @@
+{"label": "full_gpu_kv_ctx200000", "split": 0, "ctx": 200000, "exit_code": 4, "result": "FAILS - failed to allocate compute buffers"}
+{"label": "half_cpu_kv_ctx200000", "split": 16, "ctx": 200000, "exit_code": 0, "result": "SUCCEEDS", "n_cpu_kv": 16, "n_gpu_kv": 16, "weight_layers_all_vulkan": 33}
+{"label": "aggressive_cpu_kv_ctx200000", "split": 24, "ctx": 200000, "exit_code": 0, "result": "SUCCEEDS", "n_cpu_kv": 24, "n_gpu_kv": 8}
+{"label": "full_gpu_kv_ctx186000", "split": 0, "ctx": 186000, "exit_code": 0, "result": "SUCCEEDS (raw hardware capacity, below the products conservative rejection point per Phase 11E)"}

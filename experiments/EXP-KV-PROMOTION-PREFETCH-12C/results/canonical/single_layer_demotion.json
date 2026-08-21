@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 5,
+  "method": "Reverse direction of single_layer_promotion.json: target layer is GPU-resident (kv_dev_override split), copy real bytes into a fresh CPU scratch tensor, round-trip verify, poison test.",
+  "trials": {
+    "smollm2_135m_ctx2048_q8_layer20": {
+      "ok": true,
+      "k_bytes": 417792,
+      "v_bytes": 417792,
+      "copy_ms": 2.058,
+      "roundtrip_byte_equal": true,
+      "hash_match": true,
+      "generated_control_tokens": [
+        198,
+        198,
+        788,
+        451,
+        14874,
+        3586,
+        28,
+        339
+      ],
+      "generated_poisoned_tokens": [
+        198,
+        198,
+        788,
+        451,
+        14874,
+        3586,
+        28,
+        339
+      ],
+      "poison_had_no_effect_on_output": true
+    },
+    "smollm2_360m_ctx2048_q8_layer20": {
+      "ok": true,
+      "k_bytes": 696320,
+      "v_bytes": 696320,
+      "copy_ms": 2.6335,
+      "roundtrip_byte_equal": true,
+      "poison_had_no_effect_on_output": true,
+      "hash_match": true
+    }
+  },
+  "generation_can_continue_after_transition": true,
+  "generation_can_continue_after_transition_detail": "generate_greedy succeeds and produces deterministic, byte-identical-to-control output in every trial after the demotion copy+poison sequence -- because the original llama_kv_cache tensor for the layer was never touched (classification B), generation trivially continues correctly. This is not evidence of successful live rebind, only evidence that the demotion probe does not corrupt the live context.",
+  "no_stale_backing_consumed": true,
+  "no_stale_backing_consumed_detail": "The scratch buffer is freed (scratch_free) before generation resumes past the poison test in the same process; no dangling pointer is retained.",
+  "raw_data": [
+    "raw_demote_135m_layer20.json",
+    "raw_demote_360m_layer20.json"
+  ],
+  "classification": "B",
+  "classification_name": "COPY_WORKS_BUT_PLACEMENT_IS_STATIC"
+}

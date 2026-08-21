@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 15: correctness -- placement must not alter KV precision or generation output at fixed precision.",
+  "method": "SmolLM2-135M, ctx=16384, Q8_0, identical model/prompt/gen_tokens across three placement configs (full GPU KV, half CPU/half GPU, aggressive 25/5 CPU/GPU split), greedy (argmax) decoding, real live generation, 8 tokens each.",
+  "generated_tokens": {
+    "full_gpu_kv": [198, 198, 788, 451, 14874, 3586, 28, 339],
+    "half_cpu_kv": [198, 198, 788, 451, 14874, 3586, 28, 339],
+    "aggressive_cpu_kv": [198, 198, 788, 451, 14874, 3586, 28, 339]
+  },
+  "token_identity": "exact match across all three configurations, all 8 generated tokens",
+  "first_divergence": "none observed (n/a)",
+  "output_length": {"all_configs": 8, "match": true},
+  "logit_level_comparison": {
+    "performed": false,
+    "reason": "token-identity across THREE different placement ratios (0%, 50%, 83% of layers CPU-placed) already provides strong correctness evidence for greedy decoding -- a numerical difference large enough to matter would need to flip an argmax somewhere across 8 steps x 3 configs, which did not happen. A full logit_rel_l2/delta_nll comparison (the methodology used in Phase 11E/12A) was not additionally run this phase given time/resource constraints on this shared host -- disclosed as a scope limitation, not a claim of bit-exact numerical equality.",
+    "reasoning_for_expected_exactness": "the patch changes ONLY which backend buffer a layer's KV tensors are allocated into -- it introduces no new arithmetic, no new quantization, and no change to which ggml ops run or in what order at the graph-construction level (only where their inputs/outputs physically live). Any numerical difference would have to come from the CPU and Vulkan backends' own attention-related kernels producing different floating-point rounding for the SAME op -- a pre-existing characteristic of running mixed CPU/GPU graphs (identical to what already happens with ordinary partial weight offload, --gpu-layers N, which has always split compute across backends), not something this patch introduces."
+  },
+  "quantization_error_from_movement_itself": "none -- kv_dev_override changes ONLY device/buffer placement, never a tensor's ggml_type (that remains controlled exclusively by the pre-existing, separate kv_type_override / type_k / type_v mechanism). Q8_0 stays Q8_0, Q5_1 stays Q5_1, regardless of which backend buffer holds the bytes."
+}

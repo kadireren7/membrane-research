@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 17: GTX 1650 constrained-region pressure test, SmolLM2-360M, weights always full-GPU (mp.n_gpu_layers=-1, verified via 33/33 'assigned to device Vulkan1' log lines at every tested point). Raw data: raw_pressure_test.jsonl.",
+  "method": "membrane-kv-device-override-probe direct llama_init_from_model calls (no product-level conservative pre-flight rejection -- this measures the RAW hardware capacity boundary, consistent with Phase 11E's own finding that the product's conservative gpu_policy estimator rejects earlier than the true hardware limit)",
+  "boundary_found": {
+    "ctx_186000": {"full_gpu_kv": "SUCCEEDS (raw hardware has headroom here, below the product's conservative rejection point)"},
+    "ctx_200000": {
+      "full_gpu_kv": {"exit_code": 4, "result": "FAILS -- 'failed to allocate compute buffers' (real, hard allocation failure, not a conservative estimate)"},
+      "half_cpu_kv_split16": {"exit_code": 0, "result": "SUCCEEDS", "n_cpu_kv_layers": 16, "n_gpu_kv_layers": 16, "weight_layers_all_vulkan": 33},
+      "aggressive_cpu_kv_split24": {"exit_code": 0, "result": "SUCCEEDS", "n_cpu_kv_layers": 24, "n_gpu_kv_layers": 8}
+    }
+  },
+  "answer_to_section17_question": {
+    "question": "Can moving only KV layers to RAM allow successful execution at a context where full GPU KV cannot, with weights remaining GPU-resident where they were before?",
+    "answer": true,
+    "evidence": "at ctx=200000 on the real GTX 1650, full-GPU-KV allocation genuinely fails (a hard error, not a conservative rejection), while a 16/16 KV split succeeds cleanly -- and weight placement is independently confirmed unchanged (33/33 weight-layer log lines report Vulkan1 in BOTH the failing and succeeding configurations' comparable runs). This is a stronger, cleaner result than Phase 12A's pressure_test.json, which could only show a whole-cache-adaptive-vs-tiered-Q5 comparison conflating weight and KV movement -- here the weights never move at all."
+  }
+}

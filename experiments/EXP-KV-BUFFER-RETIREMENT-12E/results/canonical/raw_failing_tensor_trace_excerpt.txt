@@ -1,0 +1,45 @@
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x5d43f9cb3470
+[MEMBRANE-DEBUG]   name=Qcur-4 (reshaped) op=36 src0=0x5d43f9cb3190 src1=(nil) view_src=0x5d43f9cb3190 view_offs=0
+[MEMBRANE-DEBUG]   data=0xa630 buffer=0x5d43f97e3d20
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x5d43f9cb35e0
+[MEMBRANE-DEBUG]   name=node_179 op=29 src0=0x7814902a7310 src1=0x5d43f9cb3470 view_src=(nil) view_offs=0
+[MEMBRANE-DEBUG]   data=0xc430 buffer=0x5d43f97e3d20
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x5d43f9cb38c0
+[MEMBRANE-DEBUG]   name=Kcur-4 (reshaped) op=36 src0=0x5d43f9cb3300 src1=(nil) view_src=0x5d43f9cb3300 view_offs=0
+[MEMBRANE-DEBUG]   data=0xbe30 buffer=0x5d43f97e3d20
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x5d43f9cb3a30
+[MEMBRANE-DEBUG]   name=node_190 op=29 src0=0x7814902a7310 src1=0x5d43f9cb38c0 view_src=(nil) view_offs=0
+[MEMBRANE-DEBUG]   data=0xa630 buffer=0x5d43f97e3d20
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x5d43f9cb4440
+[MEMBRANE-DEBUG]   name= (reshaped) (view) op=37 src0=0x5d43f9cb3ff0 src1=(nil) view_src=0x5d43f9cb3e80 view_offs=0
+[MEMBRANE-DEBUG]   data=0xb830 buffer=0x5d43f97e3d20
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x7814902a8fd0
+[MEMBRANE-DEBUG]   name=Vulkan1#leaf_12#0 op=0 src0=(nil) src1=(nil) view_src=(nil) view_offs=0
+[MEMBRANE-DEBUG]   data=0xa620 buffer=0x5d43f97e3d20
+[MEMBRANE-DEBUG]   buffer->context=0x5d43f97e4490 buffer->size=101842944
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+[MEMBRANE-DEBUG]   buf_ctx=0x5d43f97e4490 buf_ctx->dev_buffer.get()=0x5d43f97e48e0
+[MEMBRANE-DEBUG] ggml_vk_tensor_subbuffer entry: tensor=0x5d43f9cb45b0
+[MEMBRANE-DEBUG]   name=cache_v_l4 (view) op=42 src0=0x5d43f9cb4440 src1=0x7814902a8fd0 view_src=0x5d43fb200c10 view_offs=0
+[MEMBRANE-DEBUG]   data=0x67000 buffer=0x5d43fb155900
+[MEMBRANE-DEBUG]   buffer->context=0x5d430000003d buffer->size=2
+[MEMBRANE-DEBUG]   buffer name=Vulkan1
+timeout: the monitored command dumped core

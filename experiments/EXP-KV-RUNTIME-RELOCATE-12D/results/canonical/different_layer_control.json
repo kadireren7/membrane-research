@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 6,
+  "method": "membrane-kv-runtime-relocate-probe 'multi' mode: relocate layer 4 (first move away from shared CPU bulk buffer), then layer 5 (also first move), both CPU->GPU, in ONE live context, no free triggered by either (both are first moves for their respective layers).",
+  "all_relocations_ok": true,
+  "post_relocate_generation_ok": true,
+  "steps": [
+    {
+      "layer": 4,
+      "ok": true,
+      "relocate_ms": 0.4636,
+      "vram_used_mib": 380
+    },
+    {
+      "layer": 5,
+      "ok": true,
+      "relocate_ms": 0.9651,
+      "vram_used_mib": 380
+    }
+  ],
+  "conclusion": "Relocating two DIFFERENT layers (each once) works cleanly, no crash. Supports the finding that the problematic lifecycle is specific to a layer's backing being retired/reused across TWO relocations of the SAME layer, not relocation in general.",
+  "raw_data": "raw_different_layer_control_135m.json"
+}

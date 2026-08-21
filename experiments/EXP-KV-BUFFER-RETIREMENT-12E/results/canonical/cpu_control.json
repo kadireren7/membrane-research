@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 14,
+  "live_reproduction_attempted": false,
+  "reason": "A CPU-only build (GGML_VULKAN=OFF, e.g. build-cpu-rc1) has only ONE backend registered, so there is no second backend to relocate a layer TO/FROM -- kv_dev_override's split always resolves to CPU for every layer, and the probe's own require_gpu_device() guard (added in Phase 12C after a real crash on this exact scenario) fails closed with backend_unavailable before any relocation is attempted. A genuine CPU<->CPU 'relocation' would just be a same-buft move and would not exercise cross-buffer free semantics in a meaningfully different way.",
+  "source_based_generality_argument": "The root cause (see scheduler_lifetime.json) lives entirely in llama_context::process_ubatch's graph-reuse decision and llm_graph_params::allow_reuse -- neither contains any backend-specific branching. The SAME stale-graph-reuse hazard would apply to ANY out-of-band mutation of layers[il].k/.v (or any other persistent tensor a cached graph references), on ANY backend pair, not just CPU<->Vulkan. This is a source-level argument, not a live-tested one -- disclosed as such.",
+  "fix_backend_specificity": "llama_invalidate_graph_cache() is implemented entirely at the llama_context level (a call to gf_res_prev->reset()) with zero backend-specific code -- it would apply identically to a hypothetical CUDA/SYCL/CPU-only relocation primitive.",
+  "verdict_contribution": "Backend-generic by source-level construction; not independently verified live on a second backend pair due to this host only having one alternative backend (Vulkan) available."
+}

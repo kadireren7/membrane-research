@@ -1,0 +1,6 @@
+{"case": "promote_already_gpu", "layer": 20, "rc": 11, "result": {"schema_version": 1, "mode": "promote", "layer": 20, "ok": false, "error": "already_gpu"}}
+{"case": "demote_already_cpu", "layer": 4, "rc": 12, "result": {"schema_version": 1, "mode": "demote", "layer": 4, "ok": false, "error": "already_cpu"}}
+{"case": "invalid_layer", "layer": 99, "rc": 10, "result": {"schema_version": 1, "mode": "promote", "layer": 99, "n_layer": 30, "ok": false, "error": "invalid_layer"}}
+{"case": "promote_headroom_refused_huge", "layer": 4, "rc": 16, "result": {"schema_version": 1, "mode": "promote", "layer": 4, "ok": false, "error": "headroom_refused", "required_bytes": 1671168000000}}
+{"case": "demote_scratch_alloc_failed_huge", "layer": 20, "rc": 17, "result": {"schema_version": 1, "mode": "demote", "layer": 20, "ok": false, "error": "scratch_alloc_failed_closed_as_expected"}}
+{"case": "backend_unavailable", "layer": 4, "rc": 20, "note": "run on build-cpu-rc1 (GGML_VULKAN=OFF, llama-enabled CPU Release) -- no GPU backend device registered at all", "result": {"schema_version": 1, "mode": "promote", "ok": false, "error": "backend_unavailable", "detail": "no GPU backend device registered (e.g. a CPU-only/GGML_VULKAN=OFF build)"}}

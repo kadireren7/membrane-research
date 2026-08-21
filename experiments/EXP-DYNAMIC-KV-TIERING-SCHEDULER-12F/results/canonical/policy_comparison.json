@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "static_all_gpu": {
+    "tok_s": 23.5092,
+    "vram_peak_mib": 385
+  },
+  "static_split": {
+    "tok_s": 21.9443,
+    "vram_peak_mib": 368
+  },
+  "dynamic_schedule": {
+    "note": "same token output as static references (see correctness.json); adds bounded per-transition overhead (see transition_latency.json, frequency_sweep.json) in exchange for time-varying VRAM footprint",
+    "peak_vram_mib_during_promoted_window": 373,
+    "vram_mib_outside_promoted_window": 367
+  },
+  "conclusion": "Dynamic scheduling is mechanically correct and adds no output divergence, but at this model/context scale there is no throughput advantage over a static split -- KV placement is not the bottleneck (matches Phase 6.2's finding)."
+}

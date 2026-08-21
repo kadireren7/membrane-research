@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 18,
+  "gpu_to_cpu_vram_decrease": {
+    "cycle_stability_evidence": "every retirement-to-CPU step in cycle_stability.json's 50-cycle run shows VRAM dropping back to the CPU-side baseline (429 MiB) from the GPU-side value (433-435 MiB) -- a clean, real, repeated drop.",
+    "multi_layer_evidence": [
+      {
+        "n_layers": 1,
+        "vram_reclaimed_mib": 6
+      },
+      {
+        "n_layers": 2,
+        "vram_reclaimed_mib": 9
+      },
+      {
+        "n_layers": 4,
+        "vram_reclaimed_mib": 15
+      },
+      {
+        "n_layers": 8,
+        "vram_reclaimed_mib": 28
+      }
+    ],
+    "pressure_regime_evidence": {
+      "vram_reclaimed_mib": 132
+    }
+  },
+  "cpu_side_rss_decrease": "Not independently isolated in this phase's experiments (all cycle/multi-layer trials measure RSS across the WHOLE alternating CPU<->GPU cycle, not isolated to a single CPU-retirement step) -- cycle_stability.json's RSS figures show no net growth trend across 50 full round trips, which is consistent with (but does not in isolation prove) real host-RAM reclamation on each GPU->CPU retirement specifically.",
+  "allocator_granularity_honesty": "1/2/4/8-layer VRAM reclamation at ctx=8192/135M (6, 9, 15, 28 MiB respectively) is slightly super-linear per-layer at small counts (6 MiB for 1 layer vs a theoretical ~1.3 MiB of raw K+V bytes at this ctx) -- consistent with a fixed per-allocation Vulkan allocator/driver overhead on top of the raw tensor bytes, the same allocator-overhead pattern already disclosed in Phase 12C/12D's own VRAM accounting. At the ctx=200000/360M pressure-regime scale, reclaimed VRAM (132 MiB) is much closer to the raw layer byte size (~130 MiB, matching Phase 12D's own measurement for this exact layer/config), since fixed overhead is proportionally smaller at that scale.",
+  "raw_data": [
+    "raw_multi_layer_retirement.jsonl",
+    "raw_pressure_retirement_360m_ctx200000.jsonl",
+    "raw_cycle_stability_50x.jsonl"
+  ]
+}

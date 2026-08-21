@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 12,
+  "method": "SmolLM2-135M, ctx=2048, Q8_0, split=8, 32-token generation. At step i, cycle through layers [0..7] round-robin; issue an ASYNC copy (ggml_backend_tensor_set_async) of that layer's real K/V bytes to a fresh GPU scratch tensor, immediately call llama_decode for the current token (so its compute is enqueued right after the async submission), then ggml_backend_synchronize(). Deterministic, predeclared schedule -- no adaptive policy. 5 repetitions.",
+  "results": {
+    "total_issue_ms": {
+      "n": 7,
+      "mean": 8.8296,
+      "median": 8.7197,
+      "min": 8.3204,
+      "max": 9.4444,
+      "stddev": 0.4169
+    },
+    "total_decode_ms": {
+      "n": 7,
+      "mean": 1331.6233,
+      "median": 1321.5291,
+      "min": 1311.713,
+      "max": 1396.3433,
+      "stddev": 27.0815
+    },
+    "total_sync_wait_ms_residual_stall": {
+      "n": 7,
+      "mean": 0.0525,
+      "median": 0.047,
+      "min": 0.0435,
+      "max": 0.0777,
+      "stddev": 0.0109
+    },
+    "async_total_ms": {
+      "n": 7,
+      "mean": 1340.5055,
+      "median": 1329.9111,
+      "min": 1320.0798,
+      "max": 1405.8654,
+      "stddev": 27.3776
+    },
+    "sync_repeated_baseline_total_ms": {
+      "n": 7,
+      "mean": 1370.4002,
+      "median": 1348.0886,
+      "min": 1331.8555,
+      "max": 1440.3342,
+      "stddev": 37.4918
+    }
+  },
+  "overlap_achieved": true,
+  "overlap_achieved_detail": "Residual sync_wait_ms (time NOT hidden behind decode compute) is 0.0525 ms mean over 32 copy+decode steps -- effectively zero compared to the copy issue cost or a synchronous equivalent. Nearly all of the copy latency was hidden behind the decode call's own GPU work.",
+  "copy_latency_hidden_ms": 29.8948,
+  "caveat": "As with sync_stall.json, this measures wall-clock overlap of the COPY MACHINERY with real decode compute -- it does NOT mean the prefetched bytes are consumed by decode (classification B holds identically here; this prototype never claims live rebind). It answers 'can copy latency be hidden' in isolation from 'does the copy affect output', which are two different questions.",
+  "raw_data": "raw_prefetch.jsonl"
+}

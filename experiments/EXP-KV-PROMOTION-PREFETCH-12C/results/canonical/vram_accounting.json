@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 13,
+  "note": "Every movement experiment records vram_before_mib / vram_during_mib (right after the scratch copy) / vram_after_scratch_free_mib via real nvidia-smi queries, plus process RSS is tracked separately in cycle_stability.json. This file distinguishes LOGICAL ownership (which the ownership_state.h state machine models as move-with-release) from PHYSICAL allocation (what the real probe does: always a duplicate, confirmed below).",
+  "experiments": {
+    "promote_135m_layer4_ctx2048": {
+      "weight_vram_mib_at_baseline": 378,
+      "weight_vram_note": "weights + already-GPU KV layers together, not separable per-tensor in this probe (see ownership_model.json weight_device capture caveat below); n_gpu_layers=-1 forces full weight residency per Phase 12B's established invariant.",
+      "gpu_kv_bytes_before": null,
+      "cpu_kv_bytes_before": 6684672,
+      "promotion_scratch_bytes_added": 835584,
+      "vram_before_mib": 378,
+      "vram_during_mib": 379,
+      "vram_after_scratch_free_mib": 377,
+      "duplicate_bytes_while_promoting": 835584,
+      "physical_vram_freed_on_scratch_release_mib": 2
+    },
+    "pressure_promote_360m_layer12_ctx200000": {
+      "vram_before_mib": 3107,
+      "vram_during_mib": 3237,
+      "vram_after_scratch_free_mib": 3237,
+      "vram_delta_during_mib": 130,
+      "duplicate_bytes_while_promoting": 136130560,
+      "external_vram_after_process_exit_mib": 2
+    },
+    "cycle_stability_50x": {
+      "see": "cycle_stability.json",
+      "vram_creep_across_50_alloc_copy_free_cycles_mib": 0
+    }
+  },
+  "known_limitation": "weight_device per-layer capture in the probe's cb_eval (matching 'blk.N.' tensor name prefix) returns MISSING for every layer in this phase's runs -- a real, disclosed instrumentation gap (see promotion_probe.cpp capture_cb / cmd_info output), NOT evidence weights moved. Weight GPU-residency is instead established via (a) mp.n_gpu_layers=-1 (the same invariant Phase 12B verified via 33/33 'assigned to device Vulkan1' log lines) and (b) the measured vram_used_mib baseline (378 MiB for 135M at ctx=2048, 3107 MiB for 360M at ctx=200000) being consistent with weights resident, not with a CPU-only-weights configuration.",
+  "no_vram_savings_claimed": true,
+  "no_vram_savings_claimed_detail": "No configuration in Phase 12C ever shows KV bytes physically absent from GPU while a promoted copy is 'in use' -- every promotion is a genuine duplicate for its entire lifetime (scratch stays allocated until explicitly freed), and the freed-scratch VRAM drop shown above is a drop back to the ORIGINAL kv_dev_override baseline, not a net-new saving versus that baseline. See Section 14 bar in ownership_model.json."
+}

@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "question": "Section 23: can a promote/demote be issued ahead of the decode that needs it (prefetch) instead of synchronously at the trigger decode?",
+  "analysis": "membrane_tiering_plan() is already decode-index-addressable and pure, so a scheduler could in principle call it with decode_idx = trigger - k to plan k steps early. The blocker is not the planner, it is the apply path: apply_action() in tiering_probe.cpp calls llama_synchronize(ctx) immediately before llama_kv_cache_relocate_layer(), and relocate_layer() itself (llama-kv-cache.cpp, from Phase 12D/12E) allocates a brand-new backend buffer and performs a synchronous ggml_backend_tensor_copy-style transfer on the calling thread before returning. There is no async/non-blocking variant of relocate_layer in the established primitive chain, and no established mechanism to overlap that transfer with an in-flight decode's compute graph.",
+  "measured_cost_if_run_synchronously_ahead_of_trigger": "same as transition_latency.json: single-layer promote ~0.5-0.7ms at ctx=2048/135M, which is small relative to a full 15-decode run, so a synchronous 'early' call would work mechanically but provides no latency-hiding benefit over calling it exactly at the trigger -- it just moves the same blocking cost earlier.",
+  "clean_async_path_exists": false,
+  "reason": "would require a genuinely asynchronous backend buffer transfer plus a way to signal completion back into the scheduler's state machine (a new PROMOTING/DEMOTING-complete callback), which is out of scope for this phase's explicit constraint (build on established primitives only, no new backend machinery).",
+  "verdict": "NOT_ATTEMPTED",
+  "recommendation": "if async prefetch is wanted in a future phase, it needs a dedicated primitive (async relocate + completion callback) before a prefetch scheduler variant can be validated -- do not simulate this with sleeps or fake async."
+}

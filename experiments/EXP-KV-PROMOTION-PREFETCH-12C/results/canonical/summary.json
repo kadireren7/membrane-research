@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "title": "Controlled KV Promotion / Prefetch Prototype",
+  "branch": "experiment/kv-promotion-prefetch",
+  "baseline_sha": "d6e6189d0417858bfcf3d51c766eaa4be5fe46e1",
+  "phase12b_branch_preserved": {
+    "branch": "experiment/kv-device-override",
+    "head_sha": "a1ebd9e285bd763cfb448c8d8202536802783bb9",
+    "verifier_75_of_75": true,
+    "main_unchanged": true,
+    "v030rc1_unchanged": true
+  },
+  "section_7_graph_rebuild_investigation": {
+    "finding": "No new graph-rebuild primitive is needed to CONSUME a live-rebound tensor, because llama.cpp already rebuilds the ggml graph from scratch on every single llama_decode call (confirmed by reading llama-graph.cpp: mctx_cur->get_k(ctx0, il) is called fresh inside graph construction, e.g. build_attn, at lines 2674/2765/2850/2929 of llama-graph.cpp). get_k/get_v (llama-kv-cache.cpp:1285/1305) simply return layers[ikv].k/.v (or a view of it) at whatever address that pointer currently holds.",
+    "actual_blocker": "llama_kv_cache::layers (llama-kv-cache.h:297, std::vector<kv_layer>) is declared under a `private:` section (llama-kv-cache.h:232) with no public setter. It is populated exactly once via layers.push_back(...) during cache construction (llama-kv-cache.cpp:279) and never written to again anywhere in the file (confirmed by grep across all layers[...] accesses in llama-kv-cache.cpp -- every other site is a read, e.g. lines 884, 1245, 1249, 1266, 1288, 1308, 1342, 1377).",
+    "conclusion": "This is NOT a graph-rebuild problem (D. GRAPH_REBUILD_REQUIRED does not apply) -- it is narrower: the graph already re-resolves layers[ikv].k/.v fresh every decode call, so simply mutating that pointer between calls would be sufficient for the next decode to pick up a new device/location automatically, with no other llama.cpp code changes."
+  },
+  "section_25_upstream_patch_bar": {
+    "insufficiency_of_phase12b_patch": "Phase 12B's kv_dev_override only runs once, at llama_kv_cache construction time (inside the per-layer allocation loop) -- it has no mechanism to run again after construction, and there is no public API surface on llama_kv_cache to trigger it again or to otherwise replace layers[ikv].k/.v post-construction.",
+    "exact_missing_primitive": "A public (or membrane-friend, matching the kv_dev_override/kv_type_override pattern already used by Phase 11/12B) method on llama_kv_cache, e.g. `bool relocate_layer(int32_t il, ggml_backend_buffer_type_t new_buft)`, that: (1) allocates a new k/v tensor pair on new_buft with the same dims/type as the existing layers[il].k/.v, (2) copies the real bytes via ggml_backend_tensor_copy (or get+set, as this phase's probe already does manually via scratch tensors), (3) rebuilds layers[il].k_stream/v_stream views against the new tensor, (4) replaces layers[il].k/.v with the new tensor, and (5) frees the old buffer. No change to get_k/get_v, llama-graph.cpp, or the scheduler is needed -- they already re-read layers[il].k/.v fresh every decode.",
+    "exact_source_location": "third_party/llama.cpp/src/llama-kv-cache.h:232-297 (private kv_layer/layers), third_party/llama.cpp/src/llama-kv-cache.cpp:220-280 (construction loop where the current one-shot device placement happens).",
+    "smallest_possible_patch_scope_estimate": "Roughly 40-70 added lines: one new public method plus (2)/(3)/(4)/(5) above, reusing existing helpers (ctx_for_buft, ggml_backend_tensor_copy, ggml_backend_buffer_free) already present in the file. No changes to llama-graph.cpp, the scheduler, or any public llama.h struct are required.",
+    "generic_upstreamable": "Plausibly upstreamable in spirit (KV-cache device relocation is a generically useful capability), but NOT written or proposed as an actual patch in this phase per the Section 25 instruction to stop and report instead of patching automatically.",
+    "expected_maintenance_burden": "Moderate: llama_kv_cache's internals (kv_layer, the allocation loop, defrag/resize logic) are actively developed upstream; a relocate_layer method touching the same private state would need to be kept in sync the same way the existing kv_dev_override/kv_type_override membrane patches already are (see patches/llama.cpp-membrane-kv-device-override.patch, patches/llama.cpp-membrane-kv-type-override.patch for the established maintenance pattern and its disclosed burden in Phase 12B's maintenance.json).",
+    "decision": "STOPPED before writing this patch, per Section 25 instruction -- reporting findings only."
+  },
+  "live_rebind_classification": "B",
+  "live_rebind_classification_name": "COPY_WORKS_BUT_PLACEMENT_IS_STATIC",
+  "single_layer_promotion": "see single_layer_promotion.json -- byte round-trip verified, poison test falsifies live consumption in every trial (135M/360M, ctx2048/ctx200000, Q8_0/Q5_1)",
+  "single_layer_demotion": "see single_layer_demotion.json -- same result, reverse direction",
+  "multi_layer_schedule": "see multi_layer_schedule.json -- 8-step predeclared schedule completes cleanly, generation continues correctly, both models",
+  "copy_bandwidth_latency": "see copy_microbench.json -- sub-millisecond to low-millisecond for real KV-layer-sized groups (1-8 layers) at ctx=2048/135M scale",
+  "sync_stall": "see sync_stall.json -- <2% wall-clock slowdown even for 32 repeated sync promotions across 8 layers during a 32-token generation, at this model/context scale",
+  "async_prefetch_feasibility": "ASYNC_PREFETCH_PUBLIC_API_EXISTS -- see async_feasibility.json and prefetch_result.json (near-zero residual stall, real overlap measured against a live llama_decode call)",
+  "vram_accounting": "see vram_accounting.json -- every promotion is a genuine duplicate for its lifetime; no VRAM savings claimed; scratch release correctly drops external nvidia-smi VRAM back to the pre-promotion baseline",
+  "demotion_release": "GPU scratch allocations are provably released within-process (cycle_stability.json: 50 cycles, flat VRAM/RSS) -- but this is release of the PROBE's scratch tensor, not of llama_kv_cache's own authoritative GPU tensor, since no live rebind exists to make that tensor releasable in the first place",
+  "correctness": "see correctness.json -- token-identical output between static and movement-enabled runs in every trial (expected given classification B); Q8_0 byte round-trip verified",
+  "q5_orthogonality": "see single_layer_promotion.json Q5_1 trial -- correct, smaller byte count (294912 vs 417792 for Q8_0), same classification B behavior, placement mechanism confirmed precision-independent",
+  "pressure_regime_result": "see pressure_test.json -- manual promotion succeeds cleanly at the real GTX 1650 ctx=200000 boundary where full-GPU KV hard-fails and split KV succeeds (reusing Phase 12B's established boundary); no host destabilization",
+  "promotion_headroom_rule": "see headroom_rule.json -- 0 false-safe / 0 false-reject across every attempt made this phase (small sample, disclosed)",
+  "repeated_cycle_stability": "see cycle_stability.json -- 50/50 cycles byte-identical, no RSS growth beyond noise, no VRAM creep, no crash",
+  "failure_behavior": "see failure_cases.json -- 6/7 exercised fault scenarios fail closed with no corruption; 1 scenario (interrupted copy mid-transfer) not exercised, disclosed as untested rather than claimed-passing",
+  "second_model_generality": "see raw_promote_360m_layer4.json, raw_demote_360m_layer20.json, raw_multi_schedule_360m.json -- SmolLM2-360M reproduces identical classification-B behavior and correctness",
+  "tests": {
+    "test_kv_ownership_state": "llama-free state machine unit tests (13 cases): init, full promote/demote cycle, fail-to-ERROR paths, duplicate-promotion/invalid-demotion rejection, ERROR terminality, headroom boundary/overflow/zero-margin cases.",
+    "build_matrix": {
+      "llama_free_release": {
+        "build": "build-vulkan",
+        "result": "PASS (test_kv_ownership_state)"
+      },
+      "llama_free_asan_ubsan": {
+        "build": "build-free-asan (Debug+ASan+UBSan)",
+        "result": "PASS (test_kv_ownership_state, 0 sanitizer reports)"
+      },
+      "llama_enabled_cpu_release": {
+        "build": "build-cpu-rc1 (GGML_VULKAN=OFF)",
+        "result": "PASS (test_kv_ownership_state + real probe runs against SmolLM2-135M on CPU backend for the non-GPU-dependent paths; GPU-dependent modes correctly fail closed with backend_unavailable, see bugs_found_and_fixed_this_phase)"
+      },
+      "llama_enabled_cpu_asan_ubsan": {
+        "build": "build-llama-asan (Debug+ASan+UBSan, GGML_VULKAN=OFF)",
+        "result": "PASS (test_kv_ownership_state, 0 sanitizer reports); probe correctly fails closed with backend_unavailable (no GPU device on this build) -- see limitation below, the real byte-copy path could not be sanitizer-checked on this host"
+      },
+      "vulkan_release": {
+        "build": "build-vulkan",
+        "result": "PASS -- full experiment suite (info/promote/demote/multi_schedule/copybench/cycle/stall/prefetch) run for real against SmolLM2-135M/360M on the GTX 1650; 68/68 ctest suite passing including all pre-existing product tests"
+      }
+    },
+    "sanitizer_limitation": "No Vulkan+ASan/UBSan combination build was attempted this phase -- building one from scratch on this 5.6 GiB RAM host (already needed ~580s and most of available RAM for the CPU-only ASan rebuild alone) was judged too resource-risky, and Vulkan driver-side allocations are frequently not ASan-instrumented anyway (a known source of false positives/negatives for this class of combo). The real GPU byte-copy path was instead verified via: (a) real Vulkan Release runs with byte-hash round-trip verification in every promote/demote/multi_schedule/copybench trial, and (b) cycle_stability.json (50 repeated alloc/copy/free cycles) as an external (nvidia-smi + RSS), sanitizer-independent leak/corruption check.",
+    "product_regression": "68/68 ctest suite passes on build-vulkan, including test_product_cli, test_adaptive_kv_policy, test_gpu_policy, test_compat_check, test_mem_guard (covering the native/q8/q5/adaptive/compare/gpu-bench/auto/guard --kv modes) -- tools/membrane-run/product_cli.cpp and every other product source file are byte-for-byte untouched this phase (git diff confirms only CMakeLists.txt, scripts/verify-results.py, and the new tools/membrane-kv-promotion-prefetch/ directory changed)."
+  },
+  "limitations": [
+    "This phase does NOT achieve live KV tiering -- every promotion/demotion this phase performs is a real, correct, byte-verified COPY that the live decode graph never reads (classification B, independently re-verified against llama.cpp source, not just inferred from comments).",
+    "weight_device per-layer capture in the probe is a known instrumentation gap (always reports MISSING) -- weight GPU-residency is established indirectly via mp.n_gpu_layers=-1 and measured VRAM baselines, not per-tensor capture.",
+    "headroom_rule false-safe/false-reject audit has only 3 real data points; not a powered validation of the exact constant values.",
+    "Copy/stall/prefetch measurements are all at SmolLM2-135M/360M scale (largest real pressure test at ctx=200000/360M) on a single GTX 1650 -- not validated at larger models or multi-GPU.",
+    "No product code path, CLI, or adaptive policy was touched -- entirely research-only, matching the phase's constraints.",
+    "1 of 7 failure-case scenarios (interrupted copy mid-transfer) was not exercised as a real fault injection this phase -- no mechanism in this prototype to abort an in-flight ggml_backend_tensor_set/get call."
+  ],
+  "unresolved_issues": [
+    "Whether a relocate_layer-style primitive (Section 25) would actually preserve correctness under concurrent/streaming decode (multi-sequence, batched) was not tested -- this phase used single-sequence greedy generation throughout.",
+    "Whether async prefetch overlap holds at larger KV-layer byte counts (e.g. the ctx=200000/360M pressure-regime scale, ~130 MiB/layer) was not measured -- prefetch_result.json only covers the 135M/ctx=2048 scale."
+  ],
+  "decision_gate": "LIVE_KV_COPY_WORKS_BUT_REBIND_STATIC",
+  "decision_gate_meaning": "Copies work: real, byte-verified, precision-independent (Q8_0/Q5_1), correct at both tested model scales and at the real ctx=200000 pressure boundary. But tensor/backend placement is fixed after llama_context construction -- true live tiering requires another primitive (Section 25: a relocate_layer-style method on llama_kv_cache, not yet written).",
+  "next_step_recommendation": "Design the smallest runtime rebind primitive: a llama_kv_cache::relocate_layer(il, new_buft) method (see section_25_upstream_patch_bar.exact_missing_primitive) that reassigns layers[il].k/.v after a real byte copy. Because llama.cpp already rebuilds its graph fresh every llama_decode call, no other engine change is needed for the next decode to pick up the new location -- this is a narrowly-scoped, well-localized addition, not a rearchitecture. Do NOT execute this next step in this phase.",
+  "explicit_non_actions_confirmed": {
+    "no_automatic_hot_cold_policy": true,
+    "no_product_cli_added": true,
+    "no_kv_adaptive_modified": true,
+    "no_token_block_paging": true,
+    "no_cuda_started": true,
+    "no_mixed_precision_productization": true,
+    "no_release": true,
+    "no_version_bump": true,
+    "no_automatic_merge": true,
+    "no_co_authored_by": true
+  },
+  "bugs_found_and_fixed_this_phase": [
+    {
+      "bug": "cmd_info and cmd_move (promote/demote) read cap.k_leaf/v_leaf/w_leaf (populated only by the cb_eval callback during a real decode) BEFORE ever calling decode_prompt() -- every layer reported kv_device=MISSING in info mode, and every promote/demote call misclassified its target layer (already_gpu/already_cpu) because the tensor pointer was still NULL.",
+      "fix": "moved decode_prompt() to run immediately after load_ctx()/the layer-bounds check in both cmd_info and cmd_move, before any cap.k_leaf/v_leaf read."
+    },
+    {
+      "bug": "Every mode using ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) (promote/demote/multi_schedule/copybench/cycle/stall/prefetch) passed the result straight into ggml_backend_dev_buffer_type/ggml_backend_dev_init without a NULL check -- on a build with no GPU backend registered (confirmed on build-cpu-rc1, GGML_VULKAN=OFF), this hits a bare GGML_ASSERT(device) in ggml-backend.cpp and SIGABRTs the whole process instead of failing closed.",
+      "fix": "added require_gpu_device() and called it at all 7 GPU-device-acquisition sites; verified the fix on build-cpu-rc1 (now returns a clean backend_unavailable JSON error, exit code 20) and re-verified no regression on build-vulkan afterward. This also retroactively provided real evidence for the previously-untested backend_unavailable failure case (see failure_cases.json)."
+    }
+  ]
+}

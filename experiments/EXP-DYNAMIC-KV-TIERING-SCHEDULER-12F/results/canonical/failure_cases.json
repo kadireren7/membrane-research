@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "case": "budget_guard_fail_closed",
+      "description": "promotion requested with an intentionally impossible reserve+margin (999999999 MiB each) is correctly SKIPPED, layer stays CPU_RESIDENT, no relocate_layer call is even attempted",
+      "evidence_file": "budget_guard.json",
+      "verdict": "FAILS_CLOSED_CORRECTLY"
+    },
+    {
+      "case": "config_validation_rejects_invalid_configs",
+      "description": "scheduler_core rejects out-of-range layers, duplicate layers within a group, duplicate GPU layers, and layer-count mismatches before any relocation is attempted (see test_scheduler_core.c config-validation tests)",
+      "evidence_file": "N/A (covered by test_scheduler_core, run under both Release and ASan+UBSan, see summary.json sanitizer_matrix)",
+      "verdict": "REJECTED_AT_VALIDATION"
+    },
+    {
+      "case": "already_resident_promotion_is_noted_not_silent",
+      "description": "planning a promotion for a layer that is already GPU_RESIDENT produces an explicit action=NONE, reason=ALREADY_RESIDENT entry rather than silently omitting it",
+      "evidence_file": "N/A (covered by test_plan_already_resident_promotion_is_noted_not_skipped_silently in test_scheduler_core.c)",
+      "verdict": "REPORTED_NOT_SILENT"
+    }
+  ]
+}

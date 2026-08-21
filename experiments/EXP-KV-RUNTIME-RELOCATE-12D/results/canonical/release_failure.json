@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 5,
+  "method": "membrane-kv-runtime-relocate-probe 'repro2' mode, retain_old_backing_for_research=false (the REAL, default, production-path behavior -- old backing release IS attempted). SmolLM2-135M, ctx=2048, Q8_0, split=8, layer 4: relocation #1 (CPU->GPU), one decode, relocation #2 (GPU->CPU, SAME layer -- this frees relocation #1's now-orphaned dedicated GPU buffer since nothing else references it), then a decode call.",
+  "trial_1_no_settle": {
+    "relocation_1_ok": true,
+    "relocation_2_ok": true,
+    "stdout_before_crash": "{\"schema_version\":1,\"mode\":\"repro2\",\"retain_old_backing_for_research\":false,\"layer\":4,\"points\":{\"A_initial\":{\"tensor_ptr\":\"0x62c85cccf820\",\"buffer_ptr\":\"0x62c85cfb8280\",\"buffer_name\":\"CPU\",\"data_ptr\":\"0x769eb20cc040\"},\"B_after_reloc1_call\":{\"ok\":true},\"C_graph_after_reloc1\":{\"tensor_ptr\":\"0x62c85e6b7be0\",\"buffer_ptr\":\"0x62c85e6b8750\",\"buffer_name\":\"Vulkan1\",\"data_ptr\":\"0x1000\",\"pointer_changed_from_A\":true},\"D_after_reloc2_call\":{\"ok\":true}",
+    "crash": true,
+    "exit_signal": "SIGSEGV (rc=139)",
+    "stderr_tail": [
+      "graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1",
+      "graph_reserve: reserving a graph for ubatch with n_tokens =  512, n_seqs =  1, n_outputs =  512",
+      "sched_reserve:    Vulkan1 compute buffer size =    97.12 MiB",
+      "sched_reserve: Vulkan_Host compute buffer size =     4.30 MiB",
+      "sched_reserve: graph nodes  = 1296",
+      "sched_reserve: graph splits = 18",
+      "sched_reserve: reserve took 57.23 ms, sched copies = 1",
+      "timeout: the monitored command dumped core"
+    ],
+    "crash_point": "the llama_decode() call immediately following relocation #2 (the decode never returns)"
+  },
+  "trial_2_with_4_settle_decodes": {
+    "note": "Section 3 (Test settling-window hypothesis): 4 additional ordinary decode() calls were inserted between relocation #1 and relocation #2, to test whether the crash is about relocating 'too soon'. It is NOT: the crash still occurs identically.",
+    "relocation_1_ok": true,
+    "relocation_2_ok": true,
+    "stdout_before_crash": "{\"schema_version\":1,\"mode\":\"repro2\",\"retain_old_backing_for_research\":false,\"layer\":4,\"points\":{\"A_initial\":{\"tensor_ptr\":\"0x600426f2a220\",\"buffer_ptr\":\"0x6004272133a0\",\"buffer_name\":\"CPU\",\"data_ptr\":\"0x7491757cb040\"},\"B_after_reloc1_call\":{\"ok\":true},\"C_graph_after_reloc1\":{\"tensor_ptr\":\"0x600428912920\",\"buffer_ptr\":\"0x6004288865c0\",\"buffer_name\":\"Vulkan1\",\"data_ptr\":\"0x1000\",\"pointer_changed_from_A\":true},\"settle_decodes\":4,\"D_after_reloc2_call\":{\"ok\":true}",
+    "crash": true,
+    "exit_signal": "SIGSEGV (rc=139)",
+    "stderr_tail": [
+      "graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1",
+      "graph_reserve: reserving a graph for ubatch with n_tokens =  512, n_seqs =  1, n_outputs =  512",
+      "sched_reserve:    Vulkan1 compute buffer size =    97.12 MiB",
+      "sched_reserve: Vulkan_Host compute buffer size =     4.30 MiB",
+      "sched_reserve: graph nodes  = 1296",
+      "sched_reserve: graph splits = 18",
+      "sched_reserve: reserve took 25.78 ms, sched copies = 1",
+      "timeout: the monitored command dumped core"
+    ]
+  },
+  "distinct_crash_signature_observed_elsewhere_this_investigation": {
+    "note": "An earlier root-cause session (before this closing checkpoint) observed the SAME class of failure manifest as a clean GGML_ASSERT instead of a raw SIGSEGV, in a different scenario (ctx=8192, mode=cycle, repeated CPU<->GPU relocation loop): 'GGML_ASSERT(buffer != nullptr) failed' at third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp:7815 (ggml_vk_tensor_subbuffer), backend=Vulkan1, on the llama_decode() call following the second relocation's release. Both signatures indicate the same underlying class of problem (a stale/dangling reference into freed backend memory), not two separate bugs.",
+    "assertion_text": "GGML_ASSERT(buffer != nullptr) failed",
+    "assertion_location": "third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp:7815 (ggml_vk_tensor_subbuffer)",
+    "backend": "Vulkan1"
+  },
+  "non_crashing_counter_example_disclosed_honestly": {
+    "note": "mode=roundtrip performs the logically identical operation (same layer, CPU->GPU->CPU, old backing release attempted by default) but interleaves generate_greedy(4 tokens) between relocation #1 and relocation #2 (more decode calls than trial_2's settle test, in a different function/call structure) and completed WITHOUT a crash, reproducibly, across 4 repeated runs (see raw_roundtrip_135m_layer4.json, raw_roundtrip_135m_layer4_ctx16384.json). This is explicitly NOT treated as proof that release is safe in that call pattern -- call-pattern-dependent, non-uniform manifestation is the classic signature of a use-after-free/stale-reference bug, and the demonstrated corruption elsewhere in this section means the retained-old-backing path (repeated_same_layer_retained.json) is the only one this phase can certify as safe.",
+    "roundtrip_ctx2048_result": {
+      "schema_version": 1,
+      "mode": "roundtrip",
+      "layer": 4,
+      "steps": [
+        {
+          "step": 1,
+          "direction": "cpu_to_gpu",
+          "ok": true,
+          "now_gpu": true,
+          "decode_ok": true,
+          "vram_before_mib": 379,
+          "vram_after_mib": 380
+        },
+        {
+          "step": 2,
+          "direction": "gpu_to_cpu",
+          "ok": true,
+          "now_cpu": true,
+          "decode_ok": true,
+          "vram_before_mib": 380,
+          "vram_after_mib": 379,
+          "vram_delta_mib": 1,
+          "kv_bytes_relocated": 835584
+        }
+      ],
+      "ok": true
+    },
+    "roundtrip_ctx16384_result": {
+      "schema_version": 1,
+      "mode": "roundtrip",
+      "layer": 4,
+      "steps": [
+        {
+          "step": 1,
+          "direction": "cpu_to_gpu",
+          "ok": true,
+          "now_gpu": true,
+          "decode_ok": true,
+          "vram_before_mib": 501,
+          "vram_after_mib": 508
+        },
+        {
+          "step": 2,
+          "direction": "gpu_to_cpu",
+          "ok": true,
+          "now_cpu": true,
+          "decode_ok": true,
+          "vram_before_mib": 508,
+          "vram_after_mib": 499,
+          "vram_delta_mib": 9,
+          "kv_bytes_relocated": 6684672
+        }
+      ],
+      "ok": true
+    },
+    "roundtrip_repeated_4x_all_succeeded": true
+  },
+  "conclusion": "Freeing a layer's old dedicated backing on its second (or later) relocation is UNSAFE with the current minimal design -- it reliably crashes in the tested reproducer and its settle-window variant, and remains uncertified even where it appears not to crash. Old backing must be retained (leaked) to keep relocation safe -- see repeated_same_layer_retained.json for the functionally-correct, retained-backing alternative."
+}

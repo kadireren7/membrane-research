@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 3,
+  "method": "Temporary debug instrumentation (fprintf+fflush before every field dereference, later reverted -- not part of the final patch) added directly inside ggml_vk_tensor_subbuffer (third_party/llama.cpp/ggml/src/ggml-vulkan/ggml-vulkan.cpp) and inside llama_kv_cache::cpy_v/get_v (llama-kv-cache.cpp), to trace exactly which tensor triggers the failure and whether llama-kv-cache.cpp's own view-construction code is ever called with a stale layers[ikv].v after a second relocation.",
+  "exact_failing_tensor": {
+    "name": "cache_v_l4 (view)",
+    "op": "42 (GGML_OP_SET_ROWS -- the cpy_v() write path storing the current token's V into cache)",
+    "view_src": "0x5a570a98d650 (the base V tensor this view was built from at graph-construction time)",
+    "buffer_after_relocation_2_and_free_pre_fix": {
+      "buffer_ptr": "valid-looking (vtable/get_name still resolves to \"Vulkan1\")",
+      "buffer_context_ptr": "0x5a570000003d -- implausibly small/pattern-like, not a real heap pointer",
+      "buffer_size": "2 -- implausibly small for a real KV buffer (should be hundreds of KB)",
+      "interpretation": "tensor->buffer points to a dangling/freed ggml_backend_buffer struct whose memory has been reused; the vtable call succeeds (still valid function pointer) but the ->context/->size fields read garbage from whatever now occupies that memory -- classic use-after-free signature"
+    },
+    "crash_point": "dereferencing (ggml_backend_vk_buffer_context *)tensor->buffer->context immediately after this, to read ->dev_buffer"
+  },
+  "backward_trace": {
+    "does_it_derive_from_the_old_kv_backing": "Yes, indirectly -- it is a node from the PREVIOUS decode's graph (built while layer 4 was still GPU-resident, before relocation #2), not from a fresh graph build for the current decode. See scheduler_lifetime.json for why this old graph gets executed again.",
+    "llama_kv_cache_cpy_v_get_v_called_for_layer_4_during_the_crashing_decode": false,
+    "evidence": "Instrumented cpy_v/get_v to log every call with il==4: 24 total calls logged across the whole repro sequence (prompt decode, relocation #1's follow-up decode), and ZERO further calls for the crashing 'third sentence' decode. This proves llama-graph.cpp never rebuilt the graph for that decode at all -- see raw_cpy_get_v_trace.txt."
+  },
+  "raw_data": [
+    "raw_failing_tensor_trace_excerpt.txt (last ~45 lines of the instrumented Vulkan trace, tail-truncated from ~21700 total debug lines)",
+    "raw_cpy_get_v_trace.txt (all 24 llama-kv-cache.cpp cpy_v/get_v calls for layer 4)"
+  ]
+}

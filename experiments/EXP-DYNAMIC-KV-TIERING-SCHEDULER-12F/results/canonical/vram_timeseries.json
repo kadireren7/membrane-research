@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "source": "raw_first_schedule_stderr.txt",
+  "samples": [
+    {
+      "vram_step": 0,
+      "decode_idx": 0,
+      "vram_used_mib": 369,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 1,
+      "decode_idx": 1,
+      "vram_used_mib": 369,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 2,
+      "decode_idx": 2,
+      "vram_used_mib": 369,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 3,
+      "decode_idx": 3,
+      "vram_used_mib": 369,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 4,
+      "decode_idx": 4,
+      "vram_used_mib": 369,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 5,
+      "decode_idx": 5,
+      "vram_used_mib": 373,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 6,
+      "decode_idx": 6,
+      "vram_used_mib": 373,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 7,
+      "decode_idx": 7,
+      "vram_used_mib": 373,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 8,
+      "decode_idx": 8,
+      "vram_used_mib": 373,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 9,
+      "decode_idx": 9,
+      "vram_used_mib": 373,
+      "rss_kb": 292808
+    },
+    {
+      "vram_step": 10,
+      "decode_idx": 10,
+      "vram_used_mib": 367,
+      "rss_kb": 296076
+    },
+    {
+      "vram_step": 11,
+      "decode_idx": 11,
+      "vram_used_mib": 367,
+      "rss_kb": 296076
+    },
+    {
+      "vram_step": 12,
+      "decode_idx": 12,
+      "vram_used_mib": 367,
+      "rss_kb": 296076
+    },
+    {
+      "vram_step": 13,
+      "decode_idx": 13,
+      "vram_used_mib": 367,
+      "rss_kb": 296076
+    },
+    {
+      "vram_step": 14,
+      "decode_idx": 14,
+      "vram_used_mib": 367,
+      "rss_kb": 296076
+    }
+  ],
+  "note": "vram_used_mib sampled via nvidia-smi after each decode step; promotion at decode 5 -> +4 MiB (373-369); demotion at decode 10 -> -6 MiB (367-373), consistent with 4x835584-byte KV layers moving GPU<->CPU."
+}

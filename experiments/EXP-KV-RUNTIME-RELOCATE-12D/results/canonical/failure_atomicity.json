@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 13,
+  "method": "membrane-kv-runtime-relocate-probe 'failure' mode, cheap cases only (no OOM simulation on this constrained host, per instruction).",
+  "cases": {
+    "invalid_layer": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "invalid_layer",
+      "relocate_returned_ok": false,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "layer=99999 on a 30-layer model -- relocate correctly returns false, layer 0 untouched, decode still works."
+    },
+    "invalid_dev": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "invalid_dev",
+      "relocate_returned_ok": false,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "dev=nullptr -- relocate correctly returns false, layer 0 untouched, decode still works."
+    },
+    "source_eq_destination": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "same_dev",
+      "relocate_returned_ok": true,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "Target device == current device -- NOT rejected by relocate_layer (it performs a harmless redundant relocation to a fresh buffer of the same buft). This is layer 0's FIRST relocation (CPU shared bulk -> CPU dedicated), not a second/repeated relocation, so it does not exercise the release_failure.json scenario."
+    },
+    "duplicate_two_sequential_relocations": {
+      "schema_version": 1,
+      "mode": "failure",
+      "case": "duplicate",
+      "relocate_returned_ok": true,
+      "layer0_pointer_untouched": true,
+      "decode_still_works": true,
+      "note": "Two SEQUENTIAL (not concurrent -- Section 26 forbids concurrent calls) relocations of layer 0 (CPU->GPU then GPU->CPU). This DOES exercise the same free-on-second-relocation path documented as unsafe in release_failure.json. This particular run did not crash -- consistent with (not contradicting) the disclosed non-uniform manifestation described there; it is NOT treated as evidence the path is safe."
+    }
+  },
+  "requirement_met": "original layer remains valid and usable in all 4 cases -- no half-rebound state observed.",
+  "raw_data": "raw_failure_atomicity.jsonl"
+}

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "phase": "12G",
+  "title": "KV Placement Bottleneck Regime Discovery",
+  "decision_gate": "KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME",
+  "decision_gate_allowed_values": [
+    "KV_PLACEMENT_BOTTLENECK_CONFIRMED",
+    "KV_PLACEMENT_CAPACITY_ONLY_ON_TESTED_REGIME",
+    "KV_PLACEMENT_BOTTLENECK_MODEL_DEPENDENT",
+    "KV_PLACEMENT_BOTTLENECK_BACKEND_LIMITED",
+    "KV_PLACEMENT_BOTTLENECK_INCONCLUSIVE"
+  ],
+  "strongest_slowdown_observed": {
+    "model": "1.5B",
+    "n_ctx": 8192,
+    "kv_precision": "Q8_0",
+    "gpu_kv_pct": 50,
+    "vram_used_mib": 3312,
+    "generation_tok_s_mean": 17.20778,
+    "relative_slowdown_pct": -0.512263961383347,
+    "classification": "NO_BOTTLENECK"
+  },
+  "bottleneck_regime_confirmed": false,
+  "next_step_recommendation": "Stop performance-driven dynamic policy work and focus on capacity/residency productization.",
+  "run_manifest": {
+    "schema_version": 1,
+    "phase": "12G",
+    "sections": {
+      "phase_a_n_points": 50,
+      "phase_a_candidates": [],
+      "phase_b_points": 2,
+      "large_points": 9,
+      "q5_points": 2,
+      "worst_point": {
+        "model": "1.5B",
+        "n_ctx": 8192,
+        "gpu_kv_pct": 50,
+        "slowdown_pct_vs_100gpu": -0.512263961383347
+      }
+    },
+    "wall_clock_s": 1202.2969608306885
+  }
+}

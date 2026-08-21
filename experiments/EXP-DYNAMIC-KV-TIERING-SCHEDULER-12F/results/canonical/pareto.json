@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "axis_x": "gpu_kv_bytes",
+  "axis_y": "generation_tok_s",
+  "points": [
+    {
+      "split": 0,
+      "gpu_kv_bytes": 25067520,
+      "tok_s": 23.5092,
+      "vram_used_mib": 385
+    },
+    {
+      "split": 8,
+      "gpu_kv_bytes": 18382848,
+      "tok_s": 23.7654,
+      "vram_used_mib": 379
+    },
+    {
+      "split": 15,
+      "gpu_kv_bytes": 12533760,
+      "tok_s": 23.9654,
+      "vram_used_mib": 373
+    },
+    {
+      "split": 22,
+      "gpu_kv_bytes": 6684672,
+      "tok_s": 21.9443,
+      "vram_used_mib": 368
+    },
+    {
+      "split": 30,
+      "gpu_kv_bytes": 0,
+      "tok_s": 24.3441,
+      "vram_used_mib": 361
+    }
+  ],
+  "note": "At this model/context scale (135M, ctx=2048) throughput is compute-bound, not KV-placement-bound: tok/s varies only ~21.9-24.3 across the full split range 0-30, consistent with Phase 6.2's finding of no bytes/token win at tested scale."
+}

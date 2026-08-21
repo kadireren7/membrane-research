@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 14/18: attention/graph compatibility -- what actually happens when attention consumes CPU-placed KV while weights/compute are Vulkan. Real ggml_backend_sched diagnostic output, SmolLM2-135M, ctx=16384, Q8_0.",
+  "observed_behavior_classification": "A. graph scheduler inserts required transfers automatically",
+  "evidence": {
+    "split_0_full_gpu": {"graph_nodes": 1296, "graph_splits": 2, "sched_copies": 1},
+    "split_15_half_cpu": {"graph_nodes": 1296, "graph_splits": 32, "sched_copies": 1},
+    "split_25_aggressive_cpu": {"graph_nodes": 1296, "graph_splits": 52, "sched_copies": 1}
+  },
+  "interpretation": "graph_nodes stays constant (1296) across all three configs -- the GRAPH STRUCTURE itself never changes, confirming no attention math or op ordering is altered by placement. graph_splits grows monotonically and substantially with the number of CPU-placed KV layers (2 -> 32 -> 52), confirming ggml_backend_sched automatically detects each CPU/GPU backend boundary crossing and splits the compute graph there, inserting the necessary cross-device tensor copies itself -- this is the SAME pre-existing scheduler machinery that already makes ordinary partial weight offload (--gpu-layers N) work, now also triggered by KV-only placement decisions. No explicit promotion step, no manual copy call, and no product/MEMBRANE code is involved in making this work -- it is transparent to the caller.",
+  "does_attention_partially_execute_on_cpu": "yes, necessarily -- for a CPU-placed layer's KV, the attention op(s) that read that layer's K/V tensors must execute wherever ggml_backend_sched decides to place them relative to the CPU-resident data (consistent with option B also partially applying: some computation does happen on CPU for those layers, via the CPU backend's own kernel implementations, not merely a copy-then-GPU-compute). The scheduler chooses this automatically per node; this phase did not instrument WHICH specific ops end up CPU vs GPU beyond the split-count evidence above.",
+  "answer_option_D_unsupported_error": false,
+  "implications_for_future_dynamic_tiering_section18": {
+    "explicit_promotion_before_attention": "NOT required for correctness at this granularity -- the scheduler already handles it automatically every decode call, since the graph is rebuilt fresh each time (consistent with Phase 12A's architecture.json finding).",
+    "graph_scheduler_copies": "confirmed as the real mechanism (sched copies=1 observed, meaning at least one cross-backend copy operation is being scheduled per graph execution) -- any future promotion/demotion scheduler could potentially just RELY on this existing mechanism rather than building its own copy logic, as long as it is satisfied with the scheduler's own (synchronous, per-decode-call) timing.",
+    "persistent_cpu_execution": "not applicable in the sense of a background thread -- CPU-side attention computation for CPU-placed layers happens synchronously within the SAME decode call, on the calling thread's timeline (consistent with performance.json's finding that overall generation still completes as one blocking call).",
+    "async_copy_prefetch": "not exercised by this mechanism -- ggml_backend_sched's automatic splitting/copying observed here is SYNCHRONOUS (part of the normal graph execution), not the async transfer-queue path Phase 12A's architecture.json separately documented (ggml_backend_tensor_copy_async, pinned-memory-gated). A future prefetch scheduler would still need to build on that separate async mechanism explicitly -- the automatic behavior proven here does not by itself provide overlap/prefetch.",
+    "backend_synchronization": "handled internally by ggml_backend_sched -- not something a MEMBRANE caller needs to manage explicitly for correctness at this granularity, based on the clean, crash-free, token-correct results observed across every configuration tested this phase."
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 27,
+  "patch_file": "patches/llama.cpp-membrane-kv-runtime-relocate.patch",
+  "applies_on_top_of": [
+    "patches/llama.cpp-membrane-kv-type-override.patch",
+    "patches/llama.cpp-membrane-kv-device-override.patch"
+  ],
+  "line_count": {
+    "insertions": 173,
+    "deletions": 0,
+    "comment_or_doc_lines_of_the_insertions": 66,
+    "approx_code_lines": 107
+  },
+  "files_changed": [
+    "include/llama.h",
+    "src/llama-context.cpp",
+    "src/llama-kv-cache.cpp",
+    "src/llama-kv-cache.h"
+  ],
+  "verification": {
+    "clean_reset_to_pristine_then_reapply_all_three_patches_in_order": "byte-identical to the original working state (verified via diff, see architecture.json investigation log)",
+    "compiles_after_reapply": true,
+    "ctest_after_reapply": "69/69"
+  },
+  "patch_size_bar_from_phase12d_spec": "~40-100 LOC if the Phase 12C analysis was correct",
+  "actual_vs_bar": "173 raw insertion lines, of which 66 are comments/contract documentation and ~107 are code -- the code portion is within the original ~40-100 LOC estimate; the total raw line count is somewhat higher because the relocate_layer contract (ownership model, retain_old_backing_for_research semantics, synchronization requirement) is documented in-line rather than left implicit, given how easy this exact primitive proved to misuse (see release_failure.json).",
+  "api_added": [
+    "bool llama_kv_cache::relocate_layer(int32_t il, ggml_backend_buffer_type_t new_buft, bool retain_old_backing_for_research = false) -- llama-kv-cache.h/.cpp",
+    "bool llama_kv_cache_relocate_layer(llama_memory_t mem, int32_t il, ggml_backend_dev_t dev, bool retain_old_backing_for_research = false) -- llama.h/llama-context.cpp, thin C-API wrapper (dynamic_cast to llama_kv_cache)"
+  ],
+  "no_scheduler_graph_or_backend_changes": true,
+  "no_vulkan_specific_logic": true,
+  "no_attention_or_kernel_changes": true,
+  "no_public_policy_flags": true
+}

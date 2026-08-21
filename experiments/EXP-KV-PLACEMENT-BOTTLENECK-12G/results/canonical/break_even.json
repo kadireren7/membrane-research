@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "predeclared_before_seeing_results": true,
+  "bands": [
+    {
+      "range": "< 5%",
+      "label": "NO_BOTTLENECK",
+      "note": "negligible"
+    },
+    {
+      "range": "5-10%",
+      "label": "MINOR",
+      "note": "minor"
+    },
+    {
+      "range": "10-20%",
+      "label": "MEANINGFUL",
+      "note": "meaningful"
+    },
+    {
+      "range": ">= 20%",
+      "label": "STRONG",
+      "note": "strong bottleneck"
+    }
+  ],
+  "bottleneck_regime_criteria": {
+    "min_slowdown_pct": 10.0,
+    "cv_below_half_of_slowdown_capped_at_15pct_absolute": true,
+    "host_batch_must_be_valid": true,
+    "must_persist_at_second_nearby_point_or_config": true
+  }
+}

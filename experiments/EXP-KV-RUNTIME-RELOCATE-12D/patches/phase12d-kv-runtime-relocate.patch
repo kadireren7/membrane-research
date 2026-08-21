@@ -1,0 +1,2094 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e807054..b79aa68 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -211,6 +211,17 @@ add_library(membrane_kv_ownership_state STATIC
+ target_include_directories(membrane_kv_ownership_state PUBLIC
+   tools/membrane-kv-promotion-prefetch)
+ 
++# Phase 12D: llama-free research state machine + transaction bookkeeping
++# for one relocatable KV layer unit (Section 30) -- models what the real
++# llama_kv_cache_relocate_layer() primitive actually does (as opposed to
++# Phase 12C's ownership_state, which modeled an idealized system nothing
++# real achieved yet). RESEARCH ONLY, experiment/kv-runtime-relocate
++# branch only. Never linked into membrane-run.
++add_library(membrane_relocate_state STATIC
++  tools/membrane-kv-runtime-relocate/relocate_state.c)
++target_include_directories(membrane_relocate_state PUBLIC
++  tools/membrane-kv-runtime-relocate)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -357,6 +368,13 @@ if(MEMBRANE_ENABLE_LLAMA)
+   # prefetch branch only, no product CLI exposure.
+   add_subdirectory(tools/membrane-kv-promotion-prefetch)
+ 
++  # Phase 12D: real llama-enabled runtime KV relocate/rebind probe,
++  # exercising the new llama_kv_cache_relocate_layer() primitive
++  # (patches/llama.cpp-membrane-kv-runtime-relocate.patch) added on top
++  # of the Phase 12B kv_dev_override patch. RESEARCH ONLY, experiment/
++  # kv-runtime-relocate branch only, no product CLI exposure.
++  add_subdirectory(tools/membrane-kv-runtime-relocate)
++
+   # Product Phase 5: the live llama.cpp shadow runtime (membrane-llama-
+   # run). Deliberately does NOT use the kv_type_override patch above --
+   # it observes live K/V projection tensors via the clean, unmodified,
+@@ -636,6 +654,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_kv_ownership_state COMMAND test_kv_ownership_state)
+ 
++  add_executable(test_relocate_state
++    tools/membrane-kv-runtime-relocate/test_relocate_state.c)
++  target_link_libraries(test_relocate_state PRIVATE
++    membrane_relocate_state)
++  target_include_directories(test_relocate_state PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_relocate_state COMMAND test_relocate_state)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/patches/llama.cpp-membrane-kv-runtime-relocate.patch b/patches/llama.cpp-membrane-kv-runtime-relocate.patch
+new file mode 100644
+index 0000000..d55650b
+--- /dev/null
++++ b/patches/llama.cpp-membrane-kv-runtime-relocate.patch
+@@ -0,0 +1,224 @@
++diff --git a/include/llama.h b/include/llama.h
++index 6387dae..6679a26 100644
++--- a/include/llama.h
+++++ b/include/llama.h
++@@ -815,6 +815,28 @@ extern "C" {
++     // Check if the memory supports shifting
++     LLAMA_API bool llama_memory_can_shift(llama_memory_t mem);
++ 
+++    // [MEMBRANE] Phase 12D: relocate one KV cache layer's K/V storage
+++    // to a new backend device, copying live contents, while the
+++    // context remains alive. See llama_kv_cache::relocate_layer in
+++    // llama-kv-cache.h for the full contract (in particular: may only
+++    // be called between decode calls with the backend synchronized;
+++    // no in-flight graph may reference the layer being relocated).
+++    // Returns false (mem untouched) if mem is not a plain
+++    // llama_kv_cache (e.g. a recurrent/hybrid/iSWA cache), if il is
+++    // invalid, or if dev/allocation/copy fails. Research-only: not
+++    // used by any product code path.
+++    //
+++    // retain_old_backing_for_research (default false): RESEARCH-ONLY,
+++    // see llama_kv_cache::relocate_layer's contract in llama-kv-cache
+++    // .h. When true, permanently leaks the old backing instead of
+++    // attempting to free it -- never a memory optimization, exists
+++    // only to isolate rebind correctness from release safety.
+++    LLAMA_API bool llama_kv_cache_relocate_layer(
+++            llama_memory_t mem,
+++              int32_t il,
+++              ggml_backend_dev_t dev,
+++              bool retain_old_backing_for_research = false);
+++
++     //
++     // State / sessions
++     //
++diff --git a/src/llama-context.cpp b/src/llama-context.cpp
++index b402b44..b15ed41 100644
++--- a/src/llama-context.cpp
+++++ b/src/llama-context.cpp
++@@ -6,6 +6,7 @@
++ #include "llama-impl.h"
++ #include "llama-batch.h"
++ #include "llama-io.h"
+++#include "llama-kv-cache.h"
++ #include "llama-memory.h"
++ #include "llama-mmap.h"
++ #include "llama-model.h"
++@@ -3946,6 +3947,21 @@ bool llama_memory_can_shift(llama_memory_t mem) {
++     return mem->get_can_shift();
++ }
++ 
+++// [MEMBRANE] Phase 12D: see llama.h for the contract.
+++bool llama_kv_cache_relocate_layer(llama_memory_t mem, int32_t il, ggml_backend_dev_t dev,
+++        bool retain_old_backing_for_research) {
+++    if (!mem || !dev) {
+++        return false;
+++    }
+++
+++    auto * kv = dynamic_cast<llama_kv_cache *>(mem);
+++    if (!kv) {
+++        return false;
+++    }
+++
+++    return kv->relocate_layer(il, ggml_backend_dev_buffer_type(dev), retain_old_backing_for_research);
+++}
+++
++ // llama state API
++ 
++ // deprecated
++diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
++index 48350c0..8df389a 100644
++--- a/src/llama-kv-cache.cpp
+++++ b/src/llama-kv-cache.cpp
++@@ -1266,6 +1266,113 @@ ggml_tensor * llama_kv_cache::get_k_storage(int32_t il) const {
++     return layers[ikv].k;
++ }
++ 
+++// [MEMBRANE] Phase 12D: see llama-kv-cache.h for the contract.
+++bool llama_kv_cache::relocate_layer(int32_t il, ggml_backend_buffer_type_t new_buft,
+++        bool retain_old_backing_for_research) {
+++    if (!new_buft) {
+++        return false;
+++    }
+++
+++    const auto it = map_layer_ids.find(il);
+++    if (it == map_layer_ids.end()) {
+++        return false;
+++    }
+++    const int32_t ikv = it->second;
+++
+++    kv_layer & layer = layers[ikv];
+++
+++    ggml_tensor * old_k = layer.k;
+++    ggml_tensor * old_v = layer.v;
+++    if (!old_k) {
+++        return false;
+++    }
+++
+++    // dedicated ggml_context for exactly this layer's new K/V (+ stream
+++    // views) -- never shared with any other layer, so a future
+++    // relocation of THIS layer can always tell whether the buffer it is
+++    // leaving is safe to free (see the scan below).
+++    ggml_init_params ip = {
+++        /*.mem_size   =*/ size_t(2u*(1 + n_stream)*ggml_tensor_overhead()),
+++        /*.mem_buffer =*/ nullptr,
+++        /*.no_alloc   =*/ true,
+++    };
+++    ggml_context_ptr new_ctx { ggml_init(ip) };
+++    if (!new_ctx) {
+++        return false;
+++    }
+++
+++    ggml_tensor * new_k = ggml_new_tensor(new_ctx.get(), old_k->type, GGML_MAX_DIMS, old_k->ne);
+++    ggml_format_name(new_k, "cache_k_l%d", il);
+++
+++    ggml_tensor * new_v = nullptr;
+++    if (old_v) {
+++        new_v = ggml_new_tensor(new_ctx.get(), old_v->type, GGML_MAX_DIMS, old_v->ne);
+++        ggml_format_name(new_v, "cache_v_l%d", il);
+++    }
+++
+++    std::vector<ggml_tensor *> new_k_stream;
+++    std::vector<ggml_tensor *> new_v_stream;
+++    for (uint32_t s = 0; s < n_stream; ++s) {
+++        new_k_stream.push_back(ggml_view_2d(new_ctx.get(), new_k, new_k->ne[0], new_k->ne[1], new_k->nb[1], s*new_k->nb[2]));
+++        new_v_stream.push_back(new_v ? ggml_view_2d(new_ctx.get(), new_v, new_v->ne[0], new_v->ne[1], new_v->nb[1], s*new_v->nb[2]) : nullptr);
+++    }
+++
+++    // step 5/8: allocate destination backend buffer -- any failure here
+++    // leaves the original layer completely untouched (fail-closed).
+++    ggml_backend_buffer_t new_buf_raw = ggml_backend_alloc_ctx_tensors_from_buft(new_ctx.get(), new_buft);
+++    if (!new_buf_raw) {
+++        return false;
+++    }
+++    ggml_backend_buffer_ptr new_buf { new_buf_raw };
+++
+++    // steps 6/7: copy live K then V. ggml_backend_tensor_copy handles
+++    // cross-device (CPU<->GPU) copies via the destination backend's
+++    // set_tensor/get_tensor path; any failure leaves layer untouched.
+++    ggml_backend_tensor_copy(old_k, new_k);
+++    if (old_v) {
+++        ggml_backend_tensor_copy(old_v, new_v);
+++    }
+++
+++    // step 9: the caller contract (see header) requires the backend to
+++    // already be synchronized before calling relocate_layer, so no
+++    // additional sync is issued here -- ggml_backend_tensor_copy itself
+++    // is synchronous (blocks until the copy completes).
+++
+++    ggml_backend_buffer_t old_buf = old_k->buffer;
+++
+++    // step 10: switch persistent references only now, after the copy
+++    // has fully succeeded.
+++    layer.k = new_k;
+++    layer.v = new_v;
+++    layer.k_stream = std::move(new_k_stream);
+++    layer.v_stream = std::move(new_v_stream);
+++
+++    ctxs_bufs.emplace_back(std::move(new_ctx), std::move(new_buf));
+++
+++    // step 12: release source backing only if safe -- scan every layer
+++    // (including this one's NEW tensors, which no longer point at
+++    // old_buf) for any remaining reference to old_buf. If none remain,
+++    // old_buf is not the shared construction-time bulk buffer for any
+++    // still-live layer and can be physically freed now.
+++    bool old_buf_still_referenced = false;
+++    for (const auto & other_layer : layers) {
+++        if (other_layer.k->buffer == old_buf || (other_layer.v && other_layer.v->buffer == old_buf)) {
+++            old_buf_still_referenced = true;
+++            break;
+++        }
+++    }
+++    if (!old_buf_still_referenced && !retain_old_backing_for_research) {
+++        for (auto jt = ctxs_bufs.begin(); jt != ctxs_bufs.end(); ++jt) {
+++            if (jt->second.get() == old_buf) {
+++                ctxs_bufs.erase(jt);
+++                break;
+++            }
+++        }
+++    }
+++
+++    return true;
+++}
+++
++ uint32_t llama_kv_cache::get_n_kv(const slot_info & sinfo) const {
++     uint32_t result = 0;
++ 
++diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
++index cbd911b..631d74e 100644
++--- a/src/llama-kv-cache.h
+++++ b/src/llama-kv-cache.h
++@@ -176,6 +176,34 @@ public:
++     std::vector<uint32_t> get_layer_ids() const;
++     ggml_tensor * get_k_storage(int32_t il) const;
++ 
+++    // [MEMBRANE] Phase 12D: relocate one KV cache layer's K/V storage
+++    // to a new backend buffer type, copying live contents. May only be
+++    // called between decode calls with the backend already
+++    // synchronized (no in-flight graph may reference the layer being
+++    // relocated). The new K/V tensors always get a freshly allocated,
+++    // dedicated (ggml_context, ggml_backend_buffer) pair -- never a
+++    // slice of the shared construction-time bulk buffer other layers
+++    // may still live in. The old backing is physically freed only if,
+++    // after the rebind, no other layer's tensors still reference it
+++    // (true for a layer's own previously-dedicated buffer from an
+++    // earlier relocate_layer call; never true the first time a layer
+++    // moves out of the original shared bulk buffer). On any failure
+++    // the original layer is left completely untouched. Returns true
+++    // on success.
+++    //
+++    // [MEMBRANE] retain_old_backing_for_research (default false):
+++    // RESEARCH-ONLY escape hatch. When true, the old backing is NEVER
+++    // physically freed, regardless of the reference scan above -- this
+++    // exists solely to isolate whether a given failure is caused by
+++    // rebind correctness or by backing release, per the Phase 12D
+++    // investigation (results/phase12/runtime-relocate/release_failure
+++    // .json vs repeated_same_layer_retained.json). It is NOT a memory
+++    // optimization and must never be presented as one: every retained
+++    // buffer stays fully, permanently allocated. Default (false)
+++    // preserves the real release-attempt behavior described above.
+++    bool relocate_layer(int32_t il, ggml_backend_buffer_type_t new_buft,
+++            bool retain_old_backing_for_research = false);
+++
++     //
++     // graph_build API
++     //
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 94725a2..f9c2c37 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1872,6 +1872,263 @@ def _c87():
+ 	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} valid, all non-action flags confirmed True"
+ 
+ 
++V12D_DIR = REPO_ROOT / "results" / "phase12" / "runtime-relocate"
++_V12D_CACHE = {}
++
++
++def _load_v12d(name):
++	key = name
++	if key not in _V12D_CACHE:
++		path = V12D_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12D_CACHE[key] = rows
++		elif name.endswith(".txt"):
++			_V12D_CACHE[key] = path.read_text()
++		else:
++			_V12D_CACHE[key] = json.loads(path.read_text())
++	return _V12D_CACHE[key]
++
++
++@check("Phase 12D: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual file in the directory (json/jsonl/txt, including "
++	"itself) and no others")
++def _c88():
++	if not (V12D_DIR / "manifest.json").exists():
++		return False, f"{V12D_DIR}/manifest.json does not exist"
++	m = _load_v12d("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V12D_DIR.glob("*") if p.suffix in (".json", ".jsonl", ".txt")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
++@check("Phase 12D: single_cpu_gpu.json / single_gpu_cpu.json poison "
++	"results are recomputed exactly from their raw relocate-mode files")
++def _c89():
++	bad = []
++	for artifact_name, raw_name in (
++		("single_cpu_gpu.json", "raw_relocate_135m_layer4_cpu_to_gpu.json"),
++		("single_gpu_cpu.json", "raw_relocate_135m_layer20_gpu_to_cpu.json"),
++	):
++		art = _load_v12d(artifact_name)
++		raw = _load_v12d(raw_name)
++		for field in ("ok", "pointer_changed", "device_matches_target", "poison_had_no_effect_on_output"):
++			if art.get(field) != raw.get(field):
++				bad.append(f"{artifact_name}.{field}={art.get(field)!r} != raw {raw.get(field)!r}")
++		if art.get("poison_had_no_effect_on_output") is not True:
++			bad.append(f"{artifact_name}: poison test did not confirm live rebind")
++	return len(bad) == 0, "; ".join(bad) if bad else "both single-relocation poison results match raw data and confirm live rebind"
++
++
++@check("Phase 12D: repeated_same_layer_retained.json's ground-truth "
++	"poison result is recomputed exactly from raw_repeated_same_layer_"
++	"retained_135m_layer4.json, and retain_old_backing_for_research is "
++	"true (this is the retained-backing case, not the release case)")
++def _c90():
++	art = _load_v12d("repeated_same_layer_retained.json")
++	raw = _load_v12d("raw_repeated_same_layer_retained_135m_layer4.json")
++	bad = []
++	if raw.get("retain_old_backing_for_research") is not True:
++		bad.append("raw file was not run with retain_old_backing_for_research=true")
++	gt_raw = raw.get("points", {}).get("ground_truth_poison_test", {})
++	gt_art = art.get("ground_truth_poison_test", {})
++	if gt_art.get("control_matches_clean_reference") != gt_raw.get("control_matches_clean_reference"):
++		bad.append("control_matches_clean_reference mismatches raw data")
++	if gt_raw.get("generated_after_poisoning_reloc1_dest") != gt_raw.get("independent_clean_reference_same_position"):
++		bad.append("raw generated sequences do not actually match token-for-token (claim would be unsupported)")
++	if art.get("relocation_1_ok") is not True or art.get("relocation_2_ok") is not True:
++		bad.append("one of the two relocations did not report ok=true")
++	return len(bad) == 0, "; ".join(bad) if bad else "repeated-same-layer retained case recomputed exactly from raw data, both relocations succeeded, ground truth confirms authoritative new backing"
++
++
++@check("Phase 12D: release_failure.json documents a real crash (not a "
++	"clean success) for both trials, and does not claim the "
++	"non-crashing roundtrip variant proves release is safe")
++def _c91():
++	art = _load_v12d("release_failure.json")
++	bad = []
++	for trial in ("trial_1_no_settle", "trial_2_with_4_settle_decodes"):
++		t = art.get(trial, {})
++		if t.get("crash") is not True:
++			bad.append(f"{trial}: crash is not True")
++		if "SIG" not in str(t.get("exit_signal", "")) and "ASSERT" not in str(t.get("exit_signal", "")):
++			bad.append(f"{trial}: exit_signal does not look like a real crash signal: {t.get('exit_signal')!r}")
++	counter = art.get("non_crashing_counter_example_disclosed_honestly", {})
++	note = counter.get("note", "")
++	if "NOT" not in note and "not" not in note:
++		bad.append("non-crashing counter-example is not explicitly disclaimed as not proving safety")
++	conclusion = art.get("conclusion", "").lower()
++	if "unsafe" not in conclusion and "must be retained" not in conclusion:
++		bad.append("conclusion does not state the release path is unsafe / backing must be retained")
++	return len(bad) == 0, "; ".join(bad) if bad else "both crash trials documented as real crashes; non-crashing pattern explicitly disclaimed, not used to claim safety"
++
++
++@check("Phase 12D: different_layer_control.json is backed by raw data "
++	"and shows both relocations + post-relocate generation succeeded")
++def _c92():
++	art = _load_v12d("different_layer_control.json")
++	raw = _load_v12d("raw_different_layer_control_135m.json")
++	bad = []
++	if art.get("all_relocations_ok") != raw.get("all_relocations_ok") or raw.get("all_relocations_ok") is not True:
++		bad.append("all_relocations_ok mismatch or not true")
++	if art.get("post_relocate_generation_ok") != raw.get("post_relocate_generation_ok") or raw.get("post_relocate_generation_ok") is not True:
++		bad.append("post_relocate_generation_ok mismatch or not true")
++	return len(bad) == 0, "; ".join(bad) if bad else "different-layer control backed by raw data, both relocations and generation succeeded"
++
++
++@check("Phase 12D: weights_unchanged.json's per-trial rows show "
++	"weight_device identical before/after relocation, backed by raw "
++	"weights_table data")
++def _c93():
++	art = _load_v12d("weights_unchanged.json")
++	raw_cpu2gpu = _load_v12d("raw_weights_table_135m_cpu_to_gpu.json")
++	raw_gpu2cpu = _load_v12d("raw_weights_table_135m_gpu_to_cpu.json")
++	bad = []
++	for trial_key, raw, layer in (
++		("cpu_to_gpu_trial", raw_cpu2gpu, 4),
++		("gpu_to_cpu_trial", raw_gpu2cpu, 20),
++	):
++		trial = art.get(trial_key, {})
++		raw_row = next((r for r in raw.get("rows", []) if r.get("layer") == layer), None)
++		if raw_row is None:
++			bad.append(f"{trial_key}: no raw row for layer {layer}")
++			continue
++		if trial.get("row") != raw_row:
++			bad.append(f"{trial_key}: row does not match raw data exactly")
++		if raw_row.get("kv_before") == raw_row.get("kv_after"):
++			bad.append(f"{trial_key}: kv_before == kv_after, no relocation actually recorded")
++	return len(bad) == 0, "; ".join(bad) if bad else "weight rows match raw data exactly; KV device genuinely changed in both trials"
++
++
++@check("Phase 12D: patch_scope.json's line counts are recomputed "
++	"exactly from the real patch file, which applies cleanly on a "
++	"clean reset + reapply of the two prior patches")
++def _c94():
++	patch_path = REPO_ROOT / "patches" / "llama.cpp-membrane-kv-runtime-relocate.patch"
++	if not patch_path.exists():
++		return False, f"{patch_path} does not exist"
++	text = patch_path.read_text()
++	lines = text.splitlines()
++	ins = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
++	dels = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
++	ps = _load_v12d("patch_scope.json")
++	claimed = ps.get("line_count", {})
++	bad = []
++	if ins != claimed.get("insertions"):
++		bad.append(f"recomputed insertions={ins} != claimed {claimed.get('insertions')}")
++	if dels != claimed.get("deletions"):
++		bad.append(f"recomputed deletions={dels} != claimed {claimed.get('deletions')}")
++	if ps.get("verification", {}).get("ctest_after_reapply") not in ("69/69",):
++		bad.append("verification.ctest_after_reapply is not recorded as 69/69")
++	return len(bad) == 0, "; ".join(bad) if bad else "patch line counts recomputed exactly from the real patch file, reapply verification recorded"
++
++
++@check("Phase 12D: q5.json and second_model.json are backed by their "
++	"raw relocate-mode files and both confirm live rebind via poison")
++def _c95():
++	bad = []
++	for artifact_name, raw_name in (
++		("q5.json", "raw_q5_relocate_135m_layer4.json"),
++		("second_model.json", "raw_second_model_360m_relocate_layer4.json"),
++	):
++		art = _load_v12d(artifact_name)
++		raw = _load_v12d(raw_name)
++		if art.get("ok") != raw.get("ok") or raw.get("ok") is not True:
++			bad.append(f"{artifact_name}: ok mismatch or not true")
++		if art.get("poison_had_no_effect_on_output") != raw.get("poison_had_no_effect_on_output") or raw.get("poison_had_no_effect_on_output") is not True:
++			bad.append(f"{artifact_name}: poison result mismatch or not true")
++	return len(bad) == 0, "; ".join(bad) if bad else "Q5 and second-model representative trials both backed by raw data and poison-confirmed"
++
++
++@check("Phase 12D: failure_atomicity.json's 4 cases all report the "
++	"original layer as untouched (no half-rebound state), backed by "
++	"raw_failure_atomicity.jsonl")
++def _c96():
++	art = _load_v12d("failure_atomicity.json")
++	raw = _load_v12d("raw_failure_atomicity.jsonl")
++	bad = []
++	if len(raw) < 4:
++		bad.append(f"only {len(raw)} raw failure cases, need >= 4")
++	for r in raw:
++		if r.get("layer0_pointer_untouched") is not True:
++			bad.append(f"case {r.get('case')!r}: layer0_pointer_untouched is not True")
++	cases = art.get("cases", {})
++	if len(cases) < 4:
++		bad.append(f"only {len(cases)} documented cases, need >= 4")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(raw)} raw failure cases, all show the original layer untouched"
++
++
++@check("Phase 12D: summary.json's decision_gate is exactly "
++	"RUNTIME_KV_RELOCATE_WORKS_BUT_LEAKS_BACKING (not VIABLE), every "
++	"explicit_non_actions_confirmed flag is True, and the verdict was "
++	"not softened")
++def _c97():
++	s = _load_v12d("summary.json")
++	valid = {
++		"RUNTIME_KV_RELOCATE_VIABLE",
++		"RUNTIME_KV_RELOCATE_WORKS_BUT_LEAKS_BACKING",
++		"RUNTIME_KV_RELOCATE_TOO_INVASIVE",
++		"RUNTIME_KV_RELOCATE_BACKEND_LIMITED",
++		"RUNTIME_KV_RELOCATE_REQUIRES_DEEP_SCHEDULER_CHANGE",
++		"RUNTIME_KV_RELOCATE_INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the six valid values")
++	if gate != "RUNTIME_KV_RELOCATE_WORKS_BUT_LEAKS_BACKING":
++		bad.append(f"decision_gate={gate!r}, expected RUNTIME_KV_RELOCATE_WORKS_BUT_LEAKS_BACKING per the closing-checkpoint instruction")
++	non_actions = s.get("explicit_non_actions_confirmed", {})
++	if not non_actions or not all(non_actions.values()):
++		bad.append(f"explicit_non_actions_confirmed has a False/missing flag: {non_actions}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} exactly matches the required verdict, all non-action flags confirmed True"
++
++
++@check("Phase 12D: no artifact claims the exact internal root cause "
++	"of the release failure is fully/conclusively identified -- "
++	"architecture.json and summary.json must both disclose it as "
++	"unknown/unconfirmed")
++def _c98():
++	arch = _load_v12d("architecture.json")
++	summ = _load_v12d("summary.json")
++	bad = []
++	statement = arch.get("known_safe_statement", "")
++	if "not confirmed" not in statement and "UNKNOWN" not in statement and "unknown" not in statement.lower():
++		bad.append("architecture.json's known_safe_statement does not disclose the root cause as unknown/unconfirmed")
++	unknowns = summ.get("what_remains_unknown", [])
++	if not unknowns:
++		bad.append("summary.json has no what_remains_unknown entries")
++	full_text = json.dumps(arch) + json.dumps(summ)
++	if "scheduler bug" in full_text.lower() and "not confirmed" not in full_text.lower() and "not treated as" not in full_text.lower():
++		bad.append("root cause is called a 'scheduler bug' without a not-confirmed disclaimer nearby")
++	return len(bad) == 0, "; ".join(bad) if bad else "root cause explicitly disclosed as unknown/unconfirmed in both architecture.json and summary.json"
++
++
++@check("Phase 12D: no absolute filesystem paths (/home/..., /tmp/..., "
++	"etc.) leaked in any runtime-relocate .json/.jsonl/.txt artifact")
++def _c99():
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	hits = []
++	for path in sorted(V12D_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl", ".txt"):
++			continue
++		found = pattern.findall(path.read_text())
++		found = [h for h in found if not h.startswith("/models/") and "ggml-vulkan.cpp" not in h]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all runtime-relocate artifact files"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1897,6 +2154,7 @@ def main() -> int:
+ 			_c62, _c63,
+ 			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73, _c74, _c75,
+ 			_c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83, _c84, _c85, _c86, _c87,
++			_c88, _c89, _c90, _c91, _c92, _c93, _c94, _c95, _c96, _c97, _c98, _c99,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-runtime-relocate/CMakeLists.txt b/tools/membrane-kv-runtime-relocate/CMakeLists.txt
+new file mode 100644
+index 0000000..bfaa685
+--- /dev/null
++++ b/tools/membrane-kv-runtime-relocate/CMakeLists.txt
+@@ -0,0 +1,11 @@
++# Phase 12D: research-only KV runtime relocate/rebind probe, exercising
++# llama_kv_cache_relocate_layer() (patches/llama.cpp-membrane-kv-
++# runtime-relocate.patch). No product CLI exposure -- experiment/
++# kv-runtime-relocate branch only.
++
++add_executable(membrane-kv-runtime-relocate-probe relocate_probe.cpp)
++set_target_properties(membrane-kv-runtime-relocate-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-runtime-relocate-probe PRIVATE llama
++  membrane_relocate_state)
+diff --git a/tools/membrane-kv-runtime-relocate/relocate_probe.cpp b/tools/membrane-kv-runtime-relocate/relocate_probe.cpp
+new file mode 100644
+index 0000000..a5912a3
+--- /dev/null
++++ b/tools/membrane-kv-runtime-relocate/relocate_probe.cpp
+@@ -0,0 +1,1117 @@
++/*
++ * Phase 12D: real llama-enabled probe for the new
++ * llama_kv_cache_relocate_layer() primitive
++ * (patches/llama.cpp-membrane-kv-runtime-relocate.patch), built on top
++ * of the Phase 12B kv_dev_override patch. Deterministic/manual calls
++ * only -- no adaptive policy, no product CLI exposure. RESEARCH ONLY,
++ * experiment/kv-runtime-relocate branch only.
++ *
++ * Unlike Phase 12C's promotion_probe.cpp (which only proved BYTE
++ * COPIES work, via scratch tensors the live decode graph never read),
++ * every mode here calls the REAL relocate_layer() primitive, which
++ * switches llama_kv_cache's own persistent layers[il].k/.v references.
++ * The poison test below poisons the OLD (now-unreferenced but often
++ * still-allocated) source tensor DIRECTLY -- if generation is
++ * unaffected, decode is provably reading the NEW tensor.
++ *
++ * Modes needing a real model (mp.n_gpu_layers=-1, weights always fully
++ * GPU-resident, kv_dev_override splits initial KV placement only):
++ *   info                MODEL n_ctx kv_type split
++ *   relocate            MODEL n_ctx kv_type split layer target[cpu|gpu] [poison]
++ *   roundtrip           MODEL n_ctx kv_type split layer
++ *   cycle               MODEL n_ctx kv_type split layer cycles
++ *   multi               MODEL n_ctx kv_type split direction[to_gpu|to_cpu] layer...
++ *   weights_table       MODEL n_ctx kv_type split relocate_layer
++ *   latency             MODEL n_ctx kv_type split direction[to_gpu|to_cpu] reps layer...
++ *   state_save          MODEL n_ctx kv_type split layer
++ *   repro2              MODEL n_ctx kv_type split layer retain|noretain
++ *                       (root-cause reproducer: same layer CPU->GPU->CPU,
++ *                       ground-truth poison test; retain leaks old backing
++ *                       instead of freeing it -- see relocate_state.h)
++ *   failure             MODEL n_ctx kv_type split case[invalid_layer|invalid_dev|same_dev|duplicate]
++ */
++#include <algorithm>
++#include <chrono>
++#include <cstdint>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <fstream>
++#include <string>
++#include <vector>
++
++#include "ggml-backend.h"
++#include "llama.h"
++#include "relocate_state.h"
++
++/* ---------- shared plumbing (mirrors promotion_probe.cpp) ---------- */
++
++struct capture_ctx_t
++{
++	int32_t						n_layer;
++	std::vector<ggml_tensor *>	k_leaf;
++	std::vector<ggml_tensor *>	v_leaf;
++};
++
++static bool	layer_from_name(const char *name, const char *prefix, int32_t *out)
++{
++	size_t	plen = strlen(prefix);
++	char	*end;
++	long	v;
++
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer < c->n_layer)
++		c->k_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer < c->n_layer)
++		c->v_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++struct split_ctx_t
++{
++	int32_t	split;
++};
++
++static ggml_backend_dev_t	split_kv_dev_override(int32_t il,
++				ggml_backend_dev_t default_dev, void *ud)
++{
++	split_ctx_t	*s = static_cast<split_ctx_t *>(ud);
++
++	if (il < s->split)
++		return (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++	return (default_dev);
++}
++
++static uint64_t	read_rss_kb(void)
++{
++	std::ifstream	f("/proc/self/status");
++	std::string		line;
++
++	while (std::getline(f, line))
++	{
++		if (line.compare(0, 6, "VmRSS:") == 0)
++			return ((uint64_t)strtoull(line.c_str() + 6, nullptr, 10));
++	}
++	return (0);
++}
++
++static long	nvidia_smi_used_mib(void)
++{
++	FILE	*p = popen(
++		"nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null",
++		"r");
++	char	buf[64];
++	long	v = -1;
++
++	if (p == nullptr)
++		return (-1);
++	if (fgets(buf, sizeof(buf), p) != nullptr)
++		v = strtol(buf, nullptr, 10);
++	pclose(p);
++	return (v);
++}
++
++static double	now_ms(void)
++{
++	auto	t = std::chrono::steady_clock::now();
++
++	return (std::chrono::duration<double, std::milli>(
++		t.time_since_epoch()).count());
++}
++
++static const char	*kv_type_name(const char *s)
++{
++	if (strcmp(s, "q8") == 0)
++		return ("Q8_0");
++	if (strcmp(s, "q5") == 0)
++		return ("Q5_1");
++	return ("F16");
++}
++
++static uint64_t	fnv1a(const uint8_t *p, size_t n)
++{
++	uint64_t	h = 1469598103934665603ULL;
++
++	for (size_t i = 0; i < n; i++)
++	{
++		h ^= p[i];
++		h *= 1099511628211ULL;
++	}
++	return (h);
++}
++
++struct loaded_t
++{
++	llama_model			*model;
++	llama_context		*ctx;
++	llama_memory_t		mem;
++	capture_ctx_t		cap;
++	int32_t				n_layer;
++	const llama_vocab	*vocab;
++};
++
++static bool	load_ctx(const char *model_path, int32_t n_ctx,
++			const char *kv_type_str, int32_t split, loaded_t *out)
++{
++	llama_model_params	mp = llama_model_default_params();
++
++	mp.n_gpu_layers = -1;
++	out->model = llama_model_load_from_file(model_path, mp);
++	if (out->model == nullptr)
++		return (false);
++	out->n_layer = llama_model_n_layer(out->model);
++	out->vocab = llama_model_get_vocab(out->model);
++	out->cap.n_layer = out->n_layer;
++	out->cap.k_leaf.assign(out->n_layer, nullptr);
++	out->cap.v_leaf.assign(out->n_layer, nullptr);
++
++	static split_ctx_t	split_ctx;
++	split_ctx.split = split;
++
++	ggml_type	kvt = strcmp(kv_type_str, "q8") == 0 ? GGML_TYPE_Q8_0
++		: strcmp(kv_type_str, "q5") == 0 ? GGML_TYPE_Q5_1 : GGML_TYPE_F16;
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.type_k = kvt;
++	cp.type_v = kvt;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &out->cap;
++	if (split >= 0)
++	{
++		cp.kv_dev_override = split_kv_dev_override;
++		cp.kv_dev_override_ud = &split_ctx;
++	}
++	out->ctx = llama_init_from_model(out->model, cp);
++	if (out->ctx == nullptr)
++		return (false);
++	out->mem = llama_get_memory(out->ctx);
++	return (true);
++}
++
++static void	free_loaded(loaded_t *l)
++{
++	if (l->ctx)
++		llama_free(l->ctx);
++	if (l->model)
++		llama_model_free(l->model);
++	l->ctx = nullptr;
++	l->model = nullptr;
++}
++
++static bool	decode_prompt(loaded_t *l, const char *prompt)
++{
++	std::vector<llama_token>	tokens(256);
++	int	n = llama_tokenize(l->vocab, prompt, (int32_t)strlen(prompt),
++			tokens.data(), (int32_t)tokens.size(), true, false);
++
++	if (n < 0)
++		return (false);
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	return (llama_decode(l->ctx, batch) == 0);
++}
++
++static bool	generate_greedy(loaded_t *l, int gen_tokens,
++			std::vector<llama_token> *out)
++{
++	int32_t	n_vocab = llama_vocab_n_tokens(l->vocab);
++
++	out->clear();
++	for (int i = 0; i < gen_tokens; i++)
++	{
++		const float	*logits = llama_get_logits_ith(l->ctx, -1);
++		int	best = 0;
++
++		for (int j = 1; j < n_vocab; j++)
++			if (logits[j] > logits[best])
++				best = j;
++		llama_token	tok = (llama_token)best;
++		out->push_back(tok);
++		llama_batch	b1 = llama_batch_get_one(&tok, 1);
++		if (llama_decode(l->ctx, b1) != 0)
++			return (false);
++	}
++	return (true);
++}
++
++static void	print_tokens(FILE *fp, const std::vector<llama_token> &v)
++{
++	for (size_t i = 0; i < v.size(); i++)
++		fprintf(fp, "%s%d", i == 0 ? "" : ",", v[i]);
++}
++
++static ggml_backend_dev_t	dev_for(const char *name)
++{
++	if (strcmp(name, "gpu") == 0)
++		return (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU));
++	return (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++}
++
++static bool	layer_is_cpu(ggml_tensor *k)
++{
++	return (k && strstr(ggml_backend_buffer_name(k->buffer), "CPU") != nullptr);
++}
++
++/* ---------- mode: info ---------- */
++
++static int	cmd_info(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "load failed\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "load ok but prompt decode failed\n");
++		free_loaded(&l);
++		return (13);
++	}
++	printf("{\"schema_version\":1,\"mode\":\"info\",\"model\":\"%s\","
++		"\"n_layer\":%d,\"n_ctx\":%d,\"kv_type\":\"%s\",\"split\":%d,"
++		"\"layers\":[", model, l.n_layer, n_ctx, kv_type_name(kvt), split);
++	int	n_cpu_kv = 0, n_gpu_kv = 0;
++	for (int32_t i = 0; i < l.n_layer; i++)
++	{
++		uint64_t	kb = l.cap.k_leaf[i] ? ggml_nbytes(l.cap.k_leaf[i]) : 0;
++		uint64_t	vb = l.cap.v_leaf[i] ? ggml_nbytes(l.cap.v_leaf[i]) : 0;
++		const char	*kbuf = l.cap.k_leaf[i] ? ggml_backend_buffer_name(l.cap.k_leaf[i]->buffer) : "MISSING";
++		bool	kv_cpu = layer_is_cpu(l.cap.k_leaf[i]);
++
++		if (kv_cpu)
++			n_cpu_kv++;
++		else
++			n_gpu_kv++;
++		printf("%s{\"layer\":%d,\"k_bytes\":%llu,\"v_bytes\":%llu,"
++			"\"kv_device\":\"%s\"}",
++			i == 0 ? "" : ",", i,
++			(unsigned long long)kb, (unsigned long long)vb, kbuf);
++	}
++	printf("],\"n_cpu_kv_layers\":%d,\"n_gpu_kv_layers\":%d,"
++		"\"vram_used_mib\":%ld}\n",
++		n_cpu_kv, n_gpu_kv, nvidia_smi_used_mib());
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: relocate ---------- */
++
++static int	cmd_relocate(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int32_t layer, const char *target, bool poison)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	if (layer < 0 || layer >= l.n_layer)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"relocate\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"invalid_layer\"}\n", layer);
++		free_loaded(&l);
++		return (10);
++	}
++
++	ggml_tensor	*old_k = l.cap.k_leaf[layer];
++	ggml_tensor	*old_v = l.cap.v_leaf[layer];
++	uint64_t	kb = ggml_nbytes(old_k);
++	uint64_t	vb = ggml_nbytes(old_v);
++	std::vector<uint8_t>	old_kbuf(kb), old_vbuf(vb);
++
++	ggml_backend_tensor_get(old_k, old_kbuf.data(), 0, kb);
++	ggml_backend_tensor_get(old_v, old_vbuf.data(), 0, vb);
++	uint64_t	src_hash_k = fnv1a(old_kbuf.data(), kb);
++	uint64_t	src_hash_v = fnv1a(old_vbuf.data(), vb);
++
++	ggml_backend_dev_t	dst_dev = dev_for(target);
++	if (!dst_dev)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"relocate\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"backend_unavailable\"}\n", layer);
++		free_loaded(&l);
++		return (20);
++	}
++
++	long	vram_before = nvidia_smi_used_mib();
++	uint64_t	rss_before = read_rss_kb();
++	double	t0 = now_ms();
++	llama_synchronize(l.ctx);
++	bool	ok = llama_kv_cache_relocate_layer(l.mem, layer, dst_dev);
++	double	t1 = now_ms();
++	long	vram_after_relocate = nvidia_smi_used_mib();
++	uint64_t	rss_after_relocate = read_rss_kb();
++
++	if (!ok)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"relocate\",\"layer\":%d,"
++			"\"ok\":false,\"error\":\"relocate_call_failed\"}\n", layer);
++		free_loaded(&l);
++		return (14);
++	}
++
++	/* re-run decode so cb_eval repopulates cap.k_leaf/v_leaf with
++	 * whatever layers[ikv].k/.v CURRENTLY point to -- if relocate
++	 * really switched the persistent reference, this MUST be a
++	 * different tensor object than old_k/old_v. */
++	if (!decode_prompt(&l, "and then a second sentence"))
++	{
++		fprintf(stderr, "{\"error\":\"post_relocate_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	ggml_tensor	*new_k = l.cap.k_leaf[layer];
++	ggml_tensor	*new_v = l.cap.v_leaf[layer];
++	bool	pointer_changed = (new_k != old_k) && (new_v != old_v);
++	const char	*new_device = ggml_backend_buffer_name(new_k->buffer);
++	bool	device_matches_target = (strcmp(target, "gpu") == 0)
++		== (strstr(new_device, "CPU") == nullptr);
++
++	std::vector<uint8_t>	new_kbuf(kb), new_vbuf(vb);
++	(void)new_kbuf;
++	(void)new_vbuf;
++
++	/* generated_control: this context (l), no poisoning -- always
++	 * produced, at THIS exact sequence position (right after the
++	 * post-relocate decode above). */
++	std::vector<llama_token>	gen_control;
++	generate_greedy(&l, 8, &gen_control);
++
++	bool	poison_ran = false;
++	bool	poison_had_no_effect = false;
++	std::vector<llama_token>	gen_poisoned;
++	if (poison)
++	{
++		/* Apples-to-apples poison test: an INDEPENDENT fresh context
++		 * (l2) follows the IDENTICAL schedule (load, prompt, relocate,
++		 * "second sentence") to reach the exact same sequence position
++		 * as gen_control above, then poisons the OLD source tensor
++		 * (still a valid, writable ggml_tensor -- its ggml_context was
++		 * only freed if relocate's cleanup logic found nothing else
++		 * referencing its buffer, which is never true on a layer's
++		 * FIRST relocation away from the shared construction-time bulk
++		 * buffer, since other layers still reference it) BEFORE
++		 * generating. Comparing gen_poisoned to gen_control (same
++		 * position, same schedule, only the poison differs) is the
++		 * correct apples-to-apples test -- generating twice on the
++		 * SAME context (as an earlier version of this probe did) would
++		 * compare two DIFFERENT sequence positions and is not valid. */
++		loaded_t	l2{};
++		load_ctx(model, n_ctx, kvt, split, &l2);
++		decode_prompt(&l2, "The quick brown fox jumps over the lazy dog");
++		ggml_tensor	*old_k2 = l2.cap.k_leaf[layer];
++		ggml_tensor	*old_v2 = l2.cap.v_leaf[layer];
++		std::vector<uint8_t>	poison_k(kb, 0xAA), poison_v(vb, 0xAA);
++		llama_synchronize(l2.ctx);
++		llama_kv_cache_relocate_layer(l2.mem, layer, dst_dev);
++		decode_prompt(&l2, "and then a second sentence");
++		ggml_backend_tensor_set(old_k2, poison_k.data(), 0, kb);
++		ggml_backend_tensor_set(old_v2, poison_v.data(), 0, vb);
++		poison_ran = true;
++		generate_greedy(&l2, 8, &gen_poisoned);
++		poison_had_no_effect = (gen_poisoned == gen_control);
++		free_loaded(&l2);
++	}
++
++	printf("{\"schema_version\":1,\"mode\":\"relocate\",\"model\":\"%s\","
++		"\"layer\":%d,\"n_ctx\":%d,\"kv_type\":\"%s\",\"split\":%d,"
++		"\"target\":\"%s\",\"ok\":true,\"k_bytes\":%llu,\"v_bytes\":%llu,"
++		"\"relocate_ms\":%.4f,\"pointer_changed\":%s,"
++		"\"device_matches_target\":%s,\"new_device\":\"%s\","
++		"\"src_hash_k\":%llu,\"src_hash_v\":%llu,"
++		"\"vram_before_mib\":%ld,\"vram_after_relocate_mib\":%ld,"
++		"\"rss_before_kb\":%llu,\"rss_after_relocate_kb\":%llu,"
++		"\"generated_control\":[",
++		model, layer, n_ctx, kv_type_name(kvt), split, target,
++		(unsigned long long)kb, (unsigned long long)vb, t1 - t0,
++		pointer_changed ? "true" : "false",
++		device_matches_target ? "true" : "false", new_device,
++		(unsigned long long)src_hash_k, (unsigned long long)src_hash_v,
++		vram_before, vram_after_relocate,
++		(unsigned long long)rss_before, (unsigned long long)rss_after_relocate);
++	print_tokens(stdout, gen_control);
++	printf("],\"poison_ran\":%s,\"generated_poisoned\":[",
++		poison_ran ? "true" : "false");
++	print_tokens(stdout, gen_poisoned);
++	printf("],\"poison_had_no_effect_on_output\":%s,"
++		"\"interpretation\":\"poison_had_no_effect_on_output==true means "
++		"decode is reading the NEW relocated tensor, not the poisoned "
++		"old one -- live rebind confirmed (classification A)\"}\n",
++		poison_had_no_effect ? "true" : "false");
++
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: roundtrip (CPU -> GPU -> CPU, one live context) ---------- */
++
++static int	cmd_roundtrip(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int32_t layer)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++	if (!layer_is_cpu(l.cap.k_leaf[layer]))
++	{
++		printf("{\"schema_version\":1,\"mode\":\"roundtrip\",\"ok\":false,"
++			"\"error\":\"layer_not_initially_cpu\"}\n");
++		free_loaded(&l);
++		return (11);
++	}
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	ggml_backend_dev_t	cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	if (!gpu_dev)
++	{
++		printf("{\"schema_version\":1,\"mode\":\"roundtrip\",\"ok\":false,"
++			"\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	printf("{\"schema_version\":1,\"mode\":\"roundtrip\",\"layer\":%d,"
++		"\"steps\":[", layer);
++
++	/* step 1: CPU (shared bulk buffer) -> GPU (new dedicated buffer) */
++	long	vram_0 = nvidia_smi_used_mib();
++	ggml_tensor	*old_k_step1 = l.cap.k_leaf[layer];
++	ggml_tensor	*old_v_step1 = l.cap.v_leaf[layer];
++	uint64_t	kb = ggml_nbytes(old_k_step1), vb = ggml_nbytes(old_v_step1);
++	llama_synchronize(l.ctx);
++	bool	ok1 = llama_kv_cache_relocate_layer(l.mem, layer, gpu_dev);
++	decode_prompt(&l, "second sentence");
++	std::vector<llama_token>	gen1;
++	bool	gen1_ok = ok1 && generate_greedy(&l, 4, &gen1);
++	long	vram_1 = nvidia_smi_used_mib();
++	bool	step1_now_gpu = !layer_is_cpu(l.cap.k_leaf[layer]);
++
++	printf("{\"step\":1,\"direction\":\"cpu_to_gpu\",\"ok\":%s,"
++		"\"now_gpu\":%s,\"decode_ok\":%s,\"vram_before_mib\":%ld,"
++		"\"vram_after_mib\":%ld}",
++		ok1 ? "true" : "false", step1_now_gpu ? "true" : "false",
++		gen1_ok ? "true" : "false", vram_0, vram_1);
++
++	/* step 2: GPU (dedicated, from step 1) -> CPU (new dedicated). The
++	 * step-1 GPU buffer is dedicated to this one layer, so this
++	 * relocation's cleanup MUST physically free it -- real external
++	 * VRAM drop expected. */
++	llama_synchronize(l.ctx);
++	bool	ok2 = llama_kv_cache_relocate_layer(l.mem, layer, cpu_dev);
++	decode_prompt(&l, "third sentence");
++	std::vector<llama_token>	gen2;
++	bool	gen2_ok = ok2 && generate_greedy(&l, 4, &gen2);
++	long	vram_2 = nvidia_smi_used_mib();
++	bool	step2_now_cpu = layer_is_cpu(l.cap.k_leaf[layer]);
++
++	printf(",{\"step\":2,\"direction\":\"gpu_to_cpu\",\"ok\":%s,"
++		"\"now_cpu\":%s,\"decode_ok\":%s,\"vram_before_mib\":%ld,"
++		"\"vram_after_mib\":%ld,\"vram_delta_mib\":%ld,"
++		"\"kv_bytes_relocated\":%llu}",
++		ok2 ? "true" : "false", step2_now_cpu ? "true" : "false",
++		gen2_ok ? "true" : "false", vram_1, vram_2, vram_1 - vram_2,
++		(unsigned long long)(kb + vb));
++
++	printf("],\"ok\":%s}\n",
++		(ok1 && ok2 && gen1_ok && gen2_ok && step1_now_gpu && step2_now_cpu)
++			? "true" : "false");
++
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: cycle (repeated CPU <-> GPU relocate) ---------- */
++
++static int	cmd_cycle(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int32_t layer, int cycles)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	ggml_backend_dev_t	cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	if (!gpu_dev)
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++	bool	cur_is_cpu = layer_is_cpu(l.cap.k_leaf[layer]);
++
++	for (int c = 0; c < cycles; c++)
++	{
++		ggml_backend_dev_t	target = cur_is_cpu ? gpu_dev : cpu_dev;
++		llama_synchronize(l.ctx);
++		bool	ok = llama_kv_cache_relocate_layer(l.mem, layer, target);
++		bool	decode_ok = ok && decode_prompt(&l, "x");
++		bool	now_cpu = layer_is_cpu(l.cap.k_leaf[layer]);
++		bool	correct_side = (now_cpu == !cur_is_cpu);
++		const char	*buf_name = l.cap.k_leaf[layer]
++			? ggml_backend_buffer_name(l.cap.k_leaf[layer]->buffer) : "NULL";
++		cur_is_cpu = now_cpu;
++
++		printf("{\"cycle\":%d,\"ok\":%s,\"decode_ok\":%s,"
++			"\"correct_side\":%s,\"buf_name\":\"%s\",\"tensor_ptr\":\"%p\","
++			"\"rss_kb\":%llu,\"vram_used_mib\":%ld}\n",
++			c, ok ? "true" : "false", decode_ok ? "true" : "false",
++			correct_side ? "true" : "false", buf_name,
++			(void *)l.cap.k_leaf[layer],
++			(unsigned long long)read_rss_kb(), nvidia_smi_used_mib());
++		if (!ok || !decode_ok || !correct_side)
++		{
++			free_loaded(&l);
++			return (18);
++		}
++	}
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: multi (deterministic group relocation) ---------- */
++
++static int	cmd_multi(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, const char *direction,
++			const std::vector<int32_t> &layers)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++
++	ggml_backend_dev_t	dst = dev_for(strcmp(direction, "to_gpu") == 0 ? "gpu" : "cpu");
++	if (!dst)
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	printf("{\"schema_version\":1,\"mode\":\"multi\",\"direction\":\"%s\","
++		"\"n_layers\":%d,\"steps\":[", direction, (int)layers.size());
++	bool	first = true;
++	bool	all_ok = true;
++	for (int32_t layer : layers)
++	{
++		double	t0 = now_ms();
++		llama_synchronize(l.ctx);
++		bool	ok = llama_kv_cache_relocate_layer(l.mem, layer, dst);
++		double	t1 = now_ms();
++		long	vram = nvidia_smi_used_mib();
++		all_ok = all_ok && ok;
++		printf("%s{\"layer\":%d,\"ok\":%s,\"relocate_ms\":%.4f,"
++			"\"vram_used_mib\":%ld}",
++			first ? "" : ",", layer, ok ? "true" : "false", t1 - t0, vram);
++		first = false;
++	}
++	decode_prompt(&l, "second sentence");
++	std::vector<llama_token>	gen;
++	bool	gen_ok = generate_greedy(&l, 8, &gen);
++	printf("],\"all_relocations_ok\":%s,\"post_relocate_generation_ok\":%s,"
++		"\"post_relocate_tokens\":[", all_ok ? "true" : "false",
++		gen_ok ? "true" : "false");
++	print_tokens(stdout, gen);
++	printf("]}\n");
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: weights_table ---------- */
++
++static int	cmd_weights_table(const char *model, int32_t n_ctx,
++			const char *kvt, int32_t split, int32_t relocate_layer_idx)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++
++	printf("{\"schema_version\":1,\"mode\":\"weights_table\","
++		"\"kv_type\":\"%s\",\"relocated_layer\":%d,\"rows\":[",
++		kv_type_name(kvt), relocate_layer_idx);
++	bool	first = true;
++	std::vector<std::string>	kv_before(l.n_layer);
++	for (int32_t i = 0; i < l.n_layer; i++)
++		kv_before[i] = layer_is_cpu(l.cap.k_leaf[i]) ? "CPU" : "GPU";
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	ggml_backend_dev_t	cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	ggml_backend_dev_t	dst = layer_is_cpu(l.cap.k_leaf[relocate_layer_idx]) ? gpu_dev : cpu_dev;
++	llama_synchronize(l.ctx);
++	bool	reloc_ok = dst && llama_kv_cache_relocate_layer(l.mem, relocate_layer_idx, dst);
++	decode_prompt(&l, "second sentence");
++
++	for (int32_t i = 0; i < l.n_layer; i++)
++	{
++		/* weight tensor for this layer -- capture via a distinct
++		 * name-matched tensor: blk.<il>.attn_q.weight, always resident
++		 * on the same device mp.n_gpu_layers=-1 placed it on
++		 * (kv_dev_override never touches weights). Located generically
++		 * by scanning ggml_get_first_tensor over the model's own
++		 * context would need extra plumbing; instead we rely on the
++		 * already-established Phase 12B/12C invariant (mp.n_gpu_layers
++		 * = -1 forces full GPU weight residency) and report it as a
++		 * constant, cross-checked once via vram_used_mib below rather
++		 * than per-layer (see known limitation in manifest.json).
++		 */
++		printf("%s{\"layer\":%d,\"weight_device\":\"Vulkan(n_gpu_layers=-1)\","
++			"\"kv_before\":\"%s\",\"kv_after\":\"%s\"}",
++			first ? "" : ",", i, kv_before[i].c_str(),
++			i == relocate_layer_idx
++				? (layer_is_cpu(l.cap.k_leaf[i]) ? "CPU" : "GPU")
++				: kv_before[i].c_str());
++		first = false;
++	}
++	printf("],\"relocate_ok\":%s,\"vram_used_mib\":%ld}\n",
++		reloc_ok ? "true" : "false", nvidia_smi_used_mib());
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: latency (N-layer group relocate timing) ---------- */
++
++static int	cmd_latency(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, const char *direction, int reps,
++			const std::vector<int32_t> &layers)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++
++	bool	to_gpu = strcmp(direction, "to_gpu") == 0;
++	ggml_backend_dev_t	dst = dev_for(to_gpu ? "gpu" : "cpu");
++	ggml_backend_dev_t	back = dev_for(to_gpu ? "cpu" : "gpu");
++	if (!dst)
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	for (int r = 0; r < reps; r++)
++	{
++		double	t0 = now_ms();
++		bool	ok = true;
++		for (int32_t layer : layers)
++		{
++			llama_synchronize(l.ctx);
++			ok = ok && llama_kv_cache_relocate_layer(l.mem, layer, dst);
++		}
++		double	t1 = now_ms();
++		printf("{\"rep\":%d,\"direction\":\"%s\",\"n_layers\":%d,\"ok\":%s,"
++			"\"total_ms\":%.4f}\n",
++			r, direction, (int)layers.size(), ok ? "true" : "false", t1 - t0);
++		/* relocate back so the next rep measures the same direction
++		 * from the same starting placement. */
++		for (int32_t layer : layers)
++		{
++			llama_synchronize(l.ctx);
++			llama_kv_cache_relocate_layer(l.mem, layer, back);
++		}
++	}
++	free_loaded(&l);
++	return (0);
++}
++
++/* ---------- mode: state_save ---------- */
++
++static int	cmd_state_save(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int32_t layer)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	if (!gpu_dev)
++	{
++		printf("{\"error\":\"backend_unavailable\"}\n");
++		free_loaded(&l);
++		return (20);
++	}
++	llama_synchronize(l.ctx);
++	bool	reloc_ok = llama_kv_cache_relocate_layer(l.mem, layer, gpu_dev);
++
++	size_t	need = llama_state_seq_get_size(l.ctx, 0);
++	std::vector<uint8_t>	buf(need);
++	size_t	got = llama_state_seq_get_data(l.ctx, buf.data(), buf.size(), 0);
++
++	/* restore into a fresh context (same config, same initial split)
++	 * to prove the serialized bytes are valid post-relocation and that
++	 * placement metadata (not serialized) does not corrupt restore. */
++	loaded_t	l2{};
++	load_ctx(model, n_ctx, kvt, split, &l2);
++	decode_prompt(&l2, "The quick brown fox jumps over the lazy dog");
++	size_t	set = llama_state_seq_set_data(l2.ctx, buf.data(), got, 0);
++
++	std::vector<llama_token>	gen_orig, gen_restored;
++	generate_greedy(&l, 8, &gen_orig);
++	generate_greedy(&l2, 8, &gen_restored);
++
++	printf("{\"schema_version\":1,\"mode\":\"state_save\",\"layer\":%d,"
++		"\"relocate_ok\":%s,\"state_size_needed\":%zu,"
++		"\"state_bytes_written\":%zu,\"state_bytes_read\":%zu,"
++		"\"generated_orig\":[", layer, reloc_ok ? "true" : "false",
++		need, got, set);
++	print_tokens(stdout, gen_orig);
++	printf("],\"generated_restored\":[");
++	print_tokens(stdout, gen_restored);
++	printf("],\"tokens_match\":%s}\n",
++		gen_orig == gen_restored ? "true" : "false");
++
++	free_loaded(&l);
++	free_loaded(&l2);
++	return (0);
++}
++
++/* ---------- mode: repro2 (root-cause reproducer for repeated relocation
++ * of the SAME layer -- Section 1 of the follow-up investigation) ---------- */
++
++static int	cmd_repro2(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, int32_t layer, bool retain, int settle_decodes)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	if (!decode_prompt(&l, "The quick brown fox jumps over the lazy dog"))
++	{
++		fprintf(stderr, "{\"error\":\"prompt_decode_failed\"}\n");
++		free_loaded(&l);
++		return (13);
++	}
++
++	/* A: initial state */
++	ggml_tensor	*a_k = l.cap.k_leaf[layer];
++	printf("{\"schema_version\":1,\"mode\":\"repro2\","
++		"\"retain_old_backing_for_research\":%s,\"layer\":%d,\"points\":{"
++		"\"A_initial\":{\"tensor_ptr\":\"%p\",\"buffer_ptr\":\"%p\","
++		"\"buffer_name\":\"%s\",\"data_ptr\":\"%p\"}",
++		retain ? "true" : "false", layer, (void *)a_k, (void *)a_k->buffer,
++		ggml_backend_buffer_name(a_k->buffer), a_k->data);
++
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	ggml_backend_dev_t	cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++	if (!gpu_dev)
++	{
++		printf("}}\n");
++		free_loaded(&l);
++		return (20);
++	}
++
++	/* B: relocation #1 (CPU -> GPU) */
++	llama_synchronize(l.ctx);
++	bool	ok1 = llama_kv_cache_relocate_layer(l.mem, layer, gpu_dev, retain);
++	printf(",\"B_after_reloc1_call\":{\"ok\":%s}", ok1 ? "true" : "false");
++
++	/* C: graph build after relocation #1 */
++	decode_prompt(&l, "second sentence");
++	ggml_tensor	*c_k = l.cap.k_leaf[layer];
++	ggml_tensor	*c_v = l.cap.v_leaf[layer];
++	uint64_t	kb = ggml_nbytes(c_k), vb = ggml_nbytes(c_v);
++	printf(",\"C_graph_after_reloc1\":{\"tensor_ptr\":\"%p\",\"buffer_ptr\":\"%p\","
++		"\"buffer_name\":\"%s\",\"data_ptr\":\"%p\",\"pointer_changed_from_A\":%s}",
++		(void *)c_k, (void *)c_k->buffer, ggml_backend_buffer_name(c_k->buffer),
++		c_k->data, (c_k != a_k) ? "true" : "false");
++
++	/* Settling window: N additional ordinary decode steps at the
++	 * relocation-#1 placement before attempting relocation #2 --
++	 * testing whether the crash is specifically about relocating
++	 * again "too soon" after the previous relocation (this is exactly
++	 * what mode=roundtrip does differently from the settle_decodes=0
++	 * case below, and roundtrip does NOT crash). */
++	std::vector<llama_token>	settle_tokens;
++	if (settle_decodes > 0)
++		generate_greedy(&l, settle_decodes, &settle_tokens);
++	printf(",\"settle_decodes\":%d", settle_decodes);
++
++	/* D: relocation #2 (GPU -> CPU), same layer. If retain==false (the
++	 * real default/production behavior), this is where the old GPU
++	 * dedicated buffer from relocation #1 gets physically freed -- and
++	 * the FOLLOWING decode_prompt call is where the documented crash
++	 * (GGML_ASSERT(buffer != nullptr) in ggml-vulkan.cpp) occurs. This
++	 * probe intentionally does NOT try to catch that -- the crash/exit
++	 * code IS the release_failure.json evidence, captured by the
++	 * invoking shell. */
++	llama_synchronize(l.ctx);
++	bool	ok2 = llama_kv_cache_relocate_layer(l.mem, layer, cpu_dev, retain);
++	printf(",\"D_after_reloc2_call\":{\"ok\":%s}", ok2 ? "true" : "false");
++	fflush(stdout);
++
++	/* E: graph build after relocation #2 */
++	decode_prompt(&l, "third sentence");
++	ggml_tensor	*e_k = l.cap.k_leaf[layer];
++	printf(",\"E_graph_after_reloc2\":{\"tensor_ptr\":\"%p\",\"buffer_ptr\":\"%p\","
++		"\"buffer_name\":\"%s\",\"data_ptr\":\"%p\","
++		"\"pointer_changed_from_C\":%s,\"pointer_identical_to_A\":%s}",
++		(void *)e_k, (void *)e_k->buffer, ggml_backend_buffer_name(e_k->buffer),
++		e_k->data, (e_k != c_k) ? "true" : "false",
++		(e_k == a_k) ? "true" : "false");
++
++	/* Ground-truth test: does decode ACTUALLY still read C's (relocation
++	 * #1's destination, the GPU tensor) tensor content, regardless of
++	 * what cb_eval's capture claims? Poison C's tensor DIRECTLY (still
++	 * a valid, allocated ggml_tensor -- this probe run has the source-
++	 * release erase/free step disabled so it is guaranteed unfreed) and
++	 * see whether generation changes. This is ground truth; the pointer
++	 * observations above are diagnostic only. */
++	/* Apples-to-apples: poison c_k/c_v on l BEFORE generating anything
++	 * post-relocation-2 (not after, which would compare two different
++	 * sequence positions -- the earlier version of this probe made
++	 * exactly that mistake). Compare against an INDEPENDENT fresh
++	 * context (l2) that follows the identical schedule (prompt,
++	 * relocate #1, "second sentence", relocate #2, "third sentence")
++	 * with NO poisoning, generating at the exact same position. */
++	std::vector<uint8_t>	poison_k(kb, 0xAA), poison_v(vb, 0xAA);
++	ggml_backend_tensor_set(c_k, poison_k.data(), 0, kb);
++	ggml_backend_tensor_set(c_v, poison_v.data(), 0, vb);
++	std::vector<llama_token>	gen_poisoned;
++	generate_greedy(&l, 8, &gen_poisoned);
++
++	loaded_t	l2{};
++	load_ctx(model, n_ctx, kvt, split, &l2);
++	decode_prompt(&l2, "The quick brown fox jumps over the lazy dog");
++	llama_synchronize(l2.ctx);
++	llama_kv_cache_relocate_layer(l2.mem, layer, gpu_dev, retain);
++	decode_prompt(&l2, "second sentence");
++	if (settle_decodes > 0)
++	{
++		std::vector<llama_token>	settle_tokens2;
++		generate_greedy(&l2, settle_decodes, &settle_tokens2);
++	}
++	llama_synchronize(l2.ctx);
++	llama_kv_cache_relocate_layer(l2.mem, layer, cpu_dev, retain);
++	decode_prompt(&l2, "third sentence");
++	std::vector<llama_token>	gen_clean;
++	generate_greedy(&l2, 8, &gen_clean);
++
++	bool	poison_of_reloc1_dest_had_no_effect =
++		(gen_poisoned == gen_clean);
++
++	printf(",\"ground_truth_poison_test\":{"
++		"\"poisoned_tensor_was_relocation1_destination\":true,"
++		"\"generated_after_poisoning_reloc1_dest\":[");
++	print_tokens(stdout, gen_poisoned);
++	printf("],\"independent_clean_reference_same_position\":[");
++	print_tokens(stdout, gen_clean);
++	printf("],\"control_matches_clean_reference\":%s,"
++		"\"interpretation\":\"if control_matches_clean_reference is true, "
++		"decode after 2 relocations is producing CORRECT output "
++		"(ground truth) even if the pointer-identity diagnostics above "
++		"look stale -- the staleness would then be a capture/cb_eval "
++		"artifact, not a real decode-correctness bug. If false, decode "
++		"is genuinely broken after a second relocation of the same "
++		"layer.\"}",
++		poison_of_reloc1_dest_had_no_effect ? "true" : "false");
++
++	printf("}}\n");
++	free_loaded(&l);
++	free_loaded(&l2);
++	return (0);
++}
++
++/* ---------- mode: failure (Section 23) ---------- */
++
++static int	cmd_failure(const char *model, int32_t n_ctx, const char *kvt,
++			int32_t split, const char *fcase)
++{
++	loaded_t	l{};
++
++	if (!load_ctx(model, n_ctx, kvt, split, &l))
++	{
++		fprintf(stderr, "{\"error\":\"load_failed\"}\n");
++		return (3);
++	}
++	decode_prompt(&l, "The quick brown fox jumps over the lazy dog");
++
++	ggml_tensor	*before_k = l.cap.k_leaf[0];
++	ggml_backend_dev_t	gpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
++	bool	ok;
++
++	if (strcmp(fcase, "invalid_layer") == 0)
++	{
++		llama_synchronize(l.ctx);
++		ok = llama_kv_cache_relocate_layer(l.mem, 99999, gpu_dev);
++	}
++	else if (strcmp(fcase, "invalid_dev") == 0)
++	{
++		llama_synchronize(l.ctx);
++		ok = llama_kv_cache_relocate_layer(l.mem, 0, nullptr);
++	}
++	else if (strcmp(fcase, "same_dev") == 0)
++	{
++		ggml_backend_dev_t	same = layer_is_cpu(before_k)
++			? ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU)
++			: gpu_dev;
++		llama_synchronize(l.ctx);
++		ok = llama_kv_cache_relocate_layer(l.mem, 0, same);
++	}
++	else if (strcmp(fcase, "duplicate") == 0)
++	{
++		/* not concurrently -- Section 26 forbids concurrent calls; this
++		 * checks that two SEQUENTIAL calls to the same layer both
++		 * still work and leave a consistent, decodable state (the
++		 * closest safe approximation of "duplicate" this contract
++		 * allows probing). */
++		llama_synchronize(l.ctx);
++		bool	ok1 = gpu_dev && llama_kv_cache_relocate_layer(l.mem, 0, gpu_dev);
++		llama_synchronize(l.ctx);
++		bool	ok2 = ok1 && llama_kv_cache_relocate_layer(l.mem, 0,
++				ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++		ok = ok1 && ok2;
++	}
++	else
++	{
++		fprintf(stderr, "unknown case %s\n", fcase);
++		free_loaded(&l);
++		return (2);
++	}
++
++	ggml_tensor	*after_k = l.cap.k_leaf[0];
++	bool	layer0_untouched = (before_k == after_k);
++	bool	decode_ok = decode_prompt(&l, "still works");
++
++	printf("{\"schema_version\":1,\"mode\":\"failure\",\"case\":\"%s\","
++		"\"relocate_returned_ok\":%s,\"layer0_pointer_untouched\":%s,"
++		"\"decode_still_works\":%s}\n",
++		fcase, ok ? "true" : "false", layer0_untouched ? "true" : "false",
++		decode_ok ? "true" : "false");
++	free_loaded(&l);
++	return (0);
++}
++
++int	main(int argc, char **argv)
++{
++	llama_backend_init();
++	if (argc < 2)
++	{
++		fprintf(stderr, "usage: %s <mode> ...\n", argv[0]);
++		llama_backend_free();
++		return (2);
++	}
++	std::string	mode = argv[1];
++	int	rc = 2;
++
++	if (mode == "info" && argc >= 6)
++		rc = cmd_info(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]));
++	else if (mode == "relocate" && argc >= 7)
++		rc = cmd_relocate(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), argv[7], argc >= 9 && std::string(argv[8]) == "poison");
++	else if (mode == "roundtrip" && argc >= 7)
++		rc = cmd_roundtrip(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]));
++	else if (mode == "cycle" && argc >= 8)
++		rc = cmd_cycle(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), atoi(argv[7]));
++	else if (mode == "multi" && argc >= 7)
++	{
++		std::vector<int32_t>	layers;
++		for (int i = 7; i < argc; i++)
++			layers.push_back(atoi(argv[i]));
++		rc = cmd_multi(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			argv[6], layers);
++	}
++	else if (mode == "weights_table" && argc >= 7)
++		rc = cmd_weights_table(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]));
++	else if (mode == "latency" && argc >= 8)
++	{
++		std::vector<int32_t>	layers;
++		for (int i = 8; i < argc; i++)
++			layers.push_back(atoi(argv[i]));
++		rc = cmd_latency(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			argv[6], atoi(argv[7]), layers);
++	}
++	else if (mode == "state_save" && argc >= 7)
++		rc = cmd_state_save(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]));
++	else if (mode == "repro2" && argc >= 8)
++		rc = cmd_repro2(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]),
++			atoi(argv[6]), std::string(argv[7]) == "retain",
++			argc >= 9 ? atoi(argv[8]) : 0);
++	else if (mode == "failure" && argc >= 6)
++		rc = cmd_failure(argv[2], atoi(argv[3]), argv[4], atoi(argv[5]), argv[6]);
++	else
++	{
++		fprintf(stderr, "unknown mode or missing args: %s\n", mode.c_str());
++		rc = 2;
++	}
++	llama_backend_free();
++	return (rc);
++}
+diff --git a/tools/membrane-kv-runtime-relocate/relocate_state.c b/tools/membrane-kv-runtime-relocate/relocate_state.c
+new file mode 100644
+index 0000000..17350df
+--- /dev/null
++++ b/tools/membrane-kv-runtime-relocate/relocate_state.c
+@@ -0,0 +1,76 @@
++#include <stddef.h>
++
++#include "relocate_state.h"
++
++int	membrane_relocate_init(struct s_membrane_relocate_unit *u,
++		int32_t initial_dev, uint64_t bytes)
++{
++	if (u == NULL || bytes == 0)
++		return (0);
++	u->state = MEMBRANE_RELOCATE_STATE_RESIDENT;
++	u->current_dev = initial_dev;
++	u->pending_dev = initial_dev;
++	u->bytes = bytes;
++	u->relocation_count = 0;
++	u->backing_is_dedicated = 0;
++	return (1);
++}
++
++int	membrane_relocate_validate_target(
++		const struct s_membrane_relocate_unit *u,
++		int32_t target_dev, int32_t n_devices)
++{
++	if (u == NULL)
++		return (0);
++	if (target_dev < 0 || target_dev >= n_devices)
++		return (0);
++	if (target_dev == u->current_dev)
++		return (0);
++	return (1);
++}
++
++int	membrane_relocate_begin(struct s_membrane_relocate_unit *u,
++		int32_t target_dev)
++{
++	if (u == NULL || u->state != MEMBRANE_RELOCATE_STATE_RESIDENT)
++		return (0);
++	u->state = MEMBRANE_RELOCATE_STATE_IN_PROGRESS;
++	u->pending_dev = target_dev;
++	return (1);
++}
++
++int	membrane_relocate_commit(struct s_membrane_relocate_unit *u)
++{
++	if (u == NULL || u->state != MEMBRANE_RELOCATE_STATE_IN_PROGRESS)
++		return (0);
++	u->state = MEMBRANE_RELOCATE_STATE_RESIDENT;
++	u->current_dev = u->pending_dev;
++	u->relocation_count++;
++	u->backing_is_dedicated = 1;
++	return (1);
++}
++
++int	membrane_relocate_rollback(struct s_membrane_relocate_unit *u)
++{
++	if (u == NULL || u->state != MEMBRANE_RELOCATE_STATE_IN_PROGRESS)
++		return (0);
++	u->state = MEMBRANE_RELOCATE_STATE_RESIDENT;
++	u->pending_dev = u->current_dev;
++	return (1);
++}
++
++int	membrane_relocate_fail(struct s_membrane_relocate_unit *u)
++{
++	if (u == NULL || u->state != MEMBRANE_RELOCATE_STATE_IN_PROGRESS)
++		return (0);
++	u->state = MEMBRANE_RELOCATE_STATE_ERROR;
++	return (1);
++}
++
++int	membrane_relocate_call_allowed(const struct s_membrane_relocate_unit *u,
++		int decode_in_flight)
++{
++	if (u == NULL || decode_in_flight)
++		return (0);
++	return (u->state == MEMBRANE_RELOCATE_STATE_RESIDENT);
++}
+diff --git a/tools/membrane-kv-runtime-relocate/relocate_state.h b/tools/membrane-kv-runtime-relocate/relocate_state.h
+new file mode 100644
+index 0000000..52999b6
+--- /dev/null
++++ b/tools/membrane-kv-runtime-relocate/relocate_state.h
+@@ -0,0 +1,119 @@
++#ifndef MEMBRANE_KV_RUNTIME_RELOCATE_RELOCATE_STATE_H
++# define MEMBRANE_KV_RUNTIME_RELOCATE_RELOCATE_STATE_H
++
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 12D, Section 30: llama-free (no ggml/llama header) research
++ * state machine + transaction bookkeeping for ONE relocatable KV
++ * layer unit. Unlike Phase 12C's ownership_state.h (which modeled an
++ * IDEALIZED system independent of what the real probe could achieve),
++ * this machine models what tools/membrane-kv-runtime-relocate's real
++ * probe actually does with the real llama_kv_cache_relocate_layer()
++ * primitive: current_dev is an opaque, caller-defined device id (e.g.
++ * 0 = CPU, 1 = GPU) -- this module has no notion of backends at all.
++ * RESEARCH ONLY, experiment/kv-runtime-relocate branch only.
++ */
++
++enum e_membrane_relocate_state
++{
++	MEMBRANE_RELOCATE_STATE_RESIDENT = 0,
++	MEMBRANE_RELOCATE_STATE_IN_PROGRESS,
++	MEMBRANE_RELOCATE_STATE_ERROR
++};
++
++struct s_membrane_relocate_unit
++{
++	enum e_membrane_relocate_state	state;
++	int32_t							current_dev;
++	int32_t							pending_dev;
++	uint64_t						bytes;
++	uint64_t						relocation_count;
++	/* true once the unit's CURRENT backing is a dedicated buffer (i.e.
++	 * it arrived at current_dev via at least one prior successful
++	 * relocation) -- see llama_kv_cache::relocate_layer's contract:
++	 * every relocation destination is dedicated, but the ORIGINAL
++	 * construction-time placement is shared with other layers and is
++	 * therefore never released on the layer's first move away from it. */
++	int								backing_is_dedicated;
++};
++
++/*
++ * Resets *u to RESIDENT at initial_dev, relocation_count == 0,
++ * backing_is_dedicated == 0 (the original construction-time placement
++ * is always shared, never dedicated). bytes must be > 0. Returns 1 on
++ * success, 0 (u untouched) if u is NULL or bytes == 0.
++ */
++int	membrane_relocate_init(struct s_membrane_relocate_unit *u,
++		int32_t initial_dev, uint64_t bytes);
++
++/*
++ * Section 23 pre-flight validation, called BEFORE membrane_relocate_
++ * begin: rejects an invalid target device id (target_dev < 0 or
++ * target_dev >= n_devices) or a no-op relocation (target_dev ==
++ * u->current_dev, i.e. source == destination). Returns 1 if the
++ * target is valid and different from the current device, 0 otherwise.
++ * Does not mutate *u.
++ */
++int	membrane_relocate_validate_target(
++		const struct s_membrane_relocate_unit *u,
++		int32_t target_dev, int32_t n_devices);
++
++/*
++ * RESIDENT -> IN_PROGRESS. Rejects (returns 0, u unchanged) if u is
++ * already IN_PROGRESS (duplicate relocation while one is in flight)
++ * or in ERROR. pending_dev is recorded but current_dev is NOT changed
++ * yet -- the transaction is not committed until membrane_relocate_
++ * commit succeeds.
++ */
++int	membrane_relocate_begin(struct s_membrane_relocate_unit *u,
++		int32_t target_dev);
++
++/*
++ * IN_PROGRESS -> RESIDENT at pending_dev: the copy succeeded and
++ * ownership has been transferred (matches llama_kv_cache::
++ * relocate_layer switching layers[il].k/.v only after a successful
++ * copy). Increments relocation_count and sets backing_is_dedicated
++ * unconditionally (every real relocate_layer destination is a fresh
++ * dedicated buffer). Rejects (returns 0) if u is not IN_PROGRESS.
++ */
++int	membrane_relocate_commit(struct s_membrane_relocate_unit *u);
++
++/*
++ * IN_PROGRESS -> RESIDENT at the ORIGINAL (pre-begin) current_dev,
++ * unchanged: a validated failure BEFORE any persistent reference was
++ * switched (e.g. destination allocation failed) -- this is the
++ * transaction-rollback path, distinct from an unrecoverable failure.
++ * "No half-rebound state": current_dev is exactly what it was before
++ * begin() was called. Rejects (returns 0) if u is not IN_PROGRESS.
++ */
++int	membrane_relocate_rollback(struct s_membrane_relocate_unit *u);
++
++/*
++ * IN_PROGRESS -> ERROR: an unrecoverable failure (should not occur if
++ * llama_kv_cache::relocate_layer's own fail-closed contract holds --
++ * exists so the probe can flag a real violation of that contract
++ * instead of silently treating it as a normal rollback). Rejects
++ * (returns 0) if u is not IN_PROGRESS.
++ */
++int	membrane_relocate_fail(struct s_membrane_relocate_unit *u);
++
++/*
++ * Section 26 thread/synchronization contract: relocate_layer may only
++ * be called between decode calls with the backend already
++ * synchronized. Returns 1 if calling relocate right now is allowed
++ * (currently RESIDENT, not mid-decode per decode_in_flight), 0
++ * otherwise. Pure predicate, does not mutate *u.
++ */
++int	membrane_relocate_call_allowed(const struct s_membrane_relocate_unit *u,
++		int decode_in_flight);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-runtime-relocate/test_relocate_state.c b/tools/membrane-kv-runtime-relocate/test_relocate_state.c
+new file mode 100644
+index 0000000..6f08d09
+--- /dev/null
++++ b/tools/membrane-kv-runtime-relocate/test_relocate_state.c
+@@ -0,0 +1,184 @@
++#include "relocate_state.h"
++#include "test_helpers.h"
++
++static void	test_init_basic(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	TEST_ASSERT(membrane_relocate_init(&u, 0, 1024) == 1, "init succeeds");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_RESIDENT,
++		"starts RESIDENT");
++	TEST_ASSERT(u.current_dev == 0, "current_dev == initial_dev");
++	TEST_ASSERT(u.backing_is_dedicated == 0,
++		"initial construction-time placement is never dedicated");
++	TEST_ASSERT(u.relocation_count == 0, "relocation_count starts at 0");
++}
++
++static void	test_init_rejects_bad_input(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	TEST_ASSERT(membrane_relocate_init(NULL, 0, 1024) == 0,
++		"NULL out pointer fails closed");
++	TEST_ASSERT(membrane_relocate_init(&u, 0, 0) == 0,
++		"zero bytes fails closed");
++}
++
++static void	test_validate_target_rejects_invalid_device(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 1024);
++	TEST_ASSERT(membrane_relocate_validate_target(&u, -1, 2) == 0,
++		"negative target device is invalid");
++	TEST_ASSERT(membrane_relocate_validate_target(&u, 2, 2) == 0,
++		"out-of-range target device is invalid");
++	TEST_ASSERT(membrane_relocate_validate_target(&u, 1, 2) == 1,
++		"in-range, different target device is valid");
++}
++
++static void	test_validate_target_rejects_source_eq_dest(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 1024);
++	TEST_ASSERT(membrane_relocate_validate_target(&u, 0, 2) == 0,
++		"target == current_dev (source == destination) is rejected");
++}
++
++static void	test_full_relocate_commit_cycle(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 4096);
++	TEST_ASSERT(membrane_relocate_begin(&u, 1) == 1,
++		"RESIDENT + begin(1) is legal");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_IN_PROGRESS,
++		"now IN_PROGRESS");
++	TEST_ASSERT(u.current_dev == 0,
++		"current_dev NOT changed until commit (ownership transfer only "
++		"after success)");
++	TEST_ASSERT(membrane_relocate_commit(&u) == 1,
++		"IN_PROGRESS + commit is legal");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_RESIDENT, "now RESIDENT");
++	TEST_ASSERT(u.current_dev == 1, "current_dev updated to pending_dev");
++	TEST_ASSERT(u.relocation_count == 1, "relocation_count incremented");
++	TEST_ASSERT(u.backing_is_dedicated == 1,
++		"backing is dedicated after any successful relocation");
++}
++
++static void	test_rollback_restores_original_dev_no_half_state(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 2048);
++	membrane_relocate_begin(&u, 1);
++	TEST_ASSERT(membrane_relocate_rollback(&u) == 1,
++		"IN_PROGRESS + rollback is legal");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_RESIDENT,
++		"rollback returns to RESIDENT, not ERROR");
++	TEST_ASSERT(u.current_dev == 0,
++		"current_dev unchanged -- no half-rebound state");
++	TEST_ASSERT(u.relocation_count == 0,
++		"rollback does not count as a relocation");
++	TEST_ASSERT(u.backing_is_dedicated == 0,
++		"rollback does not mark backing dedicated");
++}
++
++static void	test_fail_lands_in_error(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 512);
++	membrane_relocate_begin(&u, 1);
++	TEST_ASSERT(membrane_relocate_fail(&u) == 1,
++		"IN_PROGRESS + fail is legal");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_ERROR, "now ERROR");
++}
++
++static void	test_duplicate_relocation_rejected(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 1000);
++	membrane_relocate_begin(&u, 1);
++	TEST_ASSERT(membrane_relocate_begin(&u, 1) == 0,
++		"begin() while already IN_PROGRESS (duplicate relocation) is "
++		"illegal");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_IN_PROGRESS,
++		"rejected event leaves state unchanged");
++}
++
++static void	test_commit_and_rollback_from_resident_rejected(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 64);
++	TEST_ASSERT(membrane_relocate_commit(&u) == 0,
++		"commit from RESIDENT (no transaction in flight) is illegal");
++	TEST_ASSERT(membrane_relocate_rollback(&u) == 0,
++		"rollback from RESIDENT is illegal");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_RESIDENT,
++		"still RESIDENT, unchanged");
++}
++
++static void	test_error_is_terminal(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 64);
++	membrane_relocate_begin(&u, 1);
++	membrane_relocate_fail(&u);
++	TEST_ASSERT(membrane_relocate_begin(&u, 1) == 0,
++		"no event accepted from ERROR");
++	TEST_ASSERT(u.state == MEMBRANE_RELOCATE_STATE_ERROR,
++		"stays in ERROR, never silently recovers");
++}
++
++static void	test_second_relocation_still_dedicated(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 4096);
++	membrane_relocate_begin(&u, 1);
++	membrane_relocate_commit(&u);
++	membrane_relocate_begin(&u, 0);
++	membrane_relocate_commit(&u);
++	TEST_ASSERT(u.current_dev == 0, "round trip back to dev 0");
++	TEST_ASSERT(u.relocation_count == 2, "two relocations counted");
++	TEST_ASSERT(u.backing_is_dedicated == 1,
++		"still dedicated after the round trip -- this predicts the "
++		"NEXT move away from here will be able to release its backing");
++}
++
++static void	test_call_allowed_predicate(void)
++{
++	struct s_membrane_relocate_unit	u;
++
++	membrane_relocate_init(&u, 0, 64);
++	TEST_ASSERT(membrane_relocate_call_allowed(&u, 0) == 1,
++		"RESIDENT + no decode in flight -> allowed");
++	TEST_ASSERT(membrane_relocate_call_allowed(&u, 1) == 0,
++		"decode in flight -> not allowed, regardless of state");
++	membrane_relocate_begin(&u, 1);
++	TEST_ASSERT(membrane_relocate_call_allowed(&u, 0) == 0,
++		"IN_PROGRESS -> not allowed (duplicate relocation guard)");
++}
++
++int	main(void)
++{
++	test_init_basic();
++	test_init_rejects_bad_input();
++	test_validate_target_rejects_invalid_device();
++	test_validate_target_rejects_source_eq_dest();
++	test_full_relocate_commit_cycle();
++	test_rollback_restores_original_dev_no_half_state();
++	test_fail_lands_in_error();
++	test_duplicate_relocation_rejected();
++	test_commit_and_rollback_from_resident_rejected();
++	test_error_is_terminal();
++	test_second_relocation_still_dedicated();
++	test_call_allowed_predicate();
++	printf("test_relocate_state: all tests passed\n");
++	return (0);
++}

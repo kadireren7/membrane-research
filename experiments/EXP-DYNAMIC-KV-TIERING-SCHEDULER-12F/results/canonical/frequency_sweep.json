@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "runs": [
+    {
+      "schema_version": 1,
+      "mode": "freq_sweep",
+      "interval_decodes": 1,
+      "group_size": 4,
+      "n_cycles": 4,
+      "n_relocations": 32,
+      "total_wall_ms": 191.125,
+      "total_relocation_ms": 14.03,
+      "relocation_overhead_pct": 7.3406,
+      "vram_used_mib": 371
+    },
+    {
+      "schema_version": 1,
+      "mode": "freq_sweep",
+      "interval_decodes": 4,
+      "group_size": 4,
+      "n_cycles": 4,
+      "n_relocations": 32,
+      "total_wall_ms": 667.945,
+      "total_relocation_ms": 15.032,
+      "relocation_overhead_pct": 2.2504,
+      "vram_used_mib": 371
+    },
+    {
+      "schema_version": 1,
+      "mode": "freq_sweep",
+      "interval_decodes": 16,
+      "group_size": 4,
+      "n_cycles": 4,
+      "n_relocations": 32,
+      "total_wall_ms": 2575.264,
+      "total_relocation_ms": 16.129,
+      "relocation_overhead_pct": 0.6263,
+      "vram_used_mib": 371
+    },
+    {
+      "schema_version": 1,
+      "mode": "freq_sweep",
+      "interval_decodes": 64,
+      "group_size": 4,
+      "n_cycles": 4,
+      "n_relocations": 32,
+      "total_wall_ms": 10241.936,
+      "total_relocation_ms": 17.028,
+      "relocation_overhead_pct": 0.1663,
+      "vram_used_mib": 371
+    }
+  ]
+}

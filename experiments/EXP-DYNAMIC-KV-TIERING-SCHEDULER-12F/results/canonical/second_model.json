@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "model": "SmolLM2-360M-Instruct-f16.gguf",
+  "n_layer": 32,
+  "schedule_transitions": [
+    {
+      "decode_idx": 5,
+      "layer": 16,
+      "action": "PROMOTE",
+      "reason": "SCHEDULED_PROMOTION",
+      "bytes": 1392640,
+      "before_device": "CPU",
+      "after_device": "GPU",
+      "duration_us": 634.9,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 5,
+      "layer": 17,
+      "action": "PROMOTE",
+      "reason": "SCHEDULED_PROMOTION",
+      "bytes": 1392640,
+      "before_device": "CPU",
+      "after_device": "GPU",
+      "duration_us": 672.6,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 5,
+      "layer": 18,
+      "action": "PROMOTE",
+      "reason": "SCHEDULED_PROMOTION",
+      "bytes": 1392640,
+      "before_device": "CPU",
+      "after_device": "GPU",
+      "duration_us": 613.4,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 5,
+      "layer": 19,
+      "action": "PROMOTE",
+      "reason": "SCHEDULED_PROMOTION",
+      "bytes": 1392640,
+      "before_device": "CPU",
+      "after_device": "GPU",
+      "duration_us": 697.1,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 10,
+      "layer": 16,
+      "action": "DEMOTE",
+      "reason": "SCHEDULED_DEMOTION",
+      "bytes": 1392640,
+      "before_device": "GPU",
+      "after_device": "CPU",
+      "duration_us": 1280.2,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 10,
+      "layer": 17,
+      "action": "DEMOTE",
+      "reason": "SCHEDULED_DEMOTION",
+      "bytes": 1392640,
+      "before_device": "GPU",
+      "after_device": "CPU",
+      "duration_us": 1286.8,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 10,
+      "layer": 18,
+      "action": "DEMOTE",
+      "reason": "SCHEDULED_DEMOTION",
+      "bytes": 1392640,
+      "before_device": "GPU",
+      "after_device": "CPU",
+      "duration_us": 1082.1,
+      "result": "ok"
+    },
+    {
+      "decode_idx": 10,
+      "layer": 19,
+      "action": "DEMOTE",
+      "reason": "SCHEDULED_DEMOTION",
+      "bytes": 1392640,
+      "before_device": "GPU",
+      "after_device": "CPU",
+      "duration_us": 1048.8,
+      "result": "ok"
+    }
+  ],
+  "generated_tokens": [
+    30,
+    2,
+    198,
+    1,
+    520,
+    9531,
+    198,
+    504,
+    6330,
+    476,
+    504,
+    2365,
+    6354,
+    16438,
+    27003
+  ],
+  "all_transitions_ok": true,
+  "n_transitions": 8
+}

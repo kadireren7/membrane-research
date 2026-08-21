@@ -1,0 +1,1078 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a5e10b7..ee2ed18 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -192,6 +192,15 @@ add_library(membrane_adaptive_kv_policy STATIC
+ target_include_directories(membrane_adaptive_kv_policy PUBLIC
+   tools/membrane-run)
+ 
++# Phase 12B: llama-free pure logic mirroring device_override_probe's
++# real kv_dev_override callback decision exactly (RESEARCH ONLY,
++# experiment/kv-device-override branch only). Never linked into
++# membrane-run; does not modify or depend on adaptive_kv_policy.*.
++add_library(membrane_kv_device_split_policy STATIC
++  tools/membrane-kv-device-override/split_policy.c)
++target_include_directories(membrane_kv_device_split_policy PUBLIC
++  tools/membrane-kv-device-override)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -217,30 +226,48 @@ if(MEMBRANE_ENABLE_LLAMA)
+       "git submodule update --init third_party/llama.cpp")
+   endif()
+ 
+-  # The MEMBRANE per-layer KV type override needs a small patch to the
+-  # pinned llama.cpp commit (see
+-  # patches/llama.cpp-membrane-kv-type-override.patch and
+-  # docs/phase4-runtime-policy.md). Applied here, idempotently, so a
++  # MEMBRANE llama.cpp patches, applied in sequence, idempotently, so a
+   # fresh submodule checkout builds without a manual step -- the
+   # submodule's own commit pin is never changed, only its working tree.
+-  set(MEMBRANE_LLAMA_PATCH
+-    ${CMAKE_SOURCE_DIR}/patches/llama.cpp-membrane-kv-type-override.patch)
+-  execute_process(
+-    COMMAND git apply --reverse --check ${MEMBRANE_LLAMA_PATCH}
+-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/llama.cpp
+-    RESULT_VARIABLE MEMBRANE_PATCH_ALREADY_APPLIED
+-    OUTPUT_QUIET ERROR_QUIET)
+-  if(NOT MEMBRANE_PATCH_ALREADY_APPLIED EQUAL 0)
+-    execute_process(
+-      COMMAND git apply ${MEMBRANE_LLAMA_PATCH}
+-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/llama.cpp
+-      RESULT_VARIABLE MEMBRANE_PATCH_APPLY_RESULT)
+-    if(NOT MEMBRANE_PATCH_APPLY_RESULT EQUAL 0)
+-      message(FATAL_ERROR "failed to apply ${MEMBRANE_LLAMA_PATCH} to "
+-        "third_party/llama.cpp -- see docs/phase4-runtime-policy.md")
++  #
++  # Idempotency is checked by a unique CONTENT marker (grep-style, via
++  # CMake's own file(READ)/string(FIND)) rather than `git apply
++  # --reverse --check`: once two (or more) layered patches touch
++  # adjacent lines in the same file (as the type-override and device-
++  # override patches below do, deliberately, for readability -- the
++  # device-override callback is threaded in right next to the existing
++  # type-override one everywhere), a patch's OWN reverse-apply check
++  # stops matching as soon as a LATER patch is also applied, because
++  # its context lines have shifted. A content marker has no such
++  # ordering/adjacency sensitivity.
++  function(membrane_apply_llama_patch patch_file marker_file marker_string label)
++    file(READ ${CMAKE_SOURCE_DIR}/third_party/llama.cpp/${marker_file} _membrane_marker_contents)
++    string(FIND "${_membrane_marker_contents}" "${marker_string}" _membrane_marker_pos)
++    if(_membrane_marker_pos EQUAL -1)
++      execute_process(
++        COMMAND git apply ${patch_file}
++        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/third_party/llama.cpp
++        RESULT_VARIABLE _membrane_apply_result)
++      if(NOT _membrane_apply_result EQUAL 0)
++        message(FATAL_ERROR "failed to apply ${patch_file} to "
++          "third_party/llama.cpp -- see docs/phase4-runtime-policy.md and "
++          "results/phase12/kv-device-override/")
++      endif()
++      message(STATUS "applied MEMBRANE ${label} patch to llama.cpp")
+     endif()
+-    message(STATUS "applied MEMBRANE kv_type_override patch to llama.cpp")
+-  endif()
++  endfunction()
++
++  membrane_apply_llama_patch(
++    ${CMAKE_SOURCE_DIR}/patches/llama.cpp-membrane-kv-type-override.patch
++    include/llama.h "kv_type_override_ud;" kv_type_override)
++
++  # Phase 12B: a second, independent small patch adding a per-layer KV
++  # cache DEVICE override (see patches/llama.cpp-membrane-kv-device-
++  # override.patch and results/phase12/kv-device-override/) -- applied
++  # in sequence AFTER the type-override patch above.
++  membrane_apply_llama_patch(
++    ${CMAKE_SOURCE_DIR}/patches/llama.cpp-membrane-kv-device-override.patch
++    include/llama.h "kv_dev_override_ud;" kv_dev_override)
+ 
+   set(LLAMA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+   set(LLAMA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+@@ -312,6 +339,7 @@ if(MEMBRANE_ENABLE_LLAMA)
+   add_subdirectory(tools/membrane-kv-runtime)
+   add_subdirectory(tools/membrane-kv-runtime-optimizer)
+   add_subdirectory(tools/membrane-kv-variance)
++  add_subdirectory(tools/membrane-kv-device-override)
+ 
+   # Product Phase 5: the live llama.cpp shadow runtime (membrane-llama-
+   # run). Deliberately does NOT use the kv_type_override patch above --
+@@ -576,6 +604,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_adaptive_kv_policy COMMAND test_adaptive_kv_policy)
+ 
++  add_executable(test_kv_device_split_policy
++    tools/membrane-kv-device-override/test_split_policy.c)
++  target_link_libraries(test_kv_device_split_policy PRIVATE
++    membrane_kv_device_split_policy)
++  target_include_directories(test_kv_device_split_policy PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_kv_device_split_policy COMMAND test_kv_device_split_policy)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/patches/llama.cpp-membrane-kv-device-override.patch b/patches/llama.cpp-membrane-kv-device-override.patch
+new file mode 100644
+index 0000000..b69d78d
+--- /dev/null
++++ b/patches/llama.cpp-membrane-kv-device-override.patch
+@@ -0,0 +1,158 @@
++diff --git a/include/llama.h b/include/llama.h
++index 5216739..6387dae 100644
++--- a/include/llama.h
+++++ b/include/llama.h
++@@ -385,6 +385,24 @@ extern "C" {
++         enum ggml_type (*kv_type_override)(int32_t il, bool is_v, void * user_data);
++         void * kv_type_override_ud;
++ 
+++        // [EXPERIMENTAL, MEMBRANE] optional per-layer KV cache DEVICE
+++        // override, queried once per layer (for BOTH its K and V
+++        // tensors together) at context-construction time -- lets the KV
+++        // cache for a layer be placed on a different backend device than
+++        // that layer's own model weights (model.dev_layer(il), which
+++        // continues to govern weight placement only and is passed in
+++        // here as default_dev). NULL leaves behavior identical to
+++        // upstream (KV follows the same device as weights, exactly as
+++        // before this field existed). If the callback itself returns
+++        // NULL for a given layer, default_dev is used for that layer's
+++        // KV -- a safe fallback, never a hard failure from a NULL
+++        // return alone. Only honored for the standard, non-SWA,
+++        // non-hybrid llama_kv_cache construction path (same scope
+++        // restriction as kv_type_override above).
+++        ggml_backend_dev_t (*kv_dev_override)(int32_t il,
+++                ggml_backend_dev_t default_dev, void * user_data);
+++        void * kv_dev_override_ud;
+++
++         // Abort callback
++         // if it returns true, execution of llama_decode() will be aborted
++         // currently works only with CPU execution
++diff --git a/src/llama-context.cpp b/src/llama-context.cpp
++index 30e93bb..b402b44 100644
++--- a/src/llama-context.cpp
+++++ b/src/llama-context.cpp
++@@ -384,6 +384,8 @@ llama_context::llama_context(
++             /*.type_v             =*/ params.type_v,
++             /*.kv_type_override   =*/ params.kv_type_override,
++             /*.kv_type_override_ud=*/ params.kv_type_override_ud,
+++            /*.kv_dev_override    =*/ params.kv_dev_override,
+++            /*.kv_dev_override_ud =*/ params.kv_dev_override_ud,
++             /*.swa_full           =*/ params.swa_full,
++             /*.ctx_type           =*/ cparams.ctx_type,
++             /*.mem_other          =*/ llama_get_memory(cparams.ctx_other),
++@@ -3492,6 +3494,8 @@ llama_context_params llama_context_default_params() {
++         /*.type_v                      =*/ GGML_TYPE_F16,
++         /*.kv_type_override            =*/ nullptr,
++         /*.kv_type_override_ud         =*/ nullptr,
+++        /*.kv_dev_override              =*/ nullptr,
+++        /*.kv_dev_override_ud           =*/ nullptr,
++         /*.abort_callback              =*/ nullptr,
++         /*.abort_callback_data         =*/ nullptr,
++         /*.embeddings                  =*/ false,
++diff --git a/src/llama-kv-cache.cpp b/src/llama-kv-cache.cpp
++index d075552..48350c0 100644
++--- a/src/llama-kv-cache.cpp
+++++ b/src/llama-kv-cache.cpp
++@@ -79,7 +79,10 @@ llama_kv_cache::llama_kv_cache(
++     const  layer_reuse_cb & reuse,
++     const  layer_share_cb & share,
++     ggml_type (*kv_type_override)(int32_t il, bool is_v, void * user_data),
++-    void * kv_type_override_ud) :
+++    void * kv_type_override_ud,
+++    ggml_backend_dev_t (*kv_dev_override)(int32_t il,
+++            ggml_backend_dev_t default_dev, void * user_data),
+++    void * kv_dev_override_ud) :
++     model(model), hparams(hparams), v_trans(v_trans),
++     n_seq_max(n_seq_max), n_stream(unified ? 1 : n_seq_max), n_pad(n_pad), n_swa(n_swa), swa_type(swa_type),
++     other(static_cast<llama_kv_cache *>(mem_other)),
++@@ -211,13 +214,34 @@ llama_kv_cache::llama_kv_cache(
++ 
++         const char * dev_name = "CPU";
++ 
+++        ggml_backend_dev_t default_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
++         ggml_backend_buffer_type_t buft = ggml_backend_cpu_buffer_type();
++ 
++         if (offload) {
++-            auto * dev = model.dev_layer(il);
++-            buft = ggml_backend_dev_buffer_type(dev);
++-
++-            dev_name = ggml_backend_dev_name(dev);
+++            default_dev = model.dev_layer(il);
+++            buft = ggml_backend_dev_buffer_type(default_dev);
+++
+++            dev_name = ggml_backend_dev_name(default_dev);
+++        }
+++
+++        // [MEMBRANE] optional per-layer KV device override -- default_dev
+++        // above is exactly the device upstream would have used for this
+++        // layer's KV (the same device as its weights when offload==true,
+++        // else CPU); the callback may redirect ONLY this layer's KV
+++        // placement to a different device, leaving the layer's own
+++        // weights on default_dev untouched (llama_kv_cache never moves
+++        // weights -- it has no access to weight tensors at all). A NULL
+++        // return from the callback falls back to default_dev, never a
+++        // hard failure. buft is only recomputed when the override
+++        // actually picks a different device, so the offload==false /
+++        // no-override path is byte-for-byte the same buft value upstream
+++        // would have produced.
+++        if (kv_dev_override) {
+++            ggml_backend_dev_t kv_dev = kv_dev_override(il, default_dev, kv_dev_override_ud);
+++            if (kv_dev && kv_dev != default_dev) {
+++                buft = ggml_backend_dev_buffer_type(kv_dev);
+++                dev_name = ggml_backend_dev_name(kv_dev);
+++            }
++         }
++ 
++         LLAMA_LOG_DEBUG("%s: layer %3d: dev = %s\n", __func__, il, dev_name);
++diff --git a/src/llama-kv-cache.h b/src/llama-kv-cache.h
++index 5c865a8..cbd911b 100644
++--- a/src/llama-kv-cache.h
+++++ b/src/llama-kv-cache.h
++@@ -117,7 +117,14 @@ public:
++         // llama_context_params::kv_type_override. NULL (the default)
++         // reproduces upstream behavior exactly.
++         ggml_type (*kv_type_override)(int32_t il, bool is_v, void * user_data) = nullptr,
++-        void * kv_type_override_ud = nullptr);
+++        void * kv_type_override_ud = nullptr,
+++        // [MEMBRANE] optional per-layer device override, see
+++        // llama_context_params::kv_dev_override. NULL (the default)
+++        // reproduces upstream behavior exactly (KV follows the same
+++        // device as weights).
+++        ggml_backend_dev_t (*kv_dev_override)(int32_t il,
+++                ggml_backend_dev_t default_dev, void * user_data) = nullptr,
+++        void * kv_dev_override_ud = nullptr);
++ 
++     ~llama_kv_cache() = default;
++ 
++diff --git a/src/llama-memory.h b/src/llama-memory.h
++index 794cf19..4ed2bb0 100644
++--- a/src/llama-memory.h
+++++ b/src/llama-memory.h
++@@ -24,6 +24,12 @@ struct llama_memory_params {
++     ggml_type (*kv_type_override)(int32_t il, bool is_v, void * user_data);
++     void * kv_type_override_ud;
++ 
+++    // [MEMBRANE] optional per-layer KV device override, see
+++    // llama_context_params::kv_dev_override
+++    ggml_backend_dev_t (*kv_dev_override)(int32_t il,
+++            ggml_backend_dev_t default_dev, void * user_data);
+++    void * kv_dev_override_ud;
+++
++     // use full-size SWA cache
++     bool swa_full;
++ 
++diff --git a/src/llama-model.cpp b/src/llama-model.cpp
++index 9591c35..f71feb6 100644
++--- a/src/llama-model.cpp
+++++ b/src/llama-model.cpp
++@@ -2281,7 +2281,9 @@ llama_memory_i * llama_model::create_memory(const llama_memory_params & params,
++                                 nullptr,
++                                 nullptr,
++                                 params.kv_type_override,
++-                                params.kv_type_override_ud);
+++                                params.kv_type_override_ud,
+++                                params.kv_dev_override,
+++                                params.kv_dev_override_ud);
++                     }
++                 }
++             }
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 1a5a1a3..33d0b2c 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1315,6 +1315,278 @@ def _c63():
+ 	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported claims, snapshot caveat disclosed"
+ 
+ 
++V12B_DIR = REPO_ROOT / "results" / "phase12" / "kv-device-override"
++_V12B_CACHE = {}
++
++
++def _load_v12b(name):
++	key = name
++	if key not in _V12B_CACHE:
++		path = V12B_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V12B_CACHE[key] = rows
++		else:
++			_V12B_CACHE[key] = json.loads(path.read_text())
++	return _V12B_CACHE[key]
++
++
++@check("Phase 12B: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual .json/.jsonl file in the directory and no "
++	"others")
++def _c64():
++	if not (V12B_DIR / "manifest.json").exists():
++		return False, f"{V12B_DIR}/manifest.json does not exist"
++	m = _load_v12b("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V12B_DIR.glob("*") if p.suffix in (".json", ".jsonl")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
++@check("Phase 12B: patch provenance -- patches/llama.cpp-membrane-kv-"
++	"device-override.patch exists, and patch_scope.json's claimed line "
++	"counts are recomputed exactly from the real patch file")
++def _c65():
++	patch_path = REPO_ROOT / "patches" / "llama.cpp-membrane-kv-device-override.patch"
++	if not patch_path.exists():
++		return False, f"{patch_path} does not exist"
++	text = patch_path.read_text()
++	lines = text.splitlines()
++	ins = sum(1 for l in lines if l.startswith("+") and not l.startswith("+++"))
++	dels = sum(1 for l in lines if l.startswith("-") and not l.startswith("---"))
++	ps = _load_v12b("patch_scope.json")
++	claimed = ps.get("line_count", {})
++	bad = []
++	if ins != claimed.get("insertions"):
++		bad.append(f"recomputed insertions={ins} != claimed {claimed.get('insertions')}")
++	if dels != claimed.get("deletions"):
++		bad.append(f"recomputed deletions={dels} != claimed {claimed.get('deletions')}")
++	files_changed = set(re.findall(r"^diff --git a/(\S+) b/\S+$", text, re.MULTILINE))
++	claimed_files = set(ps.get("files_changed", []))
++	if files_changed != claimed_files:
++		bad.append(f"files changed mismatch: patch has {files_changed}, claimed {claimed_files}")
++	return len(bad) == 0, "; ".join(bad) if bad else "patch line counts and file list recomputed exactly from the real patch file"
++
++
++@check("Phase 12B: default_regression.json's null/always-null/always-"
++	"default callback equivalence claim is backed by identical "
++	"placement AND identical generated tokens across all three variants")
++def _c66():
++	dr = _load_v12b("default_regression.json")
++	eq = dr.get("null_vs_always_null_vs_default_returning_equivalence", {})
++	results = eq.get("results", {})
++	bad = []
++	variants = list(results.values())
++	if len(variants) != 3:
++		bad.append(f"expected 3 variants, found {len(variants)}")
++	else:
++		first = variants[0]
++		for v in variants[1:]:
++			if v.get("n_cpu_kv_layers") != first.get("n_cpu_kv_layers") \
++					or v.get("n_gpu_kv_layers") != first.get("n_gpu_kv_layers") \
++					or v.get("generated_tokens") != first.get("generated_tokens"):
++				bad.append(f"variant mismatch: {v} != {first}")
++	if eq.get("all_three_identical") is not True:
++		bad.append("all_three_identical is not true")
++	return len(bad) == 0, "; ".join(bad) if bad else "all three callback variants produce identical placement and generated tokens"
++
++
++@check("Phase 12B: placement_maps.json's per-layer boundary excerpt is "
++	"internally consistent -- every layer below the split reports CPU "
++	"on both k_buffer and v_buffer, every layer at/above it reports "
++	"Vulkan1 on both, and weight_device is Vulkan1 throughout "
++	"regardless of KV placement")
++def _c67():
++	pm = _load_v12b("placement_maps.json")
++	rows = pm.get("per_layer_table_boundary_excerpt", [])
++	bad = []
++	if not rows:
++		return False, "no per_layer_table_boundary_excerpt rows found"
++	for r in rows:
++		if r.get("weight_device") != "Vulkan1":
++			bad.append(f"layer {r.get('layer')}: weight_device={r.get('weight_device')!r} != Vulkan1")
++		expect_gpu = r.get("kv_device_requested") == "GPU"
++		k_is_gpu = r.get("k_buffer") == "Vulkan1"
++		v_is_gpu = r.get("v_buffer") == "Vulkan1"
++		if expect_gpu != k_is_gpu or expect_gpu != v_is_gpu:
++			bad.append(f"layer {r.get('layer')}: requested={r.get('kv_device_requested')} but k_buffer={r.get('k_buffer')} v_buffer={r.get('v_buffer')}")
++	return len(bad) == 0, "; ".join(bad) if bad else "per-layer boundary excerpt internally consistent: weights always Vulkan1, KV matches request exactly"
++
++
++@check("Phase 12B: q8_memory.json's CPU+GPU KV layer counts sum to the "
++	"real layer count for every recorded configuration (SmolLM2-135M="
++	"30, SmolLM2-360M=32)")
++def _c68():
++	qm = _load_v12b("q8_memory.json")
++	bad = []
++	counts_135m = qm.get("smollm2_135m_layer_counts", {})
++	for cfg_name, counts in counts_135m.items():
++		total = counts.get("cpu", 0) + counts.get("gpu", 0)
++		if total != 30:
++			bad.append(f"135m/{cfg_name}: cpu+gpu={total} != 30")
++	counts_360m = qm.get("smollm2_360m_ctx2048", {}).get("layer_counts", {})
++	for cfg_name, counts in counts_360m.items():
++		total = counts.get("cpu", 0) + counts.get("gpu", 0)
++		if total != 32:
++			bad.append(f"360m/{cfg_name}: cpu+gpu={total} != 32")
++	return len(bad) == 0, "; ".join(bad) if bad else "CPU+GPU KV layer counts sum to the real layer count in every recorded configuration"
++
++
++@check("Phase 12B: q8_memory.json's VRAM savings for SmolLM2-135M are "
++	"recomputed exactly from raw_context_matrix_135m.jsonl's own "
++	"peak/idle VRAM numbers")
++def _c69():
++	rows = _load_v12b("raw_context_matrix_135m.jsonl")
++	qm = _load_v12b("q8_memory.json")
++	by_ctx = {}
++	for r in rows:
++		ctx = r["ctx"]
++		label = r["label"].split("_ctx")[0]
++		by_ctx.setdefault(ctx, {})[label] = r["peak_vram_mib"] - r["idle_vram_mib"]
++	bad = []
++	for ctx_str, expect in qm.get("smollm2_135m", {}).items():
++		ctx = int(ctx_str.replace("ctx_", ""))
++		d = by_ctx.get(ctx, {})
++		recomputed_half = d.get("full_gpu", 0) - d.get("half_cpu", 0)
++		recomputed_aggr = d.get("full_gpu", 0) - d.get("aggressive_cpu", 0)
++		if recomputed_half != expect.get("kv_only_saving_half"):
++			bad.append(f"ctx={ctx}: recomputed half saving={recomputed_half} != claimed {expect.get('kv_only_saving_half')}")
++		if recomputed_aggr != expect.get("kv_only_saving_aggressive"):
++			bad.append(f"ctx={ctx}: recomputed aggressive saving={recomputed_aggr} != claimed {expect.get('kv_only_saving_aggressive')}")
++	return len(bad) == 0, "; ".join(bad) if bad else "every ctx's KV-only VRAM saving recomputed exactly from raw nvidia-smi deltas"
++
++
++@check("Phase 12B: correctness.json's token-identity claim is real -- "
++	"all three placement configs' generated_tokens lists are exactly "
++	"equal, not just claimed equal")
++def _c70():
++	c = _load_v12b("correctness.json")
++	toks = c.get("generated_tokens", {})
++	bad = []
++	values = list(toks.values())
++	if len(values) < 2:
++		bad.append("fewer than 2 token lists to compare")
++	else:
++		first = values[0]
++		for v in values[1:]:
++			if v != first:
++				bad.append(f"token list mismatch: {v} != {first}")
++	return len(bad) == 0, "; ".join(bad) if bad else "all recorded generated_tokens lists are exactly equal"
++
++
++@check("Phase 12B: pressure_test.json's boundary claim (full-GPU-KV "
++	"fails, partial-CPU-KV succeeds, at the identical context) is "
++	"backed by raw_pressure_test.jsonl's own exit codes")
++def _c71():
++	rows = _load_v12b("raw_pressure_test.jsonl")
++	by_label = {r["label"]: r for r in rows}
++	bad = []
++	full = by_label.get("full_gpu_kv_ctx200000", {})
++	half = by_label.get("half_cpu_kv_ctx200000", {})
++	if full.get("exit_code") == 0:
++		bad.append("full_gpu_kv_ctx200000 did not actually fail in raw data")
++	if half.get("exit_code") != 0:
++		bad.append("half_cpu_kv_ctx200000 did not actually succeed in raw data")
++	if half.get("weight_layers_all_vulkan") != 33:
++		bad.append(f"half_cpu_kv_ctx200000 weight_layers_all_vulkan={half.get('weight_layers_all_vulkan')} != 33 (all weights should stay GPU)")
++	return len(bad) == 0, "; ".join(bad) if bad else "pressure-test boundary (full fails, partial succeeds, weights unchanged) backed by real raw exit codes"
++
++
++@check("Phase 12B: patch scope stayed within the recorded limits -- "
++	"patch_scope.json explicitly disclaims scheduler/graph/backend-"
++	"kernel/attention-math changes, and the real patch file contains "
++	"no Vulkan-shader or CUDA source changes")
++def _c72():
++	ps = _load_v12b("patch_scope.json")
++	bad = []
++	avoided = ps.get("scope_bar_compliance", {}).get("avoided", [])
++	if not avoided:
++		bad.append("scope_bar_compliance.avoided is empty or missing")
++	patch_path = REPO_ROOT / "patches" / "llama.cpp-membrane-kv-device-override.patch"
++	text = patch_path.read_text() if patch_path.exists() else ""
++	for forbidden in ("ggml-vulkan.cpp", "ggml-cuda", ".comp", ".glsl"):
++		if forbidden in text:
++			bad.append(f"patch touches forbidden path/extension: {forbidden}")
++	if ps.get("scope_bar_compliance", {}).get("did_not_expand_beyond_minimal") is not True:
++		bad.append("did_not_expand_beyond_minimal is not true")
++	return len(bad) == 0, "; ".join(bad) if bad else "patch scope confirmed within recorded limits, no forbidden backend/kernel files touched"
++
++
++@check("Phase 12B: no unsupported product claims -- no '--kv-device' "
++	"or similar flag documented as real/shipped without disclaiming "
++	"it, no undisclaimed 'merged' claim, product CLI (tools/membrane-"
++	"run/product_cli.cpp) unmodified and contains no 'kv_dev_override' "
++	"or 'device_override' reference, product adaptive policy untouched")
++def _c73():
++	bad = []
++	for path in sorted(V12B_DIR.glob("*.json")):
++		text = path.read_text()
++		if re.search(r"\bmerged\b", text, re.IGNORECASE) and not re.search(
++				r"not merged|never merged|do not merge", text, re.IGNORECASE):
++			bad.append(f"{path.name}: mentions 'merged' without an explicit not-merged disclaimer")
++	product_cli = REPO_ROOT / "tools" / "membrane-run" / "product_cli.cpp"
++	if product_cli.exists():
++		pc_text = product_cli.read_text().lower()
++		if "kv_dev_override" in pc_text or "device_override" in pc_text or "kv-device" in pc_text:
++			bad.append("tools/membrane-run/product_cli.cpp references the device-override mechanism -- forbidden, this phase adds no product CLI")
++	adaptive_policy = REPO_ROOT / "tools" / "membrane-run" / "adaptive_kv_policy.c"
++	if adaptive_policy.exists() and "device_override" in adaptive_policy.read_text().lower():
++		bad.append("tools/membrane-run/adaptive_kv_policy.c references device_override -- product adaptive must be untouched")
++	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported product claims, product CLI and adaptive policy untouched"
++
++
++@check("Phase 12B: no absolute filesystem paths anywhere in any "
++	"kv-device-override artifact file (JSON or JSONL)")
++def _c74():
++	hits = []
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	for path in sorted(V12B_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		text = path.read_text()
++		found = [m for m in pattern.findall(text) if not m.startswith(
++			("/proc", "/tmp", "/tools", "/results", "/third_party", "/src", "/include", "/patches"))]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all kv-device-override artifact files"
++
++
++@check("Phase 12B: summary.json's decision_gate is one of the five "
++	"valid values and is consistent with default_regression.json/"
++	"placement_maps.json/pressure_test.json's own evidence (VIABLE "
++	"requires clean default regression AND a real pressure-test win)")
++def _c75():
++	s = _load_v12b("summary.json")
++	dr = _load_v12b("default_regression.json")
++	pt = _load_v12b("pressure_test.json")
++	valid = {
++		"KV_DEVICE_OVERRIDE_VIABLE",
++		"KV_DEVICE_OVERRIDE_WORKS_BUT_TOO_SLOW",
++		"KV_DEVICE_OVERRIDE_TOO_INVASIVE",
++		"KV_DEVICE_OVERRIDE_BACKEND_LIMITED",
++		"KV_DEVICE_OVERRIDE_INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the five valid values")
++	default_ok = dr.get("null_vs_always_null_vs_default_returning_equivalence", {}).get("all_three_identical") is True
++	pressure_win = pt.get("answer_to_section17_question", {}).get("answer") is True
++	if gate == "KV_DEVICE_OVERRIDE_VIABLE" and not (default_ok and pressure_win):
++		bad.append(f"decision_gate=VIABLE but default_regression_ok={default_ok}, pressure_test_win={pressure_win}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} is valid and consistent with the recorded evidence"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1338,6 +1610,7 @@ def main() -> int:
+ 			_c48, _c49, _c50, _c51,
+ 			_c52, _c53, _c54, _c55, _c56, _c57, _c58, _c59, _c60, _c61,
+ 			_c62, _c63,
++			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73, _c74, _c75,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-device-override/CMakeLists.txt b/tools/membrane-kv-device-override/CMakeLists.txt
+new file mode 100644
+index 0000000..fb70b1f
+--- /dev/null
++++ b/tools/membrane-kv-device-override/CMakeLists.txt
+@@ -0,0 +1,10 @@
++# Phase 12B: research-only integration for the new llama.cpp
++# kv_dev_override callback (patches/llama.cpp-membrane-kv-device-
++# override.patch, results/phase12/kv-device-override/). No product CLI
++# exposure -- experiment/kv-device-override branch only.
++
++add_executable(membrane-kv-device-override-probe device_override_probe.cpp)
++set_target_properties(membrane-kv-device-override-probe PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-device-override-probe PRIVATE llama)
+diff --git a/tools/membrane-kv-device-override/device_override_probe.cpp b/tools/membrane-kv-device-override/device_override_probe.cpp
+new file mode 100644
+index 0000000..62e5eaa
+--- /dev/null
++++ b/tools/membrane-kv-device-override/device_override_probe.cpp
+@@ -0,0 +1,238 @@
++/*
++ * Phase 12B, Sections 7/8/9: minimal research integration for the new
++ * llama.cpp kv_dev_override callback (patches/llama.cpp-membrane-kv-
++ * device-override.patch). Deterministic, manual placement only -- no
++ * promotion/demotion, no scheduler, no product CLI.
++ *
++ * Sets llama_context_params.kv_dev_override to a fixed split (layers
++ * [0, split) -> CPU KV, [split, n_layer) -> GPU KV) while --gpu-layers
++ * all keeps every layer's WEIGHTS on GPU throughout (kv_dev_override
++ * has no access to weight tensors -- it can only steer llama_kv_cache's
++ * own per-layer buft resolution, see the patch itself).
++ *
++ * Proves per-layer placement two independent ways:
++ *   1. llama.cpp's own LLAMA_LOG_DEBUG lines (load_tensors: layer N
++ *      assigned to device ... for WEIGHTS; llama_kv_cache's own
++ *      "layer N: dev = ..." for KV) -- captured from real stderr.
++ *   2. cb_eval + ggml_tensor::view_src (same public-API mechanism
++ *      proven in Phase 12A) directly reading cache_k_lN/cache_v_lN's
++ *      real ggml_backend_buffer_name() -- independent of any log text.
++ */
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#include "llama.h"
++
++struct split_ctx_t
++{
++	int32_t	split;
++};
++
++static ggml_backend_dev_t	split_kv_dev_override(int32_t il,
++				ggml_backend_dev_t default_dev, void *ud)
++{
++	split_ctx_t	*s = static_cast<split_ctx_t *>(ud);
++
++	if (il < s->split)
++		return (ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU));
++	return (default_dev);
++}
++
++/* Section 19 safety test: a callback that ALWAYS returns NULL must be
++ * exactly equivalent to no callback at all (default_dev used for
++ * every layer) -- the patch's own documented NULL-return contract. */
++static ggml_backend_dev_t	always_null_kv_dev_override(int32_t,
++				ggml_backend_dev_t, void *)
++{
++	return (nullptr);
++}
++
++struct capture_ctx_t
++{
++	int32_t					n_layer;
++	std::vector<ggml_tensor *>	k_leaf;
++	std::vector<ggml_tensor *>	v_leaf;
++};
++
++static bool	layer_from_name(const char *name, const char *prefix, int32_t *out)
++{
++	size_t	plen = strlen(prefix);
++	char	*end;
++	long	v;
++
++	if (strncmp(name, prefix, plen) != 0)
++		return (false);
++	v = strtol(name + plen, &end, 10);
++	if (end == name + plen || v < 0)
++		return (false);
++	*out = (int32_t)v;
++	return (true);
++}
++
++static bool	capture_cb(struct ggml_tensor *t, bool ask, void *ud)
++{
++	capture_ctx_t	*c = static_cast<capture_ctx_t *>(ud);
++	int32_t			layer;
++
++	if (ask)
++		return (true);
++	if (layer_from_name(t->name, "cache_k_l", &layer) && layer < c->n_layer
++			&& c->k_leaf[layer] == nullptr)
++		c->k_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	else if (layer_from_name(t->name, "cache_v_l", &layer) && layer < c->n_layer
++			&& c->v_leaf[layer] == nullptr)
++		c->v_leaf[layer] = t->view_src != nullptr ? t->view_src : t;
++	return (true);
++}
++
++static const char	*kv_type_name(const char *s)
++{
++	if (strcmp(s, "q8") == 0)
++		return ("Q8_0");
++	if (strcmp(s, "q5") == 0)
++		return ("Q5_1");
++	return ("F16");
++}
++
++int	main(int argc, char **argv)
++{
++	if (argc < 3)
++	{
++		fprintf(stderr, "usage: %s MODEL.gguf split_layer [n_ctx] [kv_type:q8|q5|f16] [gen_tokens]\n", argv[0]);
++		return (2);
++	}
++	const char	*model_path = argv[1];
++	int32_t		split = atoi(argv[2]);
++	int32_t		n_ctx = argc > 3 ? atoi(argv[3]) : 2048;
++	const char	*kv_type_str = argc > 4 ? argv[4] : "q8";
++	int			gen_tokens = argc > 5 ? atoi(argv[5]) : 8;
++
++	llama_backend_init();
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = -1; /* all weights offloaded, unaffected by kv_dev_override */
++	llama_model	*model = llama_model_load_from_file(model_path, mp);
++	if (model == nullptr)
++	{
++		fprintf(stderr, "model load failed\n");
++		return (3);
++	}
++	int32_t		n_layer = llama_model_n_layer(model);
++	const llama_vocab	*vocab = llama_model_get_vocab(model);
++
++	capture_ctx_t	cap;
++	cap.n_layer = n_layer;
++	cap.k_leaf.assign(n_layer, nullptr);
++	cap.v_leaf.assign(n_layer, nullptr);
++
++	split_ctx_t	split_ctx = {split};
++
++	ggml_type	kvt = strcmp(kv_type_str, "q8") == 0 ? GGML_TYPE_Q8_0
++		: strcmp(kv_type_str, "q5") == 0 ? GGML_TYPE_Q5_1 : GGML_TYPE_F16;
++
++	llama_context_params	cp = llama_context_default_params();
++	cp.n_ctx = n_ctx;
++	cp.type_k = kvt;
++	cp.type_v = kvt;
++	cp.cb_eval = capture_cb;
++	cp.cb_eval_user_data = &cap;
++	/* split < 0 is a sentinel meaning "do not install any kv_dev_override
++	 * callback at all" -- Section 19/20's null-callback-equals-default
++	 * test needs the TRUE nullptr path, not merely a callback that
++	 * happens to always return default_dev (that tests a different,
++	 * also-useful thing: a well-behaved callback that chooses not to
++	 * override anything, exercised whenever split == 0). */
++	if (split == -2)
++		cp.kv_dev_override = always_null_kv_dev_override;
++	else if (split >= 0)
++	{
++		cp.kv_dev_override = split_kv_dev_override;
++		cp.kv_dev_override_ud = &split_ctx;
++	}
++
++	llama_context	*ctx = llama_init_from_model(model, cp);
++	if (ctx == nullptr)
++	{
++		fprintf(stderr, "context creation failed\n");
++		return (4);
++	}
++
++	std::vector<llama_token>	tokens(64);
++	const char	*prompt = "The quick brown fox jumps over the lazy dog";
++	int	n = llama_tokenize(vocab, prompt, (int32_t)strlen(prompt), tokens.data(),
++			(int32_t)tokens.size(), true, false);
++	if (n < 0)
++	{
++		fprintf(stderr, "tokenize failed\n");
++		return (5);
++	}
++	tokens.resize(n);
++	llama_batch	batch = llama_batch_get_one(tokens.data(), (int32_t)tokens.size());
++	auto	t_prompt0 = std::chrono::steady_clock::now();
++	if (llama_decode(ctx, batch) != 0)
++	{
++		fprintf(stderr, "prompt decode failed\n");
++		return (6);
++	}
++	auto	t_prompt1 = std::chrono::steady_clock::now();
++	double	prompt_ms = std::chrono::duration<double, std::milli>(t_prompt1 - t_prompt0).count();
++
++	int32_t		n_vocab = llama_vocab_n_tokens(vocab);
++	std::vector<llama_token>	gen;
++	auto	t_gen0 = std::chrono::steady_clock::now();
++	for (int i = 0; i < gen_tokens; i++)
++	{
++		const float	*logits = llama_get_logits_ith(ctx, -1);
++		int	best = 0;
++		for (int j = 1; j < n_vocab; j++)
++			if (logits[j] > logits[best])
++				best = j;
++		llama_token	tok = (llama_token)best;
++		gen.push_back(tok);
++		llama_batch	b1 = llama_batch_get_one(&tok, 1);
++		if (llama_decode(ctx, b1) != 0)
++		{
++			fprintf(stderr, "generation failed at step %d\n", i);
++			return (7);
++		}
++	}
++	auto	t_gen1 = std::chrono::steady_clock::now();
++	double	gen_ms = std::chrono::duration<double, std::milli>(t_gen1 - t_gen0).count();
++	double	prompt_tok_per_s = n / (prompt_ms / 1000.0);
++	double	gen_tok_per_s = gen_tokens / (gen_ms / 1000.0);
++
++	printf("{\"schema_version\":1,\"n_layer\":%d,\"split\":%d,\"n_ctx\":%d,"
++		"\"kv_type\":\"%s\",\"gen_tokens\":%d,"
++		"\"prompt_tok_per_s\":%.4f,\"generation_tok_per_s\":%.4f,"
++		"\"per_layer_kv_device\":[",
++		n_layer, split, n_ctx, kv_type_name(kv_type_str), gen_tokens,
++		prompt_tok_per_s, gen_tok_per_s);
++	int	n_cpu_kv = 0;
++	int	n_gpu_kv = 0;
++	for (int32_t i = 0; i < n_layer; i++)
++	{
++		const char	*k_buf = cap.k_leaf[i] ? ggml_backend_buffer_name(cap.k_leaf[i]->buffer) : "MISSING";
++		const char	*v_buf = cap.v_leaf[i] ? ggml_backend_buffer_name(cap.v_leaf[i]->buffer) : "MISSING";
++		bool	is_cpu = strstr(k_buf, "CPU") != nullptr;
++		if (is_cpu)
++			n_cpu_kv++;
++		else
++			n_gpu_kv++;
++		printf("%s{\"layer\":%d,\"expected\":\"%s\",\"k_buffer\":\"%s\",\"v_buffer\":\"%s\",\"k_v_agree\":%s}",
++			i == 0 ? "" : ",", i, i < split ? "CPU" : "GPU", k_buf, v_buf,
++			strcmp(k_buf, v_buf) == 0 ? "true" : "false");
++	}
++	printf("],\"n_cpu_kv_layers\":%d,\"n_gpu_kv_layers\":%d,"
++		"\"generated_tokens_list\":[", n_cpu_kv, n_gpu_kv);
++	for (size_t i = 0; i < gen.size(); i++)
++		printf("%s%d", i == 0 ? "" : ",", gen[i]);
++	printf("]}\n");
++
++	llama_free(ctx);
++	llama_model_free(model);
++	llama_backend_free();
++	return (0);
++}
+diff --git a/tools/membrane-kv-device-override/split_policy.c b/tools/membrane-kv-device-override/split_policy.c
+new file mode 100644
+index 0000000..c10fe1b
+--- /dev/null
++++ b/tools/membrane-kv-device-override/split_policy.c
+@@ -0,0 +1,42 @@
++#include <stddef.h>
++
++#include "split_policy.h"
++
++int	membrane_kv_split_decide(int32_t il, int32_t n_layer, int32_t split)
++{
++	int32_t	clamped_split;
++
++	if (n_layer <= 0 || il < 0 || il >= n_layer)
++		return (-1);
++	clamped_split = split;
++	if (clamped_split < 0)
++		clamped_split = 0;
++	if (clamped_split > n_layer)
++		clamped_split = n_layer;
++	if (il < clamped_split)
++		return (MEMBRANE_KV_DEVICE_CPU);
++	return (MEMBRANE_KV_DEVICE_GPU);
++}
++
++int	membrane_kv_split_placement_map(int32_t n_layer, int32_t split,
++		int *out_device, int32_t *out_n_cpu, int32_t *out_n_gpu)
++{
++	int32_t	i;
++	int		d;
++
++	if (n_layer <= 0 || out_device == NULL || out_n_cpu == NULL
++			|| out_n_gpu == NULL)
++		return (0);
++	*out_n_cpu = 0;
++	*out_n_gpu = 0;
++	for (i = 0; i < n_layer; i++)
++	{
++		d = membrane_kv_split_decide(i, n_layer, split);
++		out_device[i] = d;
++		if (d == MEMBRANE_KV_DEVICE_CPU)
++			(*out_n_cpu)++;
++		else
++			(*out_n_gpu)++;
++	}
++	return (1);
++}
+diff --git a/tools/membrane-kv-device-override/split_policy.h b/tools/membrane-kv-device-override/split_policy.h
+new file mode 100644
+index 0000000..1697da5
+--- /dev/null
++++ b/tools/membrane-kv-device-override/split_policy.h
+@@ -0,0 +1,49 @@
++#ifndef MEMBRANE_KV_DEVICE_OVERRIDE_SPLIT_POLICY_H
++# define MEMBRANE_KV_DEVICE_OVERRIDE_SPLIT_POLICY_H
++
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 12B, Section 20: llama-free (no ggml/llama header) pure logic
++ * mirroring device_override_probe.cpp's split_kv_dev_override exactly
++ * (layers [0, split) -> CPU KV, [split, n_layer) -> GPU KV), kept
++ * separate and testable without a model/GPU. RESEARCH ONLY,
++ * experiment/kv-device-override branch only.
++ */
++
++# define MEMBRANE_KV_DEVICE_CPU	0
++# define MEMBRANE_KV_DEVICE_GPU	1
++
++/*
++ * Returns MEMBRANE_KV_DEVICE_CPU if il < split, else
++ * MEMBRANE_KV_DEVICE_GPU -- the exact decision device_override_probe's
++ * real llama.cpp-facing callback makes. split is clamped to [0,
++ * n_layer] first (mirrors the real callback's tolerance: an
++ * out-of-range split does not crash or misbehave, it just saturates
++ * to all-CPU or all-GPU). Returns -1 (invalid) only for il out of
++ * [0, n_layer) or n_layer <= 0 -- a real llama.cpp caller never
++ * passes such an il (the constructor's own loop bounds guarantee
++ * this), but the pure function fails closed anyway rather than
++ * guessing.
++ */
++int	membrane_kv_split_decide(int32_t il, int32_t n_layer, int32_t split);
++
++/*
++ * Fills out_device[i] for i in [0, n_layer) using
++ * membrane_kv_split_decide, and returns the count of CPU-placed and
++ * GPU-placed layers via out_n_cpu/out_n_gpu (which always sum to
++ * n_layer). Returns 1 on success, 0 (fails closed, outputs untouched)
++ * for n_layer <= 0 or a NULL out_device/out_n_cpu/out_n_gpu.
++ */
++int	membrane_kv_split_placement_map(int32_t n_layer, int32_t split,
++		int *out_device, int32_t *out_n_cpu, int32_t *out_n_gpu);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-device-override/test_split_policy.c b/tools/membrane-kv-device-override/test_split_policy.c
+new file mode 100644
+index 0000000..374baa1
+--- /dev/null
++++ b/tools/membrane-kv-device-override/test_split_policy.c
+@@ -0,0 +1,141 @@
++#include "split_policy.h"
++#include "test_helpers.h"
++
++static void	test_basic_split(void)
++{
++	TEST_ASSERT(membrane_kv_split_decide(0, 30, 15) == MEMBRANE_KV_DEVICE_CPU,
++		"layer 0 < split(15) -> CPU");
++	TEST_ASSERT(membrane_kv_split_decide(14, 30, 15) == MEMBRANE_KV_DEVICE_CPU,
++		"layer 14 < split(15) -> CPU (last CPU layer)");
++	TEST_ASSERT(membrane_kv_split_decide(15, 30, 15) == MEMBRANE_KV_DEVICE_GPU,
++		"layer 15 == split -> GPU (first GPU layer, boundary is exclusive on split)");
++	TEST_ASSERT(membrane_kv_split_decide(29, 30, 15) == MEMBRANE_KV_DEVICE_GPU,
++		"layer 29 (last layer) -> GPU");
++}
++
++static void	test_split_zero_is_all_gpu(void)
++{
++	TEST_ASSERT(membrane_kv_split_decide(0, 30, 0) == MEMBRANE_KV_DEVICE_GPU,
++		"split=0 -> layer 0 is GPU (matches 'default_dev used for every "
++		"layer', i.e. null-callback-equivalent behavior)");
++	TEST_ASSERT(membrane_kv_split_decide(29, 30, 0) == MEMBRANE_KV_DEVICE_GPU,
++		"split=0 -> every layer is GPU");
++}
++
++static void	test_split_full_is_all_cpu(void)
++{
++	TEST_ASSERT(membrane_kv_split_decide(0, 30, 30) == MEMBRANE_KV_DEVICE_CPU,
++		"split=n_layer -> layer 0 is CPU");
++	TEST_ASSERT(membrane_kv_split_decide(29, 30, 30) == MEMBRANE_KV_DEVICE_CPU,
++		"split=n_layer -> every layer is CPU");
++}
++
++static void	test_split_clamped_negative(void)
++{
++	TEST_ASSERT(membrane_kv_split_decide(0, 30, -5) == MEMBRANE_KV_DEVICE_GPU,
++		"a negative split clamps to 0 (all-GPU), never crashes or "
++		"misbehaves");
++}
++
++static void	test_split_clamped_over_range(void)
++{
++	TEST_ASSERT(membrane_kv_split_decide(29, 30, 999) == MEMBRANE_KV_DEVICE_CPU,
++		"a split larger than n_layer clamps to n_layer (all-CPU)");
++}
++
++static void	test_layer_bounds_rejected(void)
++{
++	TEST_ASSERT(membrane_kv_split_decide(-1, 30, 15) == -1,
++		"negative layer index fails closed (-1), never silently treated "
++		"as layer 0");
++	TEST_ASSERT(membrane_kv_split_decide(30, 30, 15) == -1,
++		"il == n_layer (one past the end) fails closed");
++	TEST_ASSERT(membrane_kv_split_decide(999, 30, 15) == -1,
++		"far-out-of-range il fails closed");
++	TEST_ASSERT(membrane_kv_split_decide(0, 0, 15) == -1,
++		"n_layer <= 0 fails closed");
++}
++
++static void	test_placement_map_exact_counts(void)
++{
++	int		devices[30];
++	int32_t	n_cpu;
++	int32_t	n_gpu;
++
++	TEST_ASSERT(membrane_kv_split_placement_map(30, 15, devices, &n_cpu,
++			&n_gpu) == 1, "placement map resolves");
++	TEST_ASSERT(n_cpu == 15 && n_gpu == 15, "exactly 15/15 split");
++	TEST_ASSERT(n_cpu + n_gpu == 30,
++		"n_cpu + n_gpu == n_layer exactly, no layer double-counted or "
++		"dropped");
++	for (int32_t i = 0; i < 15; i++)
++		TEST_ASSERT(devices[i] == MEMBRANE_KV_DEVICE_CPU,
++			"first 15 layers report CPU in the map");
++	for (int32_t i = 15; i < 30; i++)
++		TEST_ASSERT(devices[i] == MEMBRANE_KV_DEVICE_GPU,
++			"last 15 layers report GPU in the map");
++}
++
++static void	test_placement_map_matches_measured_layer_counts(void)
++{
++	/* results/phase12/kv-device-override/raw_context_matrix_135m.jsonl:
++	 * split=25 on the real 30-layer SmolLM2-135M measured
++	 * n_cpu_kv_layers=25, n_gpu_kv_layers=5 -- the pure function must
++	 * reproduce this exactly. */
++	int		devices[30];
++	int32_t	n_cpu;
++	int32_t	n_gpu;
++
++	membrane_kv_split_placement_map(30, 25, devices, &n_cpu, &n_gpu);
++	TEST_ASSERT(n_cpu == 25 && n_gpu == 5,
++		"pure function reproduces the real measured 25/5 split exactly");
++}
++
++static void	test_placement_map_degenerate_inputs(void)
++{
++	int		devices[4];
++	int32_t	n_cpu = 99;
++	int32_t	n_gpu = 99;
++
++	TEST_ASSERT(membrane_kv_split_placement_map(0, 1, devices, &n_cpu, &n_gpu)
++		== 0, "n_layer<=0 fails closed");
++	TEST_ASSERT(membrane_kv_split_placement_map(4, 1, NULL, &n_cpu, &n_gpu)
++		== 0, "NULL out_device fails closed");
++}
++
++static void	test_deterministic_repeated_calls(void)
++{
++	int		devices1[30];
++	int		devices2[30];
++	int32_t	n_cpu1;
++	int32_t	n_cpu2;
++	int32_t	n_gpu1;
++	int32_t	n_gpu2;
++	int		i;
++	int		ok;
++
++	membrane_kv_split_placement_map(30, 15, devices1, &n_cpu1, &n_gpu1);
++	membrane_kv_split_placement_map(30, 15, devices2, &n_cpu2, &n_gpu2);
++	ok = (n_cpu1 == n_cpu2) && (n_gpu1 == n_gpu2);
++	for (i = 0; ok && i < 30; i++)
++		if (devices1[i] != devices2[i])
++			ok = 0;
++	TEST_ASSERT(ok, "identical inputs produce a byte-identical placement "
++		"map across calls");
++}
++
++int	main(void)
++{
++	test_basic_split();
++	test_split_zero_is_all_gpu();
++	test_split_full_is_all_cpu();
++	test_split_clamped_negative();
++	test_split_clamped_over_range();
++	test_layer_bounds_rejected();
++	test_placement_map_exact_counts();
++	test_placement_map_matches_measured_layer_counts();
++	test_placement_map_degenerate_inputs();
++	test_deterministic_repeated_calls();
++	printf("test_split_policy: all tests passed\n");
++	return (0);
++}

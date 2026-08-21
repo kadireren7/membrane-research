@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 6/19/20: default-behavior regression -- with kv_dev_override unset (or set to a callback that always returns NULL, or always returns default_dev), behavior must be byte-identical to unpatched upstream.",
+  "product_cli_smoke_test": {
+    "method": "real build-vulkan/tools/membrane-run/membrane-run --model SmolLM2-135M --prompt Hello --ctx 2048 --gpu-layers all --gen-tokens 4 --json --quiet, with the patch applied but membrane-run never setting kv_dev_override at all",
+    "native": {"exit_code": 0, "selected_kv": "native", "no_fallback_occurred": true},
+    "q8": {"exit_code": 0, "selected_kv": "q8", "no_fallback_occurred": true},
+    "q5": {"exit_code": 0, "selected_kv": "q5", "no_fallback_occurred": true},
+    "adaptive": {"exit_code": 0, "selected_kv": "q8", "no_fallback_occurred": true}
+  },
+  "byte_identical_metrics_check": {
+    "method": "membrane-run --kv q8 --ctx 2048, SmolLM2-135M, compared field-by-field against the identical config's own earlier measurement",
+    "kv_allocated_bytes": {"expected": 25067520, "observed_with_patch": 25067520, "match": true},
+    "estimated_model_bytes": {"expected": 212474880, "observed_with_patch": 212474880, "match": true},
+    "gpu_layers_selected": {"expected": 30, "observed_with_patch": 30, "match": true}
+  },
+  "null_vs_always_null_vs_default_returning_equivalence": {
+    "method": "membrane-kv-device-override-probe with three variants at identical model/ctx/kv_type/prompt/gen_tokens: (a) split=-1, cp.kv_dev_override never set at all (true NULL/unset field); (b) split=-2, a callback installed that ALWAYS returns NULL for every layer; (c) split=0, a callback installed that always resolves to default_dev via ordinary split logic",
+    "results": {
+      "a_no_callback": {"n_cpu_kv_layers": 0, "n_gpu_kv_layers": 30, "generated_tokens": [198, 198, 788, 451]},
+      "b_always_null_callback": {"n_cpu_kv_layers": 0, "n_gpu_kv_layers": 30, "generated_tokens": [198, 198, 788, 451]},
+      "c_always_default_dev_callback": {"n_cpu_kv_layers": 0, "n_gpu_kv_layers": 30, "generated_tokens": [198, 198, 788, 451]}
+    },
+    "all_three_identical": true,
+    "conclusion": "the patch's documented NULL-return safe-fallback contract is real and verified: an unset callback, an installed-but-always-NULL callback, and an installed-and-explicitly-default-choosing callback are all exactly equivalent in both placement and generated output."
+  },
+  "no_new_visible_logs": "the only new LLAMA_LOG_DEBUG line only fires INSIDE the if(kv_dev_override) block, which is skipped entirely when the field is unset -- no new debug or info-level output appears in the unset-callback path; the pre-existing 'layer %3d: dev = %s' debug line's TEXT is byte-identical to upstream when the override never changes buft (verified: the patch reuses the exact original format string unmodified)."
+}

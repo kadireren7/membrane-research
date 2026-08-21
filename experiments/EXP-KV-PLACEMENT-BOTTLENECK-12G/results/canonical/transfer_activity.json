@@ -1,0 +1,408 @@
+{
+  "schema_version": 1,
+  "label": "ESTIMATED_NOT_DIRECTLY_MEASURED",
+  "method": "estimated_bytes_transferred_per_decode_token = (graph_splits_tg at this ratio - graph_splits_tg at 100% GPU) * (cpu_resident_kv_bytes / n_cpu_resident_layers). This is a structural estimate from the real, measured graph-split count (section 12) and the real, measured per-layer KV byte size -- NOT a direct ggml_backend_sched byte-transfer instrumentation (no such counter was added; doing so would need a llama.cpp source change, out of scope for a llama-free-first phase). Do not treat these numbers as measured PCIe traffic.",
+  "rows": [
+    {
+      "model": "135M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 6684672,
+      "estimated_bytes_transferred_per_decode_token": 13369344.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 30,
+      "cpu_resident_kv_bytes": 12533760,
+      "estimated_bytes_transferred_per_decode_token": 25067520.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 44,
+      "cpu_resident_kv_bytes": 18382848,
+      "estimated_bytes_transferred_per_decode_token": 36765696.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 60,
+      "cpu_resident_kv_bytes": 25067520,
+      "estimated_bytes_transferred_per_decode_token": 50135040.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 26738688,
+      "estimated_bytes_transferred_per_decode_token": 53477376.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 30,
+      "cpu_resident_kv_bytes": 50135040,
+      "estimated_bytes_transferred_per_decode_token": 100270080.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 44,
+      "cpu_resident_kv_bytes": 73531392,
+      "estimated_bytes_transferred_per_decode_token": 147062784.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 60,
+      "cpu_resident_kv_bytes": 100270080,
+      "estimated_bytes_transferred_per_decode_token": 200540160.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 53477376,
+      "estimated_bytes_transferred_per_decode_token": 106954752.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 30,
+      "cpu_resident_kv_bytes": 100270080,
+      "estimated_bytes_transferred_per_decode_token": 200540160.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 44,
+      "cpu_resident_kv_bytes": 147062784,
+      "estimated_bytes_transferred_per_decode_token": 294125568.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 60,
+      "cpu_resident_kv_bytes": 200540160,
+      "estimated_bytes_transferred_per_decode_token": 401080320.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 106954752,
+      "estimated_bytes_transferred_per_decode_token": 213909504.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 30,
+      "cpu_resident_kv_bytes": 200540160,
+      "estimated_bytes_transferred_per_decode_token": 401080320.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 44,
+      "cpu_resident_kv_bytes": 294125568,
+      "estimated_bytes_transferred_per_decode_token": 588251136.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 60,
+      "cpu_resident_kv_bytes": 401080320,
+      "estimated_bytes_transferred_per_decode_token": 802160640.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 213909504,
+      "estimated_bytes_transferred_per_decode_token": 427819008.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 30,
+      "cpu_resident_kv_bytes": 401080320,
+      "estimated_bytes_transferred_per_decode_token": 802160640.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 44,
+      "cpu_resident_kv_bytes": 588251136,
+      "estimated_bytes_transferred_per_decode_token": 1176502272.0
+    },
+    {
+      "model": "135M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 60,
+      "cpu_resident_kv_bytes": 802160640,
+      "estimated_bytes_transferred_per_decode_token": 1604321280.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 11141120,
+      "estimated_bytes_transferred_per_decode_token": 22282240.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 32,
+      "cpu_resident_kv_bytes": 22282240,
+      "estimated_bytes_transferred_per_decode_token": 44564480.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 48,
+      "cpu_resident_kv_bytes": 33423360,
+      "estimated_bytes_transferred_per_decode_token": 66846720.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 2048,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 64,
+      "cpu_resident_kv_bytes": 44564480,
+      "estimated_bytes_transferred_per_decode_token": 89128960.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 44564480,
+      "estimated_bytes_transferred_per_decode_token": 89128960.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 32,
+      "cpu_resident_kv_bytes": 89128960,
+      "estimated_bytes_transferred_per_decode_token": 178257920.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 48,
+      "cpu_resident_kv_bytes": 133693440,
+      "estimated_bytes_transferred_per_decode_token": 267386880.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 8192,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 64,
+      "cpu_resident_kv_bytes": 178257920,
+      "estimated_bytes_transferred_per_decode_token": 356515840.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 89128960,
+      "estimated_bytes_transferred_per_decode_token": 178257920.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 32,
+      "cpu_resident_kv_bytes": 178257920,
+      "estimated_bytes_transferred_per_decode_token": 356515840.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 48,
+      "cpu_resident_kv_bytes": 267386880,
+      "estimated_bytes_transferred_per_decode_token": 534773760.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 16384,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 64,
+      "cpu_resident_kv_bytes": 356515840,
+      "estimated_bytes_transferred_per_decode_token": 713031680.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 178257920,
+      "estimated_bytes_transferred_per_decode_token": 356515840.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 32,
+      "cpu_resident_kv_bytes": 356515840,
+      "estimated_bytes_transferred_per_decode_token": 713031680.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 48,
+      "cpu_resident_kv_bytes": 534773760,
+      "estimated_bytes_transferred_per_decode_token": 1069547520.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 32768,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 64,
+      "cpu_resident_kv_bytes": 713031680,
+      "estimated_bytes_transferred_per_decode_token": 1426063360.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 100,
+      "extra_graph_splits_vs_100pct_gpu": 0,
+      "cpu_resident_kv_bytes": 0,
+      "estimated_bytes_transferred_per_decode_token": 0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 75,
+      "extra_graph_splits_vs_100pct_gpu": 16,
+      "cpu_resident_kv_bytes": 356515840,
+      "estimated_bytes_transferred_per_decode_token": 713031680.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 50,
+      "extra_graph_splits_vs_100pct_gpu": 32,
+      "cpu_resident_kv_bytes": 713031680,
+      "estimated_bytes_transferred_per_decode_token": 1426063360.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 25,
+      "extra_graph_splits_vs_100pct_gpu": 48,
+      "cpu_resident_kv_bytes": 1069547520,
+      "estimated_bytes_transferred_per_decode_token": 2139095040.0
+    },
+    {
+      "model": "360M",
+      "n_ctx": 65536,
+      "gpu_kv_pct": 0,
+      "extra_graph_splits_vs_100pct_gpu": 64,
+      "cpu_resident_kv_bytes": 1426063360,
+      "estimated_bytes_transferred_per_decode_token": 2852126720.0
+    }
+  ],
+  "unresolved": "Whether any observed slowdown (if any) is actually PCIe-bandwidth-bound, PCIe-latency-bound, host-memory-bandwidth-bound, or graph-split/sync-overhead-bound was NOT isolated by direct profiling in this phase (section 19) -- see summary.json limitations."
+}

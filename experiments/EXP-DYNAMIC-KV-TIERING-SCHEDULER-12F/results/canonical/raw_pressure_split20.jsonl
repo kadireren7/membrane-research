@@ -1,0 +1,1 @@
+{"schema_version":1,"mode":"hotset","split":20,"n_gpu_kv_layers":10,"n_cpu_kv_layers":20,"gpu_kv_bytes":267386880,"cpu_kv_bytes":534773760,"prompt_ms":84.710,"n_decodes":3,"decode_total_ms":138.783,"generation_tok_s":21.6165,"vram_used_mib":616,"rss_kb":799216,"generated_tokens":[198,198,788]}

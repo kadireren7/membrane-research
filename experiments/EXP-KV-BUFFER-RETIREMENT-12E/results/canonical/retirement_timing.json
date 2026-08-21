@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 7,
+  "note": "The originally-suggested experiment space (retirement timing options A-H: immediately, after sync, after 1/2/4 decodes, after scheduler reset, after graph rebuild, after context-level reserve) turned out to collapse to a single, much simpler finding once the root cause was identified (see scheduler_lifetime.json): the unsafe case is not about WAITING long enough -- it is about whether llama_context's NEXT decode takes the graph-REBUILD path or the graph-REUSE path. 'After N decodes' only ever helped by accident, when N happened to include a decode whose ubatch shape differed enough to fail allow_reuse() and force a rebuild -- not a reliable mechanism (see option A_no_invalidate below, and Phase 12D's own disclosed non-uniform roundtrip-mode observation).",
+  "options_tested": {
+    "A_immediate_no_invalidate": {
+      "description": "free old backing immediately (relocate_layer's real default path), no cache invalidation",
+      "result": "UNSAFE -- reliably crashes (SIGSEGV / GGML_ASSERT, see failing_tensor_trace.json)"
+    },
+    "B_immediate_plus_llama_synchronize": {
+      "description": "explicit llama_synchronize() before relocate_layer, immediate free",
+      "result": "UNSAFE -- already tested and disclosed in Phase 12D's release_failure.json; re-confirmed not to matter here since the root cause is unrelated to GPU work completion"
+    },
+    "C_immediate_plus_invalidate_graph_cache": {
+      "description": "call the new llama_invalidate_graph_cache(ctx) immediately after relocate_layer, before the next decode, then free immediately (retain=false, no deferral)",
+      "result": "SAFE -- validated repeatedly: single relocation pair (repro2), 50-cycle round trip (cycle_stability.json), 1/2/4/8-layer groups (multi_layer.json), and the real ctx=200000/360M pressure regime (pressure_test.json). This is the adopted fix."
+    },
+    "delay_based_options_D_through_H": {
+      "tested": false,
+      "reason": "Not needed -- option C (immediate free + invalidate) already provides a complete, deterministic, zero-delay solution. Introducing an arbitrary generation-count delay on top of an already-safe immediate mechanism would add complexity (Section 16 explicitly warns against unnecessary machinery) without any correctness or performance benefit this investigation found evidence for."
+    }
+  },
+  "minimum_invalidation_level_found": "C (existing backend/context cleanup call) -- llama_invalidate_graph_cache() wraps the SAME gf_res_prev->reset() call llama_context already uses internally after memory-module updates (llama-context.cpp:808). No new invalidation mechanism was invented; an existing one was exposed as a minimal public hook.",
+  "conclusion": "The safe lifetime boundary is not time/generation-based at all -- it is call-order-based: retire (free) is safe immediately, unconditionally, as long as llama_invalidate_graph_cache() is called first."
+}

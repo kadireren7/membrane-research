@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 15,
+  "matrix": {
+    "llama_free_release": {
+      "build": "build-vulkan",
+      "target": "test_relocate_state",
+      "result": "PASS"
+    },
+    "llama_free_asan_ubsan": {
+      "build": "build-free-asan (Debug+ASan+UBSan, MEMBRANE_ENABLE_LLAMA=OFF)",
+      "target": "test_relocate_state",
+      "result": "PASS, 0 sanitizer reports"
+    },
+    "llama_enabled_cpu_release": {
+      "build": "build-cpu-rc1 (GGML_VULKAN=OFF)",
+      "targets": [
+        "test_relocate_state",
+        "membrane-kv-runtime-relocate-probe (info mode, real model)"
+      ],
+      "result": "PASS"
+    },
+    "llama_enabled_cpu_asan_ubsan": {
+      "build": "build-llama-asan (Debug+ASan+UBSan, GGML_VULKAN=OFF)",
+      "targets": [
+        "test_relocate_state",
+        "membrane-kv-runtime-relocate-probe (info mode, real model)"
+      ],
+      "result": "PASS, 0 sanitizer reports"
+    },
+    "vulkan_release": {
+      "build": "build-vulkan",
+      "result": "PASS -- full experiment suite for this phase run for real against SmolLM2-135M/360M on the GTX 1650; ctest 68/69 or 69/69 depending on real-time host swap pressure (test_relocate_state, the one new test, always passes -- see regression.json for the unrelated test_mem_guard flake)"
+    }
+  },
+  "vulkan_asan_not_attempted": "Same limitation and reasoning as Phase 12C: building a Vulkan+ASan/UBSan combination was judged too resource-risky on this 5.6 GiB host (a single CPU-only ASan rebuild of llama already needs ~580s and most of the machine's headroom), and Vulkan driver-side allocations are frequently not ASan-instrumented anyway. The real Vulkan-side correctness claims in this phase rest on the poison test (ground truth generation output), not on a sanitizer run -- and the one Vulkan-side memory-safety BUG this phase found (release_failure.json) was found WITHOUT a sanitizer, via a real crash, so the absence of Vulkan+ASan does not mean memory-safety issues went undetected here."
+}

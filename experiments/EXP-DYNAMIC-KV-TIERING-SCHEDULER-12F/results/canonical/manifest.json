@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "phase": "12F",
+  "title": "Deterministic Dynamic KV Tiering Scheduler",
+  "branch": "experiment/dynamic-kv-tiering-scheduler",
+  "parent_branch": "experiment/kv-buffer-retirement",
+  "parent_branch_head": "73ae8ba12b9ce477d33ca407b9923f5d826e20b1",
+  "primitives_used": [
+    "kv_dev_override (Phase 12B)",
+    "llama_kv_cache_relocate_layer (Phase 12D)",
+    "llama_invalidate_graph_cache (Phase 12E)"
+  ],
+  "new_code": [
+    "tools/membrane-kv-tiering-scheduler/scheduler_core.h",
+    "tools/membrane-kv-tiering-scheduler/scheduler_core.c",
+    "tools/membrane-kv-tiering-scheduler/test_scheduler_core.c",
+    "tools/membrane-kv-tiering-scheduler/tiering_probe.cpp",
+    "tools/membrane-kv-tiering-scheduler/CMakeLists.txt"
+  ],
+  "no_llama_cpp_changes": true,
+  "llama_cpp_verification": {
+    "pinned_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "applied_patches_in_order": [
+      "patches/llama.cpp-membrane-kv-type-override.patch",
+      "patches/llama.cpp-membrane-kv-device-override.patch",
+      "patches/llama.cpp-membrane-kv-runtime-relocate.patch",
+      "patches/llama.cpp-membrane-kv-buffer-retirement.patch"
+    ],
+    "dirty_files": [
+      "include/llama.h", "src/llama-context.cpp", "src/llama-context.h",
+      "src/llama-kv-cache.cpp", "src/llama-kv-cache.h", "src/llama-memory.h",
+      "src/llama-model.cpp"
+    ],
+    "reconstruction_method": "git -C third_party/llama.cpp stash push -u; verify clean at pinned_commit; reapply the 4 patches above in order; git diff; compare byte-for-byte against the pre-stash working-tree diff; git checkout -- . && git stash pop to restore",
+    "reconstruction_byte_identical": true,
+    "note": "Phase 12F introduced no new patch and made no edits under third_party/llama.cpp -- the dirty working tree carries only the cumulative effect of the 4 patches already established and committed in Phases 12B-12E. This was manually verified once (see method above); scripts/verify-results.py's Phase 12F check recomputes the cheap, read-only half of this (dirty-file-set equals the union of files touched by the 4 patch files on disk) on every run."
+  },
+  "policy_type": "deterministic, config-driven, decode-index-triggered -- no ML/adaptive/learned-hotness component",
+  "artifacts": {
+    "scheduler_config.json": "Section 4: config schema + values used across experiments",
+    "state_machine.json": "Section 2: layer/scheduler state model",
+    "first_schedule.json": "Section 6: first end-to-end schedule proof, SmolLM2-135M ctx=2048 Q8",
+    "decision_trace.jsonl": "Section 26: raw per-transition decision trace from the first schedule",
+    "vram_timeseries.json": "Section 8: VRAM samples across the first schedule's 15 decodes",
+    "correctness.json": "Section 9: token-sequence identity across static-GPU/static-CPU/static-split/dynamic",
+    "stability.json": "Section 10: 56-relocation repeated cycle, no VRAM growth",
+    "transition_latency.json": "Section 11: per-transition promote/demote latency",
+    "performance.json": "Section 12: static A/B/C throughput comparison",
+    "hotset_sweep.json": "Section 13: static split sweep 0/8/15/22/30 of 30 layers",
+    "promotion_group_sweep.json": "Section 14: group-size 1/2/4/8 promote+demote latency and VRAM delta",
+    "frequency_sweep.json": "Section 15: schedule interval 1/4/16/64 decodes, relocation overhead %",
+    "pressure_test.json": "Section 16: pressure-regime run, ctx scaled to 65536 (documented deviation)",
+    "budget_guard.json": "Sections 17-18: generous-budget success + impossible-budget fail-closed",
+    "q5.json": "Section 20: Q5_1 precision schedule + promotion latency",
+    "second_model.json": "Section 21: SmolLM2-360M (32 layers) schedule",
+    "long_context.json": "Section 22: ctx=16384 schedule",
+    "prefetch_feasibility.json": "Section 23: analytical feasibility assessment, NOT_ATTEMPTED",
+    "policy_comparison.json": "Section 24: static vs dynamic policy comparison",
+    "pareto.json": "Section 25: VRAM/throughput Pareto points from hotset sweep",
+    "failure_cases.json": "Section 27: enumerated failure-handling cases and verdicts",
+    "determinism.json": "Section 28: identical planning trace across two independent runs",
+    "summary.json": "Section 34: decision gate"
+  },
+  "raw_evidence_files": [
+    "raw_first_schedule_trace.jsonl", "raw_first_schedule_stderr.txt",
+    "raw_hotset_sweep.jsonl", "raw_promo_group_sweep.jsonl",
+    "raw_budget_ok_trace.jsonl", "raw_budget_ok.txt",
+    "raw_budget_fail_trace.jsonl", "raw_budget_fail.txt",
+    "raw_freq_sweep.jsonl", "raw_q5_trace.jsonl", "raw_q5_stderr.txt",
+    "raw_q5_promo_group.jsonl", "raw_360m_trace.jsonl", "raw_360m_stderr.txt",
+    "raw_longctx_trace.jsonl", "raw_longctx_stderr.txt",
+    "raw_pressure_split20.jsonl", "raw_pressure_split20.txt",
+    "raw_pressure_schedule_trace.jsonl", "raw_pressure_schedule_stderr.txt",
+    "raw_stability_50.jsonl", "raw_stability_50.txt"
+  ],
+  "tests": {
+    "test_scheduler_core": "21 llama-free unit tests, run under Release (build-vulkan), ASan+UBSan llama-free (build-free-asan), and ASan+UBSan llama-enabled CPU (build-llama-asan); all pass in all three",
+    "product_regression": "70/70 ctest in build-vulkan Release (69 prior + this phase's test_scheduler_core), no product code modified"
+  },
+  "sanitizer_matrix": {
+    "llama_free_release": "PASS (dedicated MEMBRANE_ENABLE_LLAMA=OFF Release build directory 'build'; also covered incidentally by test_scheduler_core in build-vulkan since scheduler_core itself is llama-free)",
+    "llama_free_asan_ubsan": "PASS (build-free-asan, MEMBRANE_ENABLE_LLAMA=OFF)",
+    "llama_enabled_cpu_release": "not run separately; covered by llama-enabled ASan build below plus build-vulkan Release",
+    "llama_enabled_cpu_asan_ubsan": "PASS for load/decode/capture path; GPU device unavailable in this CPU-only build so relocate/invalidate could not be exercised there -- those primitives were already ASan-validated in Phase 12D/12E and are unchanged in this phase",
+    "vulkan_release": "PASS (build-vulkan, full first_schedule + all sweeps run here)",
+    "vulkan_asan": "not attempted -- Vulkan+ASan combination not established as safe in prior phases either"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Section 16: synchronous cross-device attention performance cost, SmolLM2-135M, ctx=16384 (largest tested context, biggest per-layer KV, worst case for cross-device cost), Q8_0, 7 fresh runs per config, 24 generated tokens each. Raw data: raw_performance_curve.json, raw_perf_curve_vram_split8.json.",
+  "configs": {
+    "100pct_gpu_kv": {"split": 0, "vram_mib": 553, "gpu_kv_layers": 30, "cpu_kv_layers": 0,
+      "generation_tok_per_s": {"mean": 22.30, "stddev": 0.73}},
+    "75pct_gpu_kv": {"split": 8, "vram_mib": 502, "gpu_kv_layers": 22, "cpu_kv_layers": 8,
+      "generation_tok_per_s": {"mean": 23.25, "stddev": 0.81}},
+    "50pct_gpu_kv": {"split": 15, "vram_mib": 457, "gpu_kv_layers": 15, "cpu_kv_layers": 15,
+      "generation_tok_per_s": {"mean": 24.65, "stddev": 0.25}},
+    "25pct_gpu_kv": {"split": 23, "vram_mib": 393, "gpu_kv_layers": 7, "cpu_kv_layers": 23,
+      "generation_tok_per_s": {"mean": 25.06, "stddev": 0.95}}
+  },
+  "headline_finding": "generation throughput does NOT degrade as more KV layers move to CPU on this hardware/model scale -- it is flat to slightly INCREASING (22.3 -> 25.1 tok/s, well within run-to-run noise for the smaller stddevs, but consistently non-decreasing across all four points). VRAM strictly decreases (553 -> 393 MiB) across the same sweep. There is no visible memory/latency trade-off curve at this scale -- more CPU placement is currently a pure win on both axes.",
+  "interpretation": "plausible explanations (not independently isolated this phase): (1) SmolLM2-135M's per-layer KV width (n_embd_k_gqa=192) is small enough that the CPU-side attention computation for a demoted layer is cheap relative to Vulkan kernel dispatch/launch overhead on this GTX 1650 for the same tiny op; (2) the automatic graph-splitting the scheduler performs (see graph_behavior.json) may overlap host and device work reasonably well at this scale. This finding should NOT be assumed to generalize to larger models, larger per-layer KV widths, or busier host CPUs -- it is a real, measured result for this specific hardware/model/context combination, not a general claim about cross-device attention cost.",
+  "graph_split_cost_context": "sched_reserve's own 'graph splits' count grows with cpu_kv_layers (2 at split=0, 32 at split=15, 52 at split=25 -- see graph_behavior.json) yet throughput does not degrade -- the split/copy overhead the scheduler pays is apparently small relative to this small model's per-token compute cost."
+}

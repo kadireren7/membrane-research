@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 24,
+  "files_touched": [
+    "third_party/llama.cpp/include/llama.h",
+    "third_party/llama.cpp/src/llama-context.h",
+    "third_party/llama.cpp/src/llama-context.cpp",
+    "third_party/llama.cpp/src/llama-kv-cache.h",
+    "third_party/llama.cpp/src/llama-kv-cache.cpp"
+  ],
+  "api_added": [
+    "llama_kv_cache::relocate_layer(...) extended with a new defer_retirement_for_research parameter (RESEARCH ONLY, unused by the validated real fix)",
+    "bool llama_kv_cache::retire_layer_backing(int32_t il) -- RESEARCH ONLY",
+    "bool llama_kv_cache_retire_layer_backing(llama_memory_t, int32_t) -- C API wrapper, RESEARCH ONLY",
+    "void llama_context::invalidate_graph_cache() -- the actual fix's core mechanism",
+    "void llama_invalidate_graph_cache(llama_context *) -- C API wrapper, the actual fix's public entry point"
+  ],
+  "backend_specificity": "None -- every new function operates at the llama_context/llama_kv_cache level; no backend-specific (Vulkan/CUDA/CPU) code was added or touched.",
+  "ownership_complexity": "Low for the validated fix (llama_invalidate_graph_cache is a single stateless call, no new persistent state). Moderate for the RESEARCH-ONLY deferred-retirement path (adds a std::unordered_map<int32_t, ggml_backend_buffer_t> pending_retirement to llama_kv_cache, with the disclosed sharp edge in failure_atomicity.json).",
+  "maintenance_risk": "Low-to-moderate. llama_invalidate_graph_cache wraps a call (gf_res_prev->reset()) that llama_context ALREADY makes internally for the identical purpose (llama-context.cpp:808) -- it reuses an existing, actively-maintained code path rather than adding new logic, which should track upstream changes to that mechanism naturally. The relocate_layer/retire_layer_backing additions carry the same risk profile already disclosed in Phase 12D's maintenance.json (reads private llama_kv_cache internals under active upstream development).",
+  "upstreamability": "The invalidate_graph_cache hook is plausibly upstreamable in spirit as a small, generic, already-precedented primitive (llama.cpp's own decode() function does the same reset for the same reason) -- exposing it publicly for external KV-cache mutators is a natural, minimal extension. relocate_layer/retire_layer_backing's upstreamability assessment is unchanged from Phase 12D (rebind mechanism plausible, deferred-retirement research escape hatch not upstream-ready given its disclosed sharp edge)."
+}

@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 21,
+  "cases_tested": [
+    {
+      "case": "promote_without_enough_vram",
+      "method": "promote with 'huge' flag -> requests (kb+vb)*2000000 bytes (~1.56 TB), headroom check runs first and refuses",
+      "result": {
+        "schema_version": 1,
+        "mode": "promote",
+        "layer": 4,
+        "ok": false,
+        "error": "headroom_refused",
+        "required_bytes": 1671168000000
+      },
+      "failed_closed": true
+    },
+    {
+      "case": "demote_scratch_alloc_failure",
+      "method": "demote with 'huge' flag -> headroom check does not gate CPU-bound demotion, so this exercises the real ggml_backend_alloc_ctx_tensors_from_buft failure path directly for an absurd size",
+      "result": {
+        "schema_version": 1,
+        "mode": "demote",
+        "layer": 20,
+        "ok": false,
+        "error": "scratch_alloc_failed_closed_as_expected"
+      },
+      "failed_closed": true
+    },
+    {
+      "case": "invalid_layer",
+      "method": "promote layer=99 on a 30-layer model",
+      "result": {
+        "schema_version": 1,
+        "mode": "promote",
+        "layer": 99,
+        "n_layer": 30,
+        "ok": false,
+        "error": "invalid_layer"
+      },
+      "failed_closed": true
+    },
+    {
+      "case": "promotion_of_already_gpu_layer",
+      "method": "promote layer=20 (GPU-resident under split=8) a second time",
+      "result": {
+        "schema_version": 1,
+        "mode": "promote",
+        "layer": 20,
+        "ok": false,
+        "error": "already_gpu"
+      },
+      "failed_closed": true
+    },
+    {
+      "case": "demotion_of_already_cpu_layer",
+      "method": "demote layer=4 (CPU-resident under split=8)",
+      "result": {
+        "schema_version": 1,
+        "mode": "demote",
+        "layer": 4,
+        "ok": false,
+        "error": "already_cpu"
+      },
+      "failed_closed": true
+    },
+    {
+      "case": "backend_unavailable",
+      "method": "Real run of the promote mode on build-cpu-rc1 (GGML_VULKAN=OFF, llama-enabled CPU Release, no GPU backend device registered at all) -- exercises the require_gpu_device() guard added after this exact scenario was found to SIGABRT the process via a bare GGML_ASSERT(device) in ggml-backend.cpp before the fix.",
+      "result": {
+        "schema_version": 1,
+        "mode": "promote",
+        "ok": false,
+        "error": "backend_unavailable",
+        "detail": "no GPU backend device registered (e.g. a CPU-only/GGML_VULKAN=OFF build)"
+      },
+      "failed_closed": true
+    },
+    {
+      "case": "interrupted_or_failed_copy",
+      "method": "not separately exercised as a real fault-injection (no mechanism in this prototype to abort an in-flight ggml_backend_tensor_set/get call) -- classified as untested.",
+      "result": null,
+      "failed_closed": null
+    }
+  ],
+  "silent_corruption_observed": false,
+  "all_tested_cases_fail_closed": true,
+  "raw_data": "raw_failure_cases.jsonl"
+}

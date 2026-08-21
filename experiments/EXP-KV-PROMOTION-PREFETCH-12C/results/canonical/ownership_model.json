@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": "1-2",
+  "questions_answered": {
+    "is_destination_gpu_tensor_allocated_persistently": false,
+    "is_destination_gpu_tensor_allocated_persistently_detail": "No. The real probe allocates a fresh standalone scratch tensor (ggml_backend_alloc_ctx_tensors_from_buft) for every promote/demote call and frees it before the process exits the mode. There is no persistent paired GPU backing kept around across calls in this prototype.",
+    "is_promotion_a_byte_copy_into_an_already_existing_gpu_backing": false,
+    "can_cpu_backing_be_released_after_promotion": "Yes, mechanically -- ggml_backend_buffer_free on the CPU-side scratch/tensor buffer is a real, working call (proven by cycle_stability.json: 50 alloc/copy/free cycles with flat external VRAM/RSS). But releasing llama_kv_cache's OWN cache_k_l{layer}/cache_v_l{layer} CPU buffer specifically is not exercised here -- see live_rebind_classification.",
+    "can_gpu_backing_be_released_after_demotion": "Yes -- proven directly: cycle_stability.json shows external nvidia-smi VRAM returning to baseline after every one of 50 repeated GPU scratch alloc->copy->free cycles, and single_layer_promotion.json/pressure_test.json both show vram_after_scratch_free_mib dropping back toward vram_before_mib once the promotion scratch is freed.",
+    "does_kv_dev_override_allow_backing_ownership_to_change_at_runtime": false,
+    "does_kv_dev_override_allow_backing_ownership_to_change_at_runtime_detail": "No. kv_dev_override (Phase 12B) only selects device at llama_context CONSTRUCTION time. llama_kv_cache::layers[il].k/.v are assigned once during context build and are never reassigned anywhere in llama-kv-cache.cpp afterward -- confirmed empirically by the poison test (see single_layer_promotion.json / single_layer_demotion.json): corrupting the promoted/demoted scratch copy has zero effect on generated tokens, meaning the live decode graph never reads it.",
+    "is_phase12c_limited_to_copying_between_paired_persistent_tensors": "Phase 12C is limited to copying REAL KV bytes into standalone scratch tensors on the destination device and verifying byte/hash equality. It is NOT limited to 'paired persistent tensors' in the sense of a pre-declared GPU mirror kept alive the whole time -- no such pairing exists in this prototype at all. The honest description is: one-shot, on-demand scratch-tensor copies, proven correct at the byte level, that the live decode graph does not consume."
+  },
+  "explicit_tiering_disclosure": "This is NOT tiering in the sense of Section 14's bar. No bytes are ever physically absent from a device while the graph is live and using that layer -- the ORIGINAL llama_kv_cache tensor for a layer stays exactly where kv_dev_override placed it at construction time for the entire lifetime of the context. What this prototype proves is a SEPARATE, freeable scratch copy on the other device, correct byte-for-byte, that the live decode graph ignores. Calling this 'tiering' would be dishonest; see live_rebind_classification below. Every promotion/demotion this phase performs produces a genuine duplicate (both the original tensor and the scratch copy resident simultaneously), never a move.",
+  "live_rebind_classification": "B",
+  "live_rebind_classification_name": "COPY_WORKS_BUT_PLACEMENT_IS_STATIC",
+  "live_rebind_classification_evidence": "Direct empirical falsification via poison test, not code-reading inference: after a byte-identical scratch copy is created on the destination device, the SAME scratch region is corrupted (0xAA-filled) in an independent fresh context before generation, and 8-token greedy generation output is compared byte-for-byte against an unpoisoned control run. In every promote/demote trial run (135M and 360M, ctx=2048 and ctx=200000, Q8_0 and Q5_1), poison_had_no_effect_on_output == true, meaning the live decode graph never reads the scratch/promoted copy. See single_layer_promotion.json, single_layer_demotion.json, pressure_test.json for the raw per-trial evidence.",
+  "ownership_state_machine": {
+    "note": "tools/membrane-kv-promotion-prefetch/ownership_state.{h,c} implements the IDEALIZED state machine (CPU_RESIDENT -> PROMOTING -> GPU_RESIDENT -> DEMOTING -> CPU_RESIDENT, ERROR on *_FAIL) described in Section 2/22, independent of what the real probe can currently deliver. It exists to make the bookkeeping/headroom logic testable in isolation (see tests/unit run of test_kv_ownership_state), NOT to claim the real probe achieves idealized ownership transfer. The real probe's demonstrated behavior is captured honestly above as classification B.",
+    "states": [
+      "CPU_RESIDENT",
+      "PROMOTING",
+      "GPU_RESIDENT",
+      "DEMOTING",
+      "ERROR"
+    ],
+    "duplicate_backing_during_transition": true,
+    "duplicate_backing_during_transition_detail": "PROMOTING and DEMOTING states hold group_bytes on BOTH sides simultaneously by design (cpu_bytes == gpu_bytes == group_bytes) -- this models the real probe's actual behavior honestly: every promote/demote call in this phase creates a genuine duplicate, never a move."
+  }
+}

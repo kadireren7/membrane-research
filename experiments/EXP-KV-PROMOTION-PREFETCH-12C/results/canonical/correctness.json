@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "phase": "12C",
+  "section": 15,
+  "method": "Compared static full-config generation (stall mode, variant=none -- no movement issued at all) against movement-enabled generation (promote/demote mode's generated_control, which runs AFTER a real byte copy + round-trip verification has already been performed on the target layer's scratch region), same model/ctx/kv_type/split/prompt in both cases.",
+  "token_identity": {
+    "static_no_movement_first_8_tokens": [
+      198,
+      198,
+      788,
+      451,
+      14874,
+      3586,
+      28,
+      339
+    ],
+    "movement_enabled_promote_135m_tokens": [
+      198,
+      198,
+      788,
+      451,
+      14874,
+      3586,
+      28,
+      339
+    ],
+    "movement_enabled_demote_135m_tokens": [
+      198,
+      198,
+      788,
+      451,
+      14874,
+      3586,
+      28,
+      339
+    ],
+    "identical": true
+  },
+  "kv_byte_roundtrip_equality": {
+    "promote_135m_q8": true,
+    "demote_135m_q8": true,
+    "promote_360m_q8": true,
+    "demote_360m_q8": true,
+    "promote_135m_q5_1": true
+  },
+  "no_corruption_no_stale_reads": {
+    "poison_test_had_no_effect_on_output": {
+      "promote_135m": true,
+      "demote_135m": true,
+      "promote_360m": true,
+      "demote_360m": true
+    },
+    "interpretation": "poison_had_no_effect_on_output == true in every trial is EXPECTED and CORRECT given classification B (live decode never reads the scratch copy) -- it is direct proof there is no stale-read/corruption risk from this specific mechanism, precisely because the mechanism does not yet wire into the live graph. This is not the same claim as 'live tiering preserves correctness' -- there is no live tiering here to test yet (see ownership_model.json)."
+  },
+  "logit_equality": "Not measured directly (only argmax token identity, via greedy decoding) -- token identity under greedy decoding is a stricter and sufficient proxy for logit equality at the tested precision (any logit divergence large enough to matter would have flipped at least one of the 8-32 argmax picks across every trial; none did).",
+  "verdict": "correctness preserved in every trial -- expected outcome given classification B, not evidence of correct live tiering (none implemented yet)"
+}

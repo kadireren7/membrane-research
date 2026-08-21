@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "phase": "12D",
+  "section": 4,
+  "method": "membrane-kv-runtime-relocate-probe 'repro2' mode, retain_old_backing_for_research=true (RESEARCH-ONLY escape hatch -- old backing intentionally never freed, see release_failure.json for the free-enabled case). SmolLM2-135M, ctx=2048, Q8_0, split=8, layer 4: relocation #1 (CPU->GPU), one decode, relocation #2 (GPU->CPU, SAME layer), one decode, then a ground-truth poison test.",
+  "relocation_1_ok": true,
+  "relocation_2_ok": true,
+  "diagnostic_pointer_capture_caveat": "cb_eval-based tensor/buffer capture at point E (post relocation #2) is IDENTICAL to point C (post relocation #1) -- buffer_name still reports 'Vulkan1'. This is a KNOWN, confirmed measurement artifact of the probe's own capture mechanism (see architecture.json), NOT evidence relocation #2 failed -- see ground_truth_poison_test below, which is the authoritative check.",
+  "point_E_diagnostic_raw": {
+    "tensor_ptr": "0x56af2dbed5e0",
+    "buffer_ptr": "0x56af2d808fc0",
+    "buffer_name": "Vulkan1",
+    "data_ptr": "0x1000",
+    "pointer_changed_from_C": false,
+    "pointer_identical_to_A": false
+  },
+  "ground_truth_poison_test": {
+    "poisoned_tensor_was_relocation1_destination": true,
+    "generated_after_poisoning_reloc1_dest": [
+      38525,
+      6330,
+      36663,
+      6330,
+      19619,
+      6330,
+      27867,
+      6330
+    ],
+    "independent_clean_reference_same_position": [
+      38525,
+      6330,
+      36663,
+      6330,
+      19619,
+      6330,
+      27867,
+      6330
+    ],
+    "control_matches_clean_reference": true,
+    "interpretation": "if control_matches_clean_reference is true, decode after 2 relocations is producing CORRECT output (ground truth) even if the pointer-identity diagnostics above look stale -- the staleness would then be a capture/cb_eval artifact, not a real decode-correctness bug. If false, decode is genuinely broken after a second relocation of the same layer."
+  },
+  "central_result": "generated_after_poisoning_reloc1_dest exactly equals independent_clean_reference_same_position -- poisoning relocation #1's destination tensor (the one the flawed diagnostic still reports as 'current') has NO effect on generation after relocation #2. This proves relocation #2 is authoritative: decode is genuinely reading the layer's NEW (post-relocation-2) CPU tensor, not the stale GPU one.",
+  "raw_data": "raw_repeated_same_layer_retained_135m_layer4.json"
+}

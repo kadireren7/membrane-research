@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "note": "Sections 10/11/12: Q8_0 VRAM accounting, SmolLM2-135M (30 layers) contexts 2048/8192/16384, and SmolLM2-360M (32 layers) ctx=2048. Weights ALWAYS full-GPU (mp.n_gpu_layers=-1) in every row below -- ONLY KV placement varies. Real external nvidia-smi measurement, same polling method used throughout this project. Raw data: raw_context_matrix_135m.jsonl, raw_q8_vram_16384.jsonl, raw_second_model_360m.jsonl.",
+  "critical_difference_from_phase12a": "unlike Phase 12A's --gpu-layers N (which moved weights AND KV together), every row here keeps ALL weight layers GPU-resident (verified per placement_maps.json) -- the VRAM delta below is caused by KV placement ALONE, the isolated effect Phase 12A could not achieve.",
+  "smollm2_135m": {
+    "ctx_2048": {"full_gpu_kv_mib": 385, "half_cpu_kv_mib": 373, "aggressive_cpu_kv_mib": 365,
+      "kv_only_saving_half": 12, "kv_only_saving_aggressive": 20},
+    "ctx_8192": {"full_gpu_kv_mib": 457, "half_cpu_kv_mib": 409, "aggressive_cpu_kv_mib": 377,
+      "kv_only_saving_half": 48, "kv_only_saving_aggressive": 80},
+    "ctx_16384": {"full_gpu_kv_mib": 553, "half_cpu_kv_mib": 457, "aggressive_cpu_kv_mib": 393,
+      "kv_only_saving_half": 96, "kv_only_saving_aggressive": 160}
+  },
+  "smollm2_135m_layer_counts": {"full_gpu": {"cpu": 0, "gpu": 30}, "half_cpu": {"cpu": 15, "gpu": 15}, "aggressive_cpu": {"cpu": 25, "gpu": 5}},
+  "smollm2_360m_ctx2048": {"full_gpu_kv_mib": 838, "half_cpu_kv_mib": 817, "kv_only_saving": 21,
+    "layer_counts": {"full_gpu": {"cpu": 0, "gpu": 32}, "half_cpu": {"cpu": 16, "gpu": 16}}},
+  "findings": {
+    "saving_grows_with_context": "12 -> 48 -> 96 MiB (half-split) as ctx grows 2048 -> 8192 -> 16384 on 135M, consistent with the saving being proportional to per-layer KV bytes, which scale with context length -- exactly what a KV-specific (not weight-specific) mechanism should look like",
+    "saving_is_modest_at_small_context": "at ctx=2048, KV is a small fraction of total footprint (weights dominate) for both models, so absolute savings are correspondingly small (12-21 MiB) -- not a weakness of the mechanism, just an expected consequence of KV being a small share of memory at low context",
+    "second_model_confirms_generality": "the pattern (real, monotonic, weights-unaffected VRAM reduction) reproduces on a different layer count (32 vs 30) and different per-layer KV width without any code change"
+  },
+  "no_fallback_any_config": true
+}

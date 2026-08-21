@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "phase": "12B",
+  "title": "Minimal KV Device Override Patch",
+  "final_report": {
+    "branch": "experiment/kv-device-override",
+    "baseline_sha": "d6e6189d0417858bfcf3d51c766eaa4be5fe46e1",
+    "patch_filename": "patches/llama.cpp-membrane-kv-device-override.patch",
+    "patch_scope": "6 files, 74 insertions / 13 deletions (net +61 lines), comparable size to the existing kv_type_override patch (61/19, net +42)",
+    "llama_cpp_files_changed": ["include/llama.h", "src/llama-context.cpp", "src/llama-kv-cache.cpp", "src/llama-kv-cache.h", "src/llama-memory.h", "src/llama-model.cpp"],
+    "callback_api_shape": "ggml_backend_dev_t (*kv_dev_override)(int32_t il, ggml_backend_dev_t default_dev, void *user_data) -- one device decision per layer (covers both K and V), NULL return or unset field falls back to default_dev exactly, mirroring kv_type_override's threading pattern",
+    "default_behavior_regression": "clean -- product CLI smoke test (native/q8/q5/adaptive) all exit 0 with no_fallback_occurred=true; byte-identical kv_allocated_bytes/estimated_model_bytes/gpu_layers_selected vs the pre-patch baseline; unset-callback, always-NULL-callback, and always-default-choosing-callback proven exactly equivalent (same placement, same generated tokens)",
+    "per_layer_placement_proof": "SmolLM2-135M, 30 layers, requested split (0-14 CPU / 15-29 GPU) reproduced exactly, cross-validated three independent ways (load_tensors weight-device log, llama_kv_cache's own KV-device log, direct cb_eval+view_src tensor/buffer inspection) -- zero mismatches, exact boundary at layer 14/15",
+    "weight_device_proof": "31/31 (135M) and 33/33 (360M) weight-layer log lines report Vulkan1 in every tested configuration, regardless of KV split -- weights never move",
+    "authoritative_kv_proof": "each layer's K/V tensors exist in exactly one buffer (CPU xor Vulkan1, confirmed directly, never both) -- no shadow/duplicate allocation; generation succeeds and produces token-identical output across placement configs, which would not hold if attention were reading stale or wrong KV data",
+    "q8_result": "real, measured, external nvidia-smi VRAM reduction from KV placement ALONE (weights held fixed): 12-96 MiB on SmolLM2-135M across ctx 2048-16384 (growing with context, as expected for a KV-specific effect), 21 MiB on SmolLM2-360M at ctx=2048",
+    "q5_result": "same mechanism works cleanly with Q5_1 (67 MiB saving at ctx=16384/half-split) -- precision and placement confirmed orthogonal, no adaptive logic added",
+    "vram_reduction": "isolated to KV movement for the first time in this project's history -- Phase 12A's --gpu-layers N reduction was roughly half weight VRAM, half KV VRAM; every number in this phase's q8_memory.json/q5_memory.json is 100% KV-attributable, weights independently confirmed unchanged",
+    "rss_change": "not separately isolated this phase (RSS reflects both host process growth and OS-level page caching effects that are harder to attribute cleanly to KV-vs-weight than direct GPU VRAM measurement) -- external VRAM was the primary, most decisive metric used, consistent with prior phases' practice",
+    "correctness": "token-identical generation across three placement ratios (0%, 50%, 83% CPU) on the same prompt/model/context -- strong evidence of numerical correctness under greedy decoding; a full logit-level (rel_l2/delta_nll) comparison was not additionally run this phase (disclosed scope limitation, not a claim of bit-exact equality)",
+    "graph_attention_behavior": "classification A (graph scheduler inserts required transfers automatically) -- confirmed via real ggml_backend_sched diagnostics: graph_splits grows monotonically with CPU-placed KV layers (2 -> 32 -> 52) while graph_nodes stays constant, meaning the scheduler transparently detects and bridges every CPU/GPU boundary itself, using the same machinery that already supports ordinary partial weight offload",
+    "performance_curve": "on SmolLM2-135M/GTX1650/ctx=16384, generation throughput does NOT degrade as more KV moves to CPU -- flat to slightly increasing (22.3 -> 25.1 tok/s) across 100%/75%/50%/25% GPU-KV ratios, while VRAM strictly decreases (553 -> 393 MiB); this specific finding is scale/hardware-dependent and should not be assumed to generalize to larger models",
+    "pressure_test_result": "at ctx=200000 on the real GTX 1650, full-GPU-KV allocation hard-fails ('failed to allocate compute buffers') while a 16/16 KV split succeeds cleanly, weights confirmed unchanged (33/33 Vulkan1) -- a genuinely runnable configuration that was not runnable before, achieved with zero weight movement",
+    "sanitizers": "llama-free Release + ASan/UBSan: 64/65 pass, 1 pre-existing environment-sensitive failure (test_mem_guard, same root cause disclosed in both prior phases, unrelated to this patch). llama-enabled Vulkan Release: real product CLI smoke test (native/q8/q5/adaptive) clean; compare/gpu-bench/auto/guard and the full llama-enabled ASan/UBSan matrix were not separately re-run this session for the same real host-memory-constraint reasons disclosed in Phase 11E/12A",
+    "verifier": "scripts/verify-results.py extended with new Phase 12B checks (patch provenance/reproducibility, null-callback equivalence, per-layer placement completeness, weight-device-unchanged claim, CPU+GPU KV byte accounting, VRAM claims cross-checked against raw nvidia-smi numbers, pressure-test claim backed by raw exit codes, patch scope within recorded limits, no unsupported product claims, no private paths); mutation-tested",
+    "maintenance_assessment": "LOW-MODERATE conflict risk, comparable to the existing kv_type_override patch; no new public functions/types, only two additive optional struct fields; plausibly upstreamable as a generic, backward-compatible extension point",
+    "limitations": [
+      "logit-level numerical comparison not performed (token-identity only)",
+      "performance curve measured on one small model/context combination -- the flat-to-improving throughput finding is a real, disclosed result at THIS scale, not a general claim",
+      "RSS was not separately isolated from VRAM as a distinct KV-vs-weight metric",
+      "llama-enabled ASan/UBSan and the full product regression matrix (compare/gpu-bench/auto/guard) were not re-run in full this session",
+      "the pressure test used the research probe's raw allocation path (no product-level conservative pre-flight check), consistent with how Phase 11E/12A already established the product's own estimator is more conservative than true hardware capacity"
+    ],
+    "unresolved_issues": [
+      "whether ggml_backend_sched's automatic cross-device copies are synchronous-only or could be coaxed onto the async/pinned-memory path Phase 12A's architecture.json documented was not tested this phase -- graph_behavior.json's 'sched copies' evidence does not distinguish sync from async",
+      "the exact CPU-side compute cost per demoted layer (vs. pure transfer cost) was not decomposed -- performance.json's flat/improving throughput is measured end-to-end, not attributed to a specific sub-mechanism"
+    ]
+  },
+  "decision_gate": "KV_DEVICE_OVERRIDE_VIABLE",
+  "decision_gate_rationale": "All five KV_DEVICE_OVERRIDE_VIABLE criteria are met with real, measured evidence: (1) the patch is tiny (61-74 line diff, 6 files, mirrors an already-accepted precedent) and works; (2) default behavior is provably unchanged (byte-identical metrics, verified null-callback equivalence); (3) weights and KV are independently placeable (33/33 weight layers stay GPU-resident while KV splits cleanly, cross-validated three ways); (4) real, isolated, KV-attributable external VRAM reduction is proven (12-96 MiB depending on context, growing with context length as expected) and a genuinely-not-otherwise-runnable configuration (ctx=200000) becomes runnable; (5) correctness is preserved (token-identical output across placement ratios) and maintenance burden is comparable to an already-accepted, already-maintained sibling patch.",
+  "next_step_recommendation": "Build a controlled promotion/prefetch prototype on top of this primitive -- specifically, start from the copy mechanism Phase 12A already proved safe (cb_eval + ggml_tensor::view_src + ggml_backend_tensor_get/set) combined with THIS phase's kv_dev_override to explore genuinely dynamic (not just load-time-static) placement changes within a live context. Do NOT execute it in this phase."
+}

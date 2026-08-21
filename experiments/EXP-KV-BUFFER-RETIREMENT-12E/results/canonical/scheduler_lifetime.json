@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "phase": "12E",
+  "section": 6,
+  "title": "The exact root cause: llama_context's graph-reuse optimization",
+  "source_locations": {
+    "reuse_decision_site": "third_party/llama.cpp/src/llama-context.cpp:1322-1348 (llama_context::process_ubatch)",
+    "reuse_predicate": "third_party/llama.cpp/src/llama-graph.cpp:1274 (llm_graph_result::can_reuse) and third_party/llama.cpp/src/llama-graph.h:716 (llm_graph_params::allow_reuse)",
+    "scheduler_reset_call_site_skipped_on_reuse": "third_party/llama.cpp/src/llama-context.cpp:1348 (ggml_backend_sched_reset(sched.get()), only in the else/non-reuse branch)",
+    "existing_precedent_for_manual_invalidation": "third_party/llama.cpp/src/llama-context.cpp:808 (gf_res_prev->reset(), called after a memory-module update, with the comment \"reset the previous graph result to make sure that it won't be reused\")"
+  },
+  "exact_mechanism": "llama_context::process_ubatch checks `res->can_reuse(gparams)` before deciding whether to rebuild the compute graph. If the CURRENT ubatch's shape/params are considered topologically equivalent to the PREVIOUS decode's (llm_graph_params::allow_reuse -- which compares ubatch.n_tokens/n_seq_tokens/n_seqs/equal_seqs, n_outputs, sampler config, and a handful of cparams flags: embeddings/causal_attn/arch/nextn_layer_offset -- NOTHING about the memory/KV-cache module's internal state or placement), the code takes the REUSE branch: it does NOT call llm_graph_context::build_attn again (so cpy_k/cpy_v/get_k/get_v are never invoked, confirmed empirically -- see failing_tensor_trace.json), and it does NOT call ggml_backend_sched_reset(). It simply re-executes the PREVIOUS decode's already-built ggml_cgraph (held in gf_res_prev) via ggml_backend_sched_graph_compute_async. For a single-token autoregressive continuation (the overwhelmingly common case during generation), ubatch shape is IDENTICAL every step, so allow_reuse() returns true on essentially every decode after the first.",
+  "what_is_destroyed_each_decode": "Nothing, in the reuse path -- gf_res_prev and its owned ggml_cgraph/tensors persist unchanged.",
+  "what_persists": "The entire llm_graph_result (gf_res_prev), including every tensor object built during the LAST full graph construction -- these are llama_context-owned, not scheduler-owned.",
+  "does_sched_reset_run_on_reuse": false,
+  "does_old_tensor_buffer_mapping_survive_reset": "Not applicable in the reuse path since reset never runs; in the NON-reuse (rebuild) path, reset clears sched->hash_set/hv_tensor_backend_ids/hv_tensor_copies (ggml-backend.cpp:1821-1830) but does NOT clear sched->graph/node_backend_ids/leaf_backend_ids/prev_*_backend_ids -- however this is harmless because ggml_backend_sched_split_graph (ggml-backend.cpp:1014) unconditionally overwrites sched->graph and recomputes node/leaf_backend_ids from the FRESH input graph on every call where it actually runs; it never reads the previous graph's content, only the previous BACKEND ID arrays (integers, not pointers) for the backend_ids_changed comparison in ggml_backend_sched_alloc_splits.",
+  "conclusion": "The stale reference is NOT owned by ggml_backend_sched at all -- it is owned by llama_context itself, specifically gf_res_prev, and the mechanism that keeps it alive across a KV-cache placement change is the graph-REUSE optimization deciding not to rebuild. ggml_backend_sched's own reset/rebuild machinery is entirely correct and irrelevant here because it is simply never invoked on the crashing decode.",
+  "the_fix": "Force the NEXT decode after any out-of-band KV placement change to take the non-reuse (rebuild) branch, by resetting gf_res_prev the same way llama_context already does internally after its own memory-module updates. Exposed as a new minimal public API, llama_invalidate_graph_cache() -- see retirement_strategy.json."
+}

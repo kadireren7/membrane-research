@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "worst_q8_point": {
+    "model": "1.5B",
+    "n_ctx": 8192,
+    "gpu_kv_pct": 50,
+    "slowdown_pct_vs_100gpu": -0.512263961383347
+  },
+  "points": [
+    {
+      "model": "1.5B",
+      "n_ctx": 8192,
+      "kv_type": "q5",
+      "gpu_kv_pct": 50,
+      "split": 14,
+      "n_layer": 28,
+      "n_gpu_layers_weights": -1,
+      "n_repeats_requested": 7,
+      "n_repeats_ok": 7,
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 17.563385714285715,
+        "median": 17.5121,
+        "min": 17.4333,
+        "max": 17.7685,
+        "stddev": 0.1294429144265463,
+        "cv_pct": 0.7370043369329408
+      },
+      "p95_ms": {
+        "n": 7,
+        "mean": 61.11004285714286,
+        "median": 61.7291,
+        "min": 58.8835,
+        "max": 63.5295,
+        "stddev": 1.7654902688839182,
+        "cv_pct": 2.889034578180726
+      },
+      "vram_used_mib": 3294,
+      "graph_splits_tg": 30,
+      "gpu_kv_bytes": 44040192,
+      "cpu_kv_bytes": 44040192,
+      "q8_comparison_tok_s_mean": 17.20778,
+      "q5_vs_q8_delta_pct": 2.0665403339984336
+    },
+    {
+      "model": "1.5B",
+      "n_ctx": 8192,
+      "kv_type": "q5",
+      "gpu_kv_pct": 100,
+      "split": 0,
+      "n_layer": 28,
+      "n_gpu_layers_weights": -1,
+      "n_repeats_requested": 7,
+      "n_repeats_ok": 7,
+      "generation_tok_s": {
+        "n": 7,
+        "mean": 17.1862,
+        "median": 17.1668,
+        "min": 16.935,
+        "max": 17.3275,
+        "stddev": 0.14601325282316044,
+        "cv_pct": 0.8495959131347269
+      },
+      "p95_ms": {
+        "n": 7,
+        "mean": 61.75512857142857,
+        "median": 61.0597,
+        "min": 59.8196,
+        "max": 64.5963,
+        "stddev": 1.8172844142788853,
+        "cv_pct": 2.9427263068150493
+      },
+      "vram_used_mib": 3336,
+      "graph_splits_tg": 2,
+      "gpu_kv_bytes": 88080384,
+      "cpu_kv_bytes": 0,
+      "q8_comparison_tok_s_mean": 17.12008,
+      "q5_vs_q8_delta_pct": 0.3862131485366771
+    }
+  ]
+}

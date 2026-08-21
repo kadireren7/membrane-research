@@ -1,0 +1,4 @@
+{"schema_version":1,"mode":"promo_group","group_size":1,"promotion_ms":0.611,"demotion_ms":1.098,"vram_before_mib":373,"vram_after_promote_mib":374,"vram_after_demote_mib":371,"vram_delta_promote_mib":1,"vram_reclaimed_mib":3}
+{"schema_version":1,"mode":"promo_group","group_size":2,"promotion_ms":0.874,"demotion_ms":1.724,"vram_before_mib":373,"vram_after_promote_mib":375,"vram_after_demote_mib":371,"vram_delta_promote_mib":2,"vram_reclaimed_mib":4}
+{"schema_version":1,"mode":"promo_group","group_size":4,"promotion_ms":1.692,"demotion_ms":3.389,"vram_before_mib":373,"vram_after_promote_mib":377,"vram_after_demote_mib":371,"vram_delta_promote_mib":4,"vram_reclaimed_mib":6}
+{"schema_version":1,"mode":"promo_group","group_size":8,"promotion_ms":2.673,"demotion_ms":6.466,"vram_before_mib":373,"vram_after_promote_mib":380,"vram_after_demote_mib":371,"vram_delta_promote_mib":7,"vram_reclaimed_mib":9}
