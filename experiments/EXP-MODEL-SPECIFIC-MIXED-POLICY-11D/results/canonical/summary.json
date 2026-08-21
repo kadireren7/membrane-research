@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "title": "Model-Specific Offline Sensitivity Policy",
+  "note": "RESEARCH ONLY. No --kv mixed CLI flag exists. --kv adaptive is unmodified. Not merged, not released, no version bump.",
+  "research_questions_answered": {
+    "1_does_the_offline_pipeline_work": {
+      "answer": "YES -- model fingerprint (real GGUF metadata) -> train21 offline profile -> Q8-budget/byte-budget layer selection -> mixed KV context all work end-to-end for both SmolLM2-135M and SmolLM2-360M, on both CPU and Vulkan backends, with exact reproducibility and exact ggml byte accounting.",
+      "evidence": "profile_135m_train21.json, profile_360m_train21.json, budget_sweep.json, cpu_vulkan_validation.json, reproducibility.json"
+    },
+    "2_does_the_policy_generalize_to_held_out_data": {
+      "answer": "YES for both models -- the train21-derived sensitivity ranking beats every naive layout (early/late/alternating/random) at every Q8-layer budget tested, on prompts never used to build the ranking. Confirmed independently for 135M (already established in Phase 11C) and, newly in this phase, for 360M.",
+      "evidence": "results/phase11/generalization/holdout_policy.json (135M), holdout_policy_360m.json (360M, new this phase)"
+    },
+    "3_how_small_can_the_calibration_set_be": {
+      "answer": "Surprisingly small. A 10-prompt calibration set already produces a ranking whose top-8 layers are IDENTICAL to the full 21-prompt train ranking's top-8 for 135M, and held-out quality at size=10 matches size=21 almost exactly (rel_l2 0.0588 vs 0.0588 at budget=8; 0.0444 vs 0.0462 at budget=15). Even size=5 is close and clearly beats every naive layout. Rank correlation vs the full 31-prompt data is already rho=0.955+ at size=10 for both models, with diminishing returns beyond that.",
+      "evidence": "calibration_size_analysis.json, calibration_size_holdout_quality.json"
+    },
+    "4_is_the_policy_safe_against_the_wrong_model": {
+      "answer": "YES -- every tested wrong-model, wrong-fingerprint-field, and malformed-ranking scenario against REAL GGUF fingerprints fails closed with the correct machine-readable reason (MISMATCH or INVALID). No unsafe case ever validated.",
+      "evidence": "cross_model_safety.json"
+    },
+    "5_does_mixed_kv_beat_the_products_own_adaptive_policy": {
+      "answer": "NO, not in the common case. Whole-cache --kv adaptive (the real, shipped, unmodified product policy) resolved to whole-cache Q8 for every prompt tested on both models at ctx=2048 with no memory pressure, and its quality clearly beat the profile-based mixed layout (~4-5x better rel_l2) despite using only slightly more bytes (Q8 is 85.3% larger than the mixed config's bytes). Mixed KV's real, measured advantage is specifically over whole-cache Q5, not over adaptive's actual resolved behavior -- for 20.8% more bytes than all-Q5, mixed recovers 14-17% of the rel_l2 gap toward Q8. This advantage would only reach the product's adaptive policy in the specific case where memory pressure forces adaptive down to whole-cache Q5 -- a scenario not reproduced in the comfortable-memory conditions tested here.",
+      "evidence": "whole_cache_adaptive_comparison.json"
+    },
+    "6_does_the_real_memory_boundary_match_the_theoretical_byte_math": {
+      "answer": "NOT CLOSELY, right at the boundary. At the known 360M ctx=180000 Vulkan boundary, the model-specific profile's own top-8 layer selection succeeds, and even one more Q8 layer (top-9, <1% more theoretical KV bytes) fails -- a razor-thin real margin. A memory-budget-policy selection with 14% theoretical headroom below the all-Q8 total (17 layers) still failed to allocate, because the real constraint near this boundary includes compute-buffer and other non-KV overhead the pure byte formula does not model. This means membrane_memory_budget_policy's exact KV-byte math, while correct for what it claims, is NOT sufficient on its own to guarantee a safe allocation this close to a real hardware boundary.",
+      "evidence": "memory_pressure_360m.json"
+    },
+    "7_performance_impact": {
+      "answer": "None measured. No systematic throughput penalty from per-layer type heterogeneity on either backend or model; Vulkan throughput for 360M was the most stable measurement of the whole phase (stdev 0.68 tok/s on a mean of 157.1 tok/s).",
+      "evidence": "performance.json, profile_generation_performance.json"
+    }
+  },
+  "decision_gate": {
+    "verdict": "MODEL_SPECIFIC_POLICY_WORKS_BUT_NO_ADAPTIVE_ADVANTAGE",
+    "rationale": [
+      "The full offline pipeline (fingerprint -> profile -> policy -> mixed KV) is real, safe, reproducible, and generalizes across calibration sizes, held-out prompts, and both tested models -- this is not a fragile or backend-limited result.",
+      "But measured head-to-head against the ALREADY-SHIPPED, unmodified --kv adaptive policy, the profile-based mixed layout does not win in the regime that matters most in practice (comfortable memory, adaptive resolves to Q8): adaptive's whole-cache Q8 clearly beats mixed KV on quality at a similar byte cost.",
+      "Mixed KV's one measured, genuine advantage -- filling the quality gap between whole-cache Q5 and Q8 -- only becomes relevant to the product's actual behavior in the narrower case where adaptive would otherwise be forced down to whole-cache Q5 by memory pressure, which this phase did not reproduce (would require Task #103's kind of boundary conditions combined with an apples-to-apples adaptive-vs-mixed comparison AT that boundary, not just a memory-comfortable comparison).",
+      "The real memory-pressure margin at the one boundary tested is far tighter than the pure byte-budget policy's math suggests, which is a real caveat on how confidently this mechanism could be pushed toward its own theoretical limits without additional non-KV overhead margin."
+    ]
+  },
+  "recommended_next_step": "If this line of research continues, the single highest-value next step is a direct, matched comparison of profile-based mixed KV against whole-cache adaptive SPECIFICALLY in the memory-constrained regime where adaptive is forced to Q5 (e.g., near the ctx=180000 360M boundary, or with an explicit --kv-budget-mib low enough to force adaptive off Q8) -- this phase established that mixed KV beats Q5 in isolation and that adaptive beats mixed when it can freely choose Q8, but never measured the one scenario where mixed KV's advantage would actually reach a real adaptive-vs-mixed decision. This is a recommendation only; it was not executed in this phase.",
+  "explicitly_not_done": [
+    "No product CLI change of any kind.",
+    "No --kv mixed flag added or exposed anywhere.",
+    "No modification to --kv adaptive's existing policy or behavior.",
+    "No merge, no release, no version bump.",
+    "No block-level (sub-tensor) precision work.",
+    "No CUDA work.",
+    "No llama.cpp modification beyond the already-existing, already-tracked kv_type_override patch from Phase 4.1."
+  ]
+}

@@ -193,6 +193,14 @@
       "category": "A_essential_evidence"
     },
     {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/summary.json",
+      "source_path": "results/phase11/model-specific-policy/summary.json",
+      "source_sha256": "5651eefe9fae4c778f24de68fbc8a3ffd712ba2ac20836a4af0120de6236c027",
+      "migrated_sha256": "5651eefe9fae4c778f24de68fbc8a3ffd712ba2ac20836a4af0120de6236c027",
+      "size_bytes": 7013,
+      "category": "A_essential_evidence"
+    },
+    {
       "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/whole_cache_adaptive_comparison.json",
       "source_path": "results/phase11/model-specific-policy/whole_cache_adaptive_comparison.json",
       "source_sha256": "dad89ffaac48a759271f96fd05e34ef633b41c3c9755a305d167f0f266ee56d8",
