@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #101: profile-generation reproducibility check.",
+  "determinism_check": {
+    "method": "ran scripts/build_model_profile.py twice, byte-diffed the resulting profile_135m_train21.json and profile_360m_train21.json",
+    "135m_byte_identical_across_runs": true,
+    "360m_byte_identical_across_runs": true
+  },
+  "tie_break_rule": {
+    "documented_rule": "ranking_most_sensitive_first is built via Python's sorted(per_layer, key=rel_l2_delta_mean, reverse=True); sorted() is stable and reverse=True does not reverse the relative order of tied elements -- empirically confirmed (layers with identical scores stay in ascending layer-index order in the output). Equivalent to model_profile.h's documented convention: on a tie, the lower layer index wins (appears earlier / is promoted first).",
+    "empirical_confirmation": "sorted([{'layer':i,'score':v} for i,v in enumerate([1.0,2.0,2.0,2.0,0.5])], key=lambda r:r['score'], reverse=True) -> layers [1,2,3] (all score 2.0) appear in that ascending order, not reversed",
+    "real_data_has_ties": {
+      "135m": false,
+      "360m": false
+    },
+    "caveat": "Neither model's real rel_l2_delta_mean values contain an exact tie at float precision, so the tie-break rule is currently inert on real data -- it is a defined, verified safety property for future models/prompt sets, not something exercised by the current 135M/360M profiles."
+  }
+}

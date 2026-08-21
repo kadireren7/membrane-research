@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #108: regression + sanitizer pass across all 5 build configs after adding model_profile.h/.c and its tests. CMakeLists.txt changes are purely additive (new library target + new test target, nothing existing modified) -- confirmed by git diff.",
+  "build_configs": {
+    "build": {"description": "llama-free Release", "test_model_profile": "PASS", "full_suite": "66/67 passed", "only_failure": "test_mem_guard (environmental, see below)"},
+    "build-free-asan": {"description": "llama-free ASan/UBSan", "test_model_profile": "PASS", "full_suite": "66/67 passed", "only_failure": "test_mem_guard (environmental, see below)"},
+    "build-cpu-rc1": {"description": "llama-enabled CPU Release", "test_model_profile": "PASS", "full_suite": "68/69 passed", "only_failure": "test_mem_guard (environmental, see below)"},
+    "build-asan": {"description": "llama-enabled CPU ASan/UBSan", "test_model_profile": "PASS", "full_suite": "68/69 passed", "only_failure": "test_mem_guard (environmental, see below)"},
+    "build-vulkan": {"description": "Vulkan Release", "test_model_profile": "PASS", "full_suite": "68/69 passed", "only_failure": "test_mem_guard (environmental, see below)"}
+  },
+  "test_mem_guard_failure_explained": {
+    "assertion": "tools/membrane-kv-exact-sim/test_mem_guard.cpp:58, test_huge_budget_takes_no_action: expects mem_guard_t::tick() to return NONE when given a 1 TiB budget (comfortably above any real process RSS)",
+    "root_cause": "mem_guard_t::tick() also escalates to REDUCE_WORKERS whenever system-wide swap_ratio (SwapTotal-SwapFree)/SwapTotal exceeds 0.60, independent of the per-process budget -- this host's real swap usage was measured at ~61.8% (SwapTotal=10103284 kB, SwapFree=3862664 kB) at test time, tripping that branch",
+    "verified_not_a_phase11d_regression": "reproduced identically across all 5 build configs, with the background 360M inference sweep already exited (confirmed via pgrep) -- this is real, current host memory/swap pressure (likely from other long-running desktop processes on this shared dev machine), not something introduced by model_profile.c or any other Phase 11D change",
+    "action_taken": "none -- the guard is correctly reporting a real system condition; modifying the test or the guard's threshold to hide this would mask a genuine safety signal on a memory-constrained host"
+  },
+  "test_model_profile_passes_every_config": true,
+  "product_cli_unmodified": {
+    "verified_by": "git status --short tools/membrane-run/ (0 files) and scripts/verify-results.py check _c95 (product_cli.cpp does not reference 'mixed')",
+    "confirmed": true
+  },
+  "cmakelists_change_is_purely_additive": {
+    "verified_by": "git diff CMakeLists.txt -- only two new blocks added (membrane_model_profile library target, test_model_profile test target), nothing existing removed or altered"
+  }
+}

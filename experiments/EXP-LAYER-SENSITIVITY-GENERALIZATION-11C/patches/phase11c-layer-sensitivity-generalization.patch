@@ -1,0 +1,1065 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index cca5ed8..53e127c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -202,6 +202,19 @@ add_library(membrane_mixed_layer_policy STATIC
+ target_include_directories(membrane_mixed_layer_policy PUBLIC
+   tools/membrane-kv-mixed-layer)
+ 
++# Phase 11C: rank-correlation/normalized-depth/deterministic-random/
++# Pareto arithmetic for analyzing Phase 11B/11C sensitivity data,
++# RESEARCH ONLY (experiment/layer-sensitivity-generalization branch)
++# -- llama-free, links against membrane_mixed_layer_policy only for
++# its MEMBRANE_MIXED_LAYER_Q8/Q5 constants. Never linked into
++# membrane-run/membrane-llama-run.
++add_library(membrane_sensitivity_analysis STATIC
++  tools/membrane-kv-mixed-layer/sensitivity_analysis.c)
++target_link_libraries(membrane_sensitivity_analysis PUBLIC
++  membrane_mixed_layer_policy)
++target_include_directories(membrane_sensitivity_analysis PUBLIC
++  tools/membrane-kv-mixed-layer)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -598,6 +611,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_mixed_layer_policy COMMAND test_mixed_layer_policy)
+ 
++  add_executable(test_sensitivity_analysis
++    tools/membrane-kv-mixed-layer/test_sensitivity_analysis.c)
++  target_link_libraries(test_sensitivity_analysis PRIVATE
++    membrane_sensitivity_analysis)
++  target_include_directories(test_sensitivity_analysis PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_sensitivity_analysis COMMAND test_sensitivity_analysis)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index a01394d..6494544 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1518,6 +1518,366 @@ def _c73():
+ 	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported claims, research-only scope disclosed"
+ 
+ 
++# ---------------------------------------------------------------------
++# Phase 11C: layer-sensitivity generalization (research)
++# ---------------------------------------------------------------------
++V11C_DIR = REPO_ROOT / "results" / "phase11" / "generalization"
++_V11C_CACHE = {}
++
++
++def _load_v11c(name):
++	key = name
++	if key not in _V11C_CACHE:
++		path = V11C_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V11C_CACHE[key] = rows
++		else:
++			_V11C_CACHE[key] = json.loads(path.read_text())
++	return _V11C_CACHE[key]
++
++
++def _v11c_ablation_layers(raw_rows):
++	"""Returns the set of layer indices covered by ablate_layer_N rows."""
++	layers = set()
++	for row in raw_rows:
++		name = row.get("_config_name", "")
++		if name.startswith("ablate_layer_"):
++			layers.add(int(name.replace("ablate_layer_", "")))
++	return layers
++
++
++@check("Phase 11C: manifest.json exists, valid JSON, schema_version 1, "
++	"all 18 files listed actually exist")
++def _c74():
++	if not (V11C_DIR / "manifest.json").exists():
++		return False, f"{V11C_DIR}/manifest.json does not exist"
++	m = _load_v11c("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	for fname in m.get("files", {}):
++		if not (V11C_DIR / fname).exists():
++			bad.append(f"listed file missing: {fname}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(m.get('files', {}))} files listed, all present"
++
++
++@check("Phase 11C: prompts.json has exactly 31 prompts, matches the "
++	"Phase 10C source file hashes, train+holdout partition the full set "
++	"with no overlap")
++def _c75():
++	p = _load_v11c("prompts.json")
++	bad = []
++	if p.get("total_prompts") != 31:
++		bad.append(f"total_prompts={p.get('total_prompts')}, expected 31")
++	if len(p.get("prompts_and_labels", [])) != 31:
++		bad.append(f"{len(p.get('prompts_and_labels', []))} prompt records, expected 31")
++	split = p.get("train_holdout_split", {})
++	train = set(split.get("train", []))
++	holdout = set(split.get("holdout", []))
++	all_labels = {e["label"] for e in p.get("prompts_and_labels", [])}
++	if train & holdout:
++		bad.append(f"train/holdout overlap: {train & holdout}")
++	if (train | holdout) != all_labels:
++		bad.append(f"train+holdout does not cover exactly the 31 prompts: "
++			f"missing={all_labels - (train | holdout)}, extra={(train | holdout) - all_labels}")
++	if not split.get("fixed_before_any_phase11c_results"):
++		bad.append("split does not declare it was fixed before results were seen")
++	return len(bad) == 0, "; ".join(bad) if bad else "31 prompts, clean train/holdout partition"
++
++
++@check("Phase 11C: Stage A (135M ctx=2048) raw data -- every one of the "
++	"30 layers ablated exactly once, no duplicates, plus baseline and "
++	"reference rows present, all 31 prompts covered")
++def _c76():
++	raw = _load_v11c("raw_135m_ctx2048.jsonl")
++	bad = []
++	layers = [row["_config_name"] for row in raw if row.get("_config_name", "").startswith("ablate_layer_")]
++	layer_set = _v11c_ablation_layers(raw)
++	if len(layers) != 30:
++		bad.append(f"{len(layers)} ablate_layer_* rows, expected 30")
++	if layer_set != set(range(30)):
++		bad.append(f"layers covered != 0..29: missing={set(range(30)) - layer_set}, extra={layer_set - set(range(30))}")
++	names = {row.get("_config_name") for row in raw}
++	if "all_q8_baseline" not in names or "all_q5_reference" not in names:
++		bad.append("missing all_q8_baseline or all_q5_reference row")
++	baseline = next((r for r in raw if r.get("_config_name") == "all_q8_baseline"), None)
++	if baseline is None or baseline.get("aggregate", {}).get("n_prompts") != 31:
++		bad.append(f"baseline n_prompts != 31 (got {baseline.get('aggregate', {}).get('n_prompts') if baseline else None})")
++	return len(bad) == 0, "; ".join(bad) if bad else "30/30 layers, baseline+reference present, 31 prompts"
++
++
++@check("Phase 11C: Stage B (360M ctx=2048) raw data -- every one of the "
++	"32 layers ablated exactly once, no duplicates, baseline+reference "
++	"present")
++def _c77():
++	raw = _load_v11c("raw_360m_ctx2048.jsonl")
++	bad = []
++	layer_set = _v11c_ablation_layers(raw)
++	if layer_set != set(range(32)):
++		bad.append(f"layers covered != 0..31: missing={set(range(32)) - layer_set}, extra={layer_set - set(range(32))}")
++	names = {row.get("_config_name") for row in raw}
++	if "all_q8_baseline" not in names or "all_q5_reference" not in names:
++		bad.append("missing all_q8_baseline or all_q5_reference row")
++	return len(bad) == 0, "; ".join(bad) if bad else "32/32 layers, baseline+reference present"
++
++
++@check("Phase 11C: only Q8_0/Q5_1 ever appear in any type_map across "
++	"all three raw ablation sweeps -- never Q4_0/Q5_0/F16 mid-sweep")
++def _c78():
++	bad = []
++	for fname in ("raw_135m_ctx2048.jsonl", "raw_360m_ctx2048.jsonl", "raw_ctx8192.jsonl"):
++		raw = _load_v11c(fname)
++		for row in raw:
++			for t in row.get("type_map", []):
++				if t not in ("Q8_0", "Q5_1"):
++					bad.append(f"{fname}/{row.get('_config_name')}: unsupported type {t!r}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "every type_map entry is Q8_0 or Q5_1"
++
++
++@check("Phase 11C: rankings.json's global rankings are independently "
++	"reproducible from the raw ablation records (recomputed here, not "
++	"just trusted)")
++def _c79():
++	raw = _load_v11c("raw_135m_ctx2048.jsonl")
++	rankings = _load_v11c("rankings.json")
++	baseline = next(r for r in raw if r["_config_name"] == "all_q8_baseline")
++	baseline_by_prompt = {p["path"].replace(".txt", ""): p for p in baseline["prompts"]}
++	sums = {l: 0.0 for l in range(30)}
++	counts = {l: 0 for l in range(30)}
++	for row in raw:
++		name = row.get("_config_name", "")
++		if not name.startswith("ablate_layer_"):
++			continue
++		layer = int(name.replace("ablate_layer_", ""))
++		for p in row["prompts"]:
++			label = p["path"].replace(".txt", "")
++			if label not in baseline_by_prompt:
++				continue
++			delta = p["logit_rel_l2"] - baseline_by_prompt[label]["logit_rel_l2"]
++			sums[layer] += delta
++			counts[layer] += 1
++	means = {l: (sums[l] / counts[l] if counts[l] else 0.0) for l in range(30)}
++	recomputed = sorted(range(30), key=lambda l: -means[l])
++	claimed = rankings["135m_ctx2048"]["global_ranking_by_rel_l2_most_sensitive_first"]
++	ok = recomputed == claimed
++	return ok, ("recomputed global rel_l2 ranking matches rankings.json exactly"
++		if ok else f"mismatch: recomputed[:5]={recomputed[:5]} vs claimed[:5]={claimed[:5]}")
++
++
++@check("Phase 11C: category_rankings.json's per-category rankings are "
++	"built only from that category's own prompts (cross-checked against "
++	"prompts.json's category list, not just trusted)")
++def _c80():
++	prompts = _load_v11c("prompts.json")
++	cat_rankings = _load_v11c("category_rankings.json")
++	bad = []
++	for cat, expected_prompts in prompts.get("categories", {}).items():
++		entry = cat_rankings.get("135m", {}).get("category_rankings", {}).get(cat)
++		if entry is None:
++			bad.append(f"category {cat} missing from category_rankings.json")
++			continue
++		if set(entry.get("prompts", [])) != set(expected_prompts):
++			bad.append(f"category {cat}: prompts {entry.get('prompts')} != expected {expected_prompts}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "every category's prompt set matches prompts.json exactly"
++
++
++@check("Phase 11C: holdout_policy.json's train ranking was built ONLY "
++	"from train-split prompts -- no holdout prompt's raw ablation data "
++	"was used to construct it (recomputed independently from raw data "
++	"restricted to train labels)")
++def _c81():
++	raw = _load_v11c("raw_135m_ctx2048.jsonl")
++	holdout_policy = _load_v11c("holdout_policy.json")
++	split = holdout_policy["train_holdout_split"]
++	train_labels = set(split["train"])
++	holdout_labels = set(split["holdout"])
++	claimed_ranking = holdout_policy["train_ranking_used"]["ranking_most_sensitive_first"]
++
++	baseline = next(r for r in raw if r["_config_name"] == "all_q8_baseline")
++	baseline_by_prompt = {p["path"].replace(".txt", ""): p for p in baseline["prompts"]}
++	sums = {l: 0.0 for l in range(30)}
++	counts = {l: 0 for l in range(30)}
++	for row in raw:
++		name = row.get("_config_name", "")
++		if not name.startswith("ablate_layer_"):
++			continue
++		layer = int(name.replace("ablate_layer_", ""))
++		for p in row["prompts"]:
++			label = p["path"].replace(".txt", "")
++			if label not in train_labels:
++				continue  # exclude holdout AND anything not in train
++			if label not in baseline_by_prompt:
++				continue
++			delta = p["logit_rel_l2"] - baseline_by_prompt[label]["logit_rel_l2"]
++			sums[layer] += delta
++			counts[layer] += 1
++	means = {l: (sums[l] / counts[l] if counts[l] else 0.0) for l in range(30)}
++	recomputed = sorted(range(30), key=lambda l: -means[l])
++	ok = recomputed == claimed_ranking
++	bad = [] if ok else [f"train-only ranking recomputation mismatch: {recomputed[:5]} vs {claimed_ranking[:5]}"]
++	# Separately confirm the holdout EVALUATION rows only ever cite holdout prompts
++	holdout_raw = _load_v11c("raw_holdout_policy_135m.jsonl")
++	for row in holdout_raw:
++		for p in row.get("prompts", []):
++			label = p["path"].replace(".txt", "")
++			if label not in holdout_labels:
++				bad.append(f"holdout evaluation row {row.get('_config_name')} references non-holdout prompt {label}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "train ranking uses only train prompts; holdout eval uses only holdout prompts"
++
++
++@check("Phase 11C: every holdout_policy.json layout at a given budget "
++	"has EXACTLY the requested number of Q8 layers (Q8-layer budget "
++	"respected), and matched-budget configs share identical kv_bytes "
++	"(exact storage math, no drift between layouts)")
++def _c82():
++	holdout_policy = _load_v11c("holdout_policy.json")
++	bad = []
++	by_budget = {}
++	for row in holdout_policy["results"]:
++		name = row["config_name"]
++		if not name.startswith("budget"):
++			continue
++		budget_str = name.split("_", 1)[0].replace("budget", "")
++		try:
++			budget = int(budget_str)
++		except ValueError:
++			continue
++		if row["q8_layer_count"] != budget:
++			bad.append(f"{name}: q8_layer_count={row['q8_layer_count']} != budget {budget}")
++		by_budget.setdefault(budget, set()).add(row["kv_bytes"])
++	for budget, byte_set in by_budget.items():
++		if len(byte_set) != 1:
++			bad.append(f"budget {budget}: kv_bytes differ across layouts: {byte_set}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "every layout's Q8 count matches its budget; matched budgets share identical bytes"
++
++
++@check("Phase 11C: pareto.json's claimed Pareto-optimal sets are "
++	"independently reproducible (non-dominance recomputed from the raw "
++	"points, not just trusted)")
++def _c83():
++	pareto = _load_v11c("pareto.json")
++	points = pareto["all_points"]
++
++	def frontier(pts, quality_key, higher_is_better=True):
++		n = len(pts)
++		result = []
++		for i in range(n):
++			dominated = False
++			for j in range(n):
++				if j == i:
++					continue
++				bi, qi = pts[i]["bytes"], pts[i][quality_key]
++				bj, qj = pts[j]["bytes"], pts[j][quality_key]
++				if not higher_is_better:
++					qi, qj = -qi, -qj
++				if bj <= bi and qj >= qi and (bj < bi or qj > qi):
++					dominated = True
++					break
++			result.append(pts[i]["config"] if not dominated else None)
++		return {c for c in result if c is not None}
++
++	recomputed_top1 = frontier(points, "top1")
++	recomputed_rel_l2 = frontier(points, "rel_l2", higher_is_better=False)
++	claimed_top1 = set(pareto["pareto_by_top1"])
++	claimed_rel_l2 = set(pareto["pareto_by_rel_l2"])
++	bad = []
++	if recomputed_top1 != claimed_top1:
++		bad.append(f"top1 frontier mismatch: recomputed={recomputed_top1} vs claimed={claimed_top1}")
++	if recomputed_rel_l2 != claimed_rel_l2:
++		bad.append(f"rel_l2 frontier mismatch: recomputed={recomputed_rel_l2} vs claimed={claimed_rel_l2}")
++	return len(bad) == 0, "; ".join(bad) if bad else "both Pareto frontiers reproduce exactly from raw points"
++
++
++@check("Phase 11C: rank-correlation fields (Spearman rho, Kendall tau, "
++	"overlap fractions) are all within their valid mathematical ranges")
++def _c84():
++	rankings = _load_v11c("rankings.json")
++	context_stability = _load_v11c("context_stability.json")
++	cross_model = _load_v11c("cross_model.json")
++	bad = []
++
++	def check_range(val, lo, hi, label):
++		if val is not None and not (lo - 1e-9 <= val <= hi + 1e-9):
++			bad.append(f"{label}={val} out of [{lo},{hi}]")
++
++	for model_key in ("135m_ctx2048_rank_stability", "360m_ctx2048_rank_stability"):
++		rs = rankings[model_key]
++		for metric in ("rel_l2", "delta_nll", "top1"):
++			s = rs[metric]["prompt_vs_prompt_spearman"]
++			check_range(s["mean"], -1.0, 1.0, f"{model_key}.{metric}.spearman.mean")
++			check_range(s["min"], -1.0, 1.0, f"{model_key}.{metric}.spearman.min")
++			check_range(s["max"], -1.0, 1.0, f"{model_key}.{metric}.spearman.max")
++			for c, rho in rs[metric]["category_vs_global_spearman"].items():
++				check_range(rho, -1.0, 1.0, f"{model_key}.{metric}.category_vs_global.{c}")
++	check_range(context_stability["spearman_rho"], -1.0, 1.0, "context_stability.spearman_rho")
++	check_range(context_stability["kendall_tau"], -1.0, 1.0, "context_stability.kendall_tau")
++	check_range(context_stability["top10_overlap"], 0.0, 1.0, "context_stability.top10_overlap")
++	check_range(context_stability["top5_overlap"], 0.0, 1.0, "context_stability.top5_overlap")
++	check_range(cross_model["top10_overlap_after_depth_mapping"], 0.0, 1.0, "cross_model.top10_overlap")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "every correlation/overlap field is within its valid range"
++
++
++@check("Phase 11C: pressure_boundary.json -- all 4 layer-selection "
++	"strategies for the 8-layer Q8 budget report the IDENTICAL memory "
++	"budget (matched, not drifted), and all 4 report a real, non-"
++	"fabricated capacity result (context_creation_succeeded is a "
++	"boolean actually present, not inferred)")
++def _c85():
++	pb = _load_v11c("pressure_boundary.json")
++	bad = []
++	byte_totals = set()
++	for row in pb["results"]:
++		if "theoretical_mixed_bytes" not in row or "context_creation_succeeded" not in row:
++			bad.append(f"{row.get('_config_name')}: missing required field")
++			continue
++		if not isinstance(row["context_creation_succeeded"], bool):
++			bad.append(f"{row.get('_config_name')}: context_creation_succeeded is not a bool")
++		byte_totals.add(row["theoretical_mixed_bytes"])
++	if len(byte_totals) != 1:
++		bad.append(f"memory budgets differ across strategies: {byte_totals}")
++	if len(pb["results"]) != 4:
++		bad.append(f"{len(pb['results'])} strategies tested, expected 4")
++	return len(bad) == 0, "; ".join(bad) if bad else f"all 4 strategies share identical memory budget ({byte_totals})"
++
++
++@check("Phase 11C: no absolute filesystem paths anywhere in any "
++	"artifact file (JSON or JSONL)")
++def _c86():
++	hits = []
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	for path in sorted(V11C_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		text = path.read_text()
++		found = pattern.findall(text)
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all artifact files"
++
++
++@check("Phase 11C: no unsupported product/README claims -- no product "
++	"CLI change, no version bump, no claim that mixed KV is productized "
++	"or merged; existing README.md unmodified by this phase")
++def _c87():
++	bad = []
++	summary_text = (V11C_DIR / "summary.json").read_text()
++	if re.search(r"\bmerged\b", summary_text, re.IGNORECASE) and "not merged" not in summary_text.lower():
++		bad.append("summary.json mentions 'merged' without an explicit not-merged disclaimer")
++	if re.search(r"--kv\s+mixed\b", summary_text):
++		bad.append("summary.json documents a '--kv mixed' product flag -- not a real, shipped flag")
++	product_cli = (REPO_ROOT / "tools" / "membrane-run" / "product_cli.cpp")
++	if product_cli.exists() and "mixed" in product_cli.read_text().lower():
++		bad.append("tools/membrane-run/product_cli.cpp references 'mixed' -- Section 25 forbids "
++			"exposing mixed mode in the product CLI")
++	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported product claims, product CLI untouched"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1542,6 +1902,8 @@ def main() -> int:
+ 			_c52, _c53, _c54, _c55, _c56, _c57, _c58, _c59, _c60, _c61,
+ 			_c62, _c63,
+ 			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73,
++			_c74, _c75, _c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83,
++			_c84, _c85, _c86, _c87,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-mixed-layer/sensitivity_analysis.c b/tools/membrane-kv-mixed-layer/sensitivity_analysis.c
+new file mode 100644
+index 0000000..bc302ea
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/sensitivity_analysis.c
+@@ -0,0 +1,278 @@
++#include "sensitivity_analysis.h"
++#include "mixed_layer_policy.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++typedef struct s_idx_val
++{
++	double	val;
++	int32_t	idx;
++}	idx_val_t;
++
++static double	sqrt_(double x);
++
++static int	cmp_idx_val(const void *a, const void *b)
++{
++	double	da = ((const idx_val_t *)a)->val;
++	double	db = ((const idx_val_t *)b)->val;
++
++	if (da < db)
++		return (-1);
++	if (da > db)
++		return (1);
++	return (0);
++}
++
++/* Average-rank transform (1-indexed), ties share the mean of the
++ * positions they occupy -- the standard Spearman convention. */
++static int	rank_transform(const double *x, int32_t n, double *out_rank)
++{
++	idx_val_t	*sorted;
++	int32_t		i;
++	int32_t		j;
++	double		avg;
++
++	sorted = (idx_val_t *)malloc(sizeof(idx_val_t) * (size_t)n);
++	if (sorted == NULL)
++		return (0);
++	for (i = 0; i < n; i++)
++	{
++		sorted[i].val = x[i];
++		sorted[i].idx = i;
++	}
++	qsort(sorted, (size_t)n, sizeof(idx_val_t), cmp_idx_val);
++	i = 0;
++	while (i < n)
++	{
++		j = i;
++		while (j + 1 < n && sorted[j + 1].val == sorted[i].val)
++			j++;
++		avg = ((double)(i + 1) + (double)(j + 1)) / 2.0;
++		while (i <= j)
++		{
++			out_rank[sorted[i].idx] = avg;
++			i++;
++		}
++	}
++	free(sorted);
++	return (1);
++}
++
++static int	pearson(const double *a, const double *b, int32_t n, double *out)
++{
++	double	mean_a;
++	double	mean_b;
++	double	cov;
++	double	var_a;
++	double	var_b;
++	int32_t	i;
++
++	mean_a = 0.0;
++	mean_b = 0.0;
++	for (i = 0; i < n; i++)
++	{
++		mean_a += a[i];
++		mean_b += b[i];
++	}
++	mean_a /= n;
++	mean_b /= n;
++	cov = 0.0;
++	var_a = 0.0;
++	var_b = 0.0;
++	for (i = 0; i < n; i++)
++	{
++		cov += (a[i] - mean_a) * (b[i] - mean_b);
++		var_a += (a[i] - mean_a) * (a[i] - mean_a);
++		var_b += (b[i] - mean_b) * (b[i] - mean_b);
++	}
++	if (var_a <= 0.0 || var_b <= 0.0)
++		return (0);
++	*out = cov / (sqrt_(var_a) * sqrt_(var_b));
++	return (1);
++}
++
++/* Avoid pulling in <math.h> solely for sqrt() in a header-free way --
++ * this project's other llama-free modules already link libm
++ * transitively via the C++ tools, but this module stays pure C with
++ * no extra link requirement by using a tiny Newton's-method sqrt. */
++static double	sqrt_(double x)
++{
++	double	guess;
++	int		i;
++
++	if (x <= 0.0)
++		return (0.0);
++	guess = x;
++	i = 0;
++	while (i < 64)
++	{
++		guess = 0.5 * (guess + x / guess);
++		i++;
++	}
++	return (guess);
++}
++
++int	membrane_spearman_rho(const double *a, const double *b, int32_t n,
++		double *out)
++{
++	double	*rank_a;
++	double	*rank_b;
++	int		ok;
++
++	if (out == NULL)
++		return (0);
++	*out = 0.0;
++	if (a == NULL || b == NULL || n < 2)
++		return (0);
++	rank_a = (double *)malloc(sizeof(double) * (size_t)n);
++	rank_b = (double *)malloc(sizeof(double) * (size_t)n);
++	ok = rank_a != NULL && rank_b != NULL;
++	ok = ok && rank_transform(a, n, rank_a) && rank_transform(b, n, rank_b);
++	ok = ok && pearson(rank_a, rank_b, n, out);
++	free(rank_a);
++	free(rank_b);
++	return (ok);
++}
++
++int	membrane_kendall_tau(const double *a, const double *b, int32_t n,
++		double *out)
++{
++	int64_t	concordant;
++	int64_t	discordant;
++	int64_t	tied_a;
++	int64_t	tied_b;
++	int32_t	i;
++	int32_t	j;
++	double	da;
++	double	db;
++	double	denom;
++
++	if (out == NULL)
++		return (0);
++	*out = 0.0;
++	if (a == NULL || b == NULL || n < 2)
++		return (0);
++	concordant = 0;
++	discordant = 0;
++	tied_a = 0;
++	tied_b = 0;
++	i = 0;
++	while (i < n)
++	{
++		j = i + 1;
++		while (j < n)
++		{
++			da = a[i] - a[j];
++			db = b[i] - b[j];
++			if (da == 0.0 && db == 0.0)
++				; /* tied on both -- excluded from all three counts */
++			else if (da == 0.0)
++				tied_a++;
++			else if (db == 0.0)
++				tied_b++;
++			else if ((da > 0.0) == (db > 0.0))
++				concordant++;
++			else
++				discordant++;
++			j++;
++		}
++		i++;
++	}
++	denom = sqrt_((double)(concordant + discordant + tied_a))
++		* sqrt_((double)(concordant + discordant + tied_b));
++	if (denom <= 0.0)
++		return (0);
++	*out = (double)(concordant - discordant) / denom;
++	return (1);
++}
++
++int	membrane_normalized_depth(int32_t layer_index, int32_t n_layer,
++		double *out)
++{
++	double	v;
++
++	if (out == NULL)
++		return (0);
++	*out = 0.0;
++	if (n_layer <= 1 || layer_index < 0 || layer_index >= n_layer)
++		return (0);
++	v = (double)layer_index / (double)(n_layer - 1);
++	if (v < 0.0)
++		v = 0.0;
++	if (v > 1.0)
++		v = 1.0;
++	*out = v;
++	return (1);
++}
++
++static uint32_t	xorshift32(uint32_t *state)
++{
++	*state ^= *state << 13;
++	*state ^= *state >> 17;
++	*state ^= *state << 5;
++	return (*state);
++}
++
++int	membrane_deterministic_random_layers(uint32_t seed, int32_t n_layer,
++		int32_t q8_count, int *out_type_map, int32_t *scratch_indices)
++{
++	uint32_t	state;
++	int32_t		i;
++	int32_t		j;
++	int32_t		tmp;
++
++	if (out_type_map == NULL || scratch_indices == NULL || n_layer <= 0)
++		return (0);
++	if (q8_count < 0)
++		q8_count = 0;
++	if (q8_count > n_layer)
++		q8_count = n_layer;
++	state = seed == 0 ? 1u : seed;	/* xorshift32 is undefined at seed 0 */
++	i = 0;
++	while (i < n_layer)
++	{
++		scratch_indices[i] = i;
++		out_type_map[i] = MEMBRANE_MIXED_LAYER_Q5;
++		i++;
++	}
++	/* Partial Fisher-Yates: only need the first q8_count picks. */
++	i = 0;
++	while (i < q8_count)
++	{
++		j = i + (int32_t)(xorshift32(&state) % (uint32_t)(n_layer - i));
++		tmp = scratch_indices[i];
++		scratch_indices[i] = scratch_indices[j];
++		scratch_indices[j] = tmp;
++		out_type_map[scratch_indices[i]] = MEMBRANE_MIXED_LAYER_Q8;
++		i++;
++	}
++	return (1);
++}
++
++int	membrane_pareto_frontier(const uint64_t *bytes, const double *quality,
++		int32_t n, int *out_is_pareto)
++{
++	int32_t	i;
++	int32_t	j;
++	int		dominated;
++
++	if (bytes == NULL || quality == NULL || out_is_pareto == NULL || n <= 0)
++		return (0);
++	i = 0;
++	while (i < n)
++	{
++		dominated = 0;
++		j = 0;
++		while (j < n && !dominated)
++		{
++			if (j != i && bytes[j] <= bytes[i] && quality[j] >= quality[i]
++				&& (bytes[j] < bytes[i] || quality[j] > quality[i]))
++				dominated = 1;
++			j++;
++		}
++		out_is_pareto[i] = dominated ? 0 : 1;
++		i++;
++	}
++	return (1);
++}
+diff --git a/tools/membrane-kv-mixed-layer/sensitivity_analysis.h b/tools/membrane-kv-mixed-layer/sensitivity_analysis.h
+new file mode 100644
+index 0000000..4f9b941
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/sensitivity_analysis.h
+@@ -0,0 +1,83 @@
++#ifndef MEMBRANE_KV_MIXED_LAYER_SENSITIVITY_ANALYSIS_H
++# define MEMBRANE_KV_MIXED_LAYER_SENSITIVITY_ANALYSIS_H
++
++# include <stddef.h>
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 11C: llama-free (no ggml/llama header) pure arithmetic for
++ * analyzing per-layer sensitivity data already gathered by
++ * membrane-kv-mixed-layer (main.cpp) -- RESEARCH ONLY, experiment
++ * branch only. Every function here operates on plain double/int
++ * arrays the caller already has; none of it touches a model, a
++ * prompt, or a file.
++ */
++
++/*
++ * Spearman rank correlation of two equal-length real-valued series
++ * (e.g. per-layer sensitivity scores from two different prompts).
++ * Internally rank-transforms both series (average rank on ties) and
++ * computes Pearson correlation of the ranks -- the standard
++ * definition. n must be >= 2. Returns 1 (out set, in [-1, 1]) on
++ * success, 0 (out left at 0) for n < 2, NULL inputs, or a
++ * zero-variance series (undefined correlation, not silently reported
++ * as 0 or 1).
++ */
++int	membrane_spearman_rho(const double *a, const double *b, int32_t n,
++		double *out);
++
++/*
++ * Kendall's tau-b rank correlation (handles ties) of two equal-length
++ * real-valued series. Returns 1 (out set, in [-1, 1]) on success, 0
++ * (out left at 0) for n < 2, NULL inputs, or a degenerate (zero
++ * concordant+discordant+tied) comparison set.
++ */
++int	membrane_kendall_tau(const double *a, const double *b, int32_t n,
++		double *out);
++
++/*
++ * normalized_layer_position = layer_index / (n_layer - 1), the exact
++ * formula Section 11 specifies -- clamped to [0, 1] and rejecting a
++ * degenerate n_layer <= 1 (undefined depth for a single-layer model).
++ * Returns 1 (out set) on success, 0 otherwise.
++ */
++int	membrane_normalized_depth(int32_t layer_index, int32_t n_layer,
++		double *out);
++
++/*
++ * Deterministic seeded PRNG-based layer selection: fills out_type_map
++ * (n_layer entries) by choosing exactly q8_count DISTINCT layer
++ * indices for MEMBRANE_MIXED_LAYER_Q8 (see mixed_layer_policy.h),
++ * every other layer MEMBRANE_MIXED_LAYER_Q5 -- a Fisher-Yates partial
++ * shuffle driven by a plain xorshift32 PRNG seeded from `seed`, so
++ * identical (seed, n_layer, q8_count) inputs always produce an
++ * identical map (required for a reproducible "random" baseline, not
++ * a different one every run). q8_count is clamped to [0, n_layer].
++ * Returns 1 on success, 0 for n_layer <= 0 or a NULL out_type_map/
++ * scratch buffer.
++ */
++int	membrane_deterministic_random_layers(uint32_t seed, int32_t n_layer,
++		int32_t q8_count, int *out_type_map, int32_t *scratch_indices);
++
++/*
++ * Pareto non-dominance check over a set of (bytes, quality) points --
++ * quality is assumed HIGHER-IS-BETTER (e.g. top1_preservation, or a
++ * negated loss metric the caller already flipped). Point i is
++ * dominated iff some other point j in the same set has
++ * bytes[j] <= bytes[i] AND quality[j] >= quality[i], with at least
++ * one strict inequality. Fills out_is_pareto (n entries, 1 = non-
++ * dominated/on the frontier, 0 = dominated). Returns 1 on success, 0
++ * for n <= 0 or NULL inputs.
++ */
++int	membrane_pareto_frontier(const uint64_t *bytes, const double *quality,
++		int32_t n, int *out_is_pareto);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-mixed-layer/test_sensitivity_analysis.c b/tools/membrane-kv-mixed-layer/test_sensitivity_analysis.c
+new file mode 100644
+index 0000000..987a0bd
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/test_sensitivity_analysis.c
+@@ -0,0 +1,267 @@
++#include <string.h>
++
++#include "sensitivity_analysis.h"
++#include "mixed_layer_policy.h"
++#include "test_helpers.h"
++
++static void	test_spearman_perfect_positive(void)
++{
++	double	a[5] = {1, 2, 3, 4, 5};
++	double	b[5] = {10, 20, 30, 40, 50};
++	double	rho;
++
++	TEST_ASSERT(membrane_spearman_rho(a, b, 5, &rho) == 1,
++		"perfect positive correlation resolves");
++	TEST_ASSERT(rho > 0.999, "identical rank order gives rho ~= 1.0");
++}
++
++static void	test_spearman_perfect_negative(void)
++{
++	double	a[5] = {1, 2, 3, 4, 5};
++	double	b[5] = {50, 40, 30, 20, 10};
++	double	rho;
++
++	TEST_ASSERT(membrane_spearman_rho(a, b, 5, &rho) == 1,
++		"perfect negative correlation resolves");
++	TEST_ASSERT(rho < -0.999, "reversed rank order gives rho ~= -1.0");
++}
++
++static void	test_spearman_with_ties(void)
++{
++	double	a[6] = {1, 1, 2, 3, 3, 3};
++	double	b[6] = {1, 1, 2, 3, 3, 3};
++	double	rho;
++
++	TEST_ASSERT(membrane_spearman_rho(a, b, 6, &rho) == 1,
++		"tied values still resolve via average-rank transform");
++	TEST_ASSERT(rho > 0.999,
++		"identical series with ties still gives rho ~= 1.0");
++}
++
++static void	test_spearman_zero_variance_fails_closed(void)
++{
++	double	a[4] = {5, 5, 5, 5};
++	double	b[4] = {1, 2, 3, 4};
++	double	rho = -99.0;
++
++	TEST_ASSERT(membrane_spearman_rho(a, b, 4, &rho) == 0,
++		"a constant series has undefined correlation -- fails closed, "
++		"not silently 0 or 1");
++	TEST_ASSERT(rho == 0.0, "out is reset to 0.0 on failure");
++}
++
++static void	test_spearman_degenerate_inputs(void)
++{
++	double	a[2] = {1, 2};
++	double	rho;
++
++	TEST_ASSERT(membrane_spearman_rho(NULL, a, 2, &rho) == 0,
++		"NULL series fails closed");
++	TEST_ASSERT(membrane_spearman_rho(a, a, 1, &rho) == 0,
++		"n < 2 fails closed (correlation undefined)");
++	TEST_ASSERT(membrane_spearman_rho(a, a, 2, NULL) == 0,
++		"NULL out pointer fails closed, not a crash");
++}
++
++static void	test_kendall_perfect_positive(void)
++{
++	double	a[5] = {1, 2, 3, 4, 5};
++	double	b[5] = {10, 20, 30, 40, 50};
++	double	tau;
++
++	TEST_ASSERT(membrane_kendall_tau(a, b, 5, &tau) == 1,
++		"perfect positive concordance resolves");
++	TEST_ASSERT(tau > 0.999, "every pair concordant gives tau ~= 1.0");
++}
++
++static void	test_kendall_perfect_negative(void)
++{
++	double	a[5] = {1, 2, 3, 4, 5};
++	double	b[5] = {50, 40, 30, 20, 10};
++	double	tau;
++
++	TEST_ASSERT(membrane_kendall_tau(a, b, 5, &tau) == 1,
++		"perfect discordance resolves");
++	TEST_ASSERT(tau < -0.999, "every pair discordant gives tau ~= -1.0");
++}
++
++static void	test_kendall_no_relationship(void)
++{
++	/* A hand-picked series with an equal split of concordant and
++	 * discordant pairs -- tau should land near 0, not just "not 1". */
++	double	a[4] = {1, 2, 3, 4};
++	double	b[4] = {2, 1, 4, 3};
++	double	tau;
++
++	TEST_ASSERT(membrane_kendall_tau(a, b, 4, &tau) == 1,
++		"mixed concordance resolves");
++	TEST_ASSERT(tau > -0.5 && tau < 0.5,
++		"a roughly balanced concordant/discordant split gives a tau "
++		"well short of +-1");
++}
++
++static void	test_normalized_depth_endpoints(void)
++{
++	double	v;
++
++	TEST_ASSERT(membrane_normalized_depth(0, 30, &v) == 1,
++		"layer 0 resolves");
++	TEST_ASSERT(v == 0.0, "layer 0 of 30 has normalized depth 0.0");
++	TEST_ASSERT(membrane_normalized_depth(29, 30, &v) == 1,
++		"last layer resolves");
++	TEST_ASSERT(v == 1.0, "last layer of 30 has normalized depth 1.0");
++	TEST_ASSERT(membrane_normalized_depth(15, 31, &v) == 1,
++		"middle layer resolves");
++	TEST_ASSERT(v > 0.49 && v < 0.51,
++		"layer 15 of 31 (0-indexed) is close to the midpoint");
++}
++
++static void	test_normalized_depth_degenerate(void)
++{
++	double	v;
++
++	TEST_ASSERT(membrane_normalized_depth(0, 1, &v) == 0,
++		"a single-layer model has undefined depth -- fails closed");
++	TEST_ASSERT(membrane_normalized_depth(-1, 30, &v) == 0,
++		"a negative layer index fails closed");
++	TEST_ASSERT(membrane_normalized_depth(30, 30, &v) == 0,
++		"an out-of-range layer index (== n_layer) fails closed");
++}
++
++static void	test_deterministic_random_reproducible(void)
++{
++	int		map1[30];
++	int		map2[30];
++	int32_t	scratch[30];
++
++	TEST_ASSERT(membrane_deterministic_random_layers(42, 30, 15, map1,
++			scratch) == 1, "resolves for seed 42");
++	TEST_ASSERT(membrane_deterministic_random_layers(42, 30, 15, map2,
++			scratch) == 1, "resolves again for the same seed");
++	TEST_ASSERT(memcmp(map1, map2, sizeof(map1)) == 0,
++		"identical (seed, n_layer, q8_count) always produces an "
++		"identical map -- a real reproducible baseline, not a "
++		"different one every run");
++}
++
++static void	test_deterministic_random_different_seeds_differ(void)
++{
++	int		map1[30];
++	int		map2[30];
++	int32_t	scratch[30];
++	int		differs;
++	int		i;
++
++	membrane_deterministic_random_layers(1, 30, 15, map1, scratch);
++	membrane_deterministic_random_layers(2, 30, 15, map2, scratch);
++	differs = 0;
++	for (i = 0; i < 30; i++)
++		if (map1[i] != map2[i])
++			differs = 1;
++	TEST_ASSERT(differs, "different seeds produce different maps (not "
++		"a constant/degenerate generator)");
++}
++
++static void	test_deterministic_random_exact_q8_count(void)
++{
++	int		map[30];
++	int32_t	scratch[30];
++	int		q8;
++	int		i;
++
++	membrane_deterministic_random_layers(7, 30, 12, map, scratch);
++	q8 = 0;
++	for (i = 0; i < 30; i++)
++		if (map[i] == MEMBRANE_MIXED_LAYER_Q8)
++			q8++;
++	TEST_ASSERT(q8 == 12, "exactly the requested q8_count of layers "
++		"are marked Q8 -- no more, no fewer");
++}
++
++static void	test_deterministic_random_clamped_and_degenerate(void)
++{
++	int		map[10];
++	int32_t	scratch[10];
++
++	TEST_ASSERT(membrane_deterministic_random_layers(1, 10, 99, map,
++			scratch) == 1, "an over-large q8_count is clamped, not "
++		"rejected");
++	TEST_ASSERT(membrane_deterministic_random_layers(1, 0, 5, map,
++			scratch) == 0, "n_layer <= 0 fails closed");
++	TEST_ASSERT(membrane_deterministic_random_layers(1, 10, 5, NULL,
++			scratch) == 0, "NULL out_type_map fails closed");
++}
++
++static void	test_pareto_frontier_basic(void)
++{
++	/* Points: (bytes, quality) -- lower bytes and higher quality are
++	 * both better. Point 0 is dominated by point 1 (same quality,
++	 * fewer bytes doesn't exist here -- constructed so point 0 is
++	 * strictly worse on both axes than point 1). Point 2 is on the
++	 * frontier (cheapest). Point 3 is on the frontier (best quality). */
++	uint64_t	bytes[4] = {100, 80, 50, 120};
++	double		quality[4] = {0.5, 0.6, 0.4, 0.9};
++	int			is_pareto[4];
++
++	TEST_ASSERT(membrane_pareto_frontier(bytes, quality, 4, is_pareto)
++			== 1, "resolves");
++	TEST_ASSERT(is_pareto[0] == 0,
++		"point 0 (100 bytes, 0.5 quality) is dominated by point 1 "
++		"(80 bytes, 0.6 quality -- cheaper AND better)");
++	TEST_ASSERT(is_pareto[1] == 1,
++		"point 1 is non-dominated (nothing is both cheaper and at "
++		"least as good)");
++	TEST_ASSERT(is_pareto[2] == 1,
++		"point 2 (50 bytes, cheapest) is on the frontier");
++	TEST_ASSERT(is_pareto[3] == 1,
++		"point 3 (0.9 quality, best) is on the frontier despite "
++		"costing the most bytes");
++}
++
++static void	test_pareto_frontier_identical_points_both_survive(void)
++{
++	uint64_t	bytes[2] = {100, 100};
++	double		quality[2] = {0.5, 0.5};
++	int			is_pareto[2];
++
++	TEST_ASSERT(membrane_pareto_frontier(bytes, quality, 2, is_pareto)
++			== 1, "resolves");
++	TEST_ASSERT(is_pareto[0] == 1 && is_pareto[1] == 1,
++		"two identical points do not dominate each other (dominance "
++		"requires at least one STRICT improvement)");
++}
++
++static void	test_pareto_frontier_degenerate(void)
++{
++	uint64_t	bytes[1] = {10};
++	double		quality[1] = {0.5};
++	int			is_pareto[1];
++
++	TEST_ASSERT(membrane_pareto_frontier(NULL, quality, 1, is_pareto)
++			== 0, "NULL bytes fails closed");
++	TEST_ASSERT(membrane_pareto_frontier(bytes, quality, 0, is_pareto)
++			== 0, "n <= 0 fails closed");
++}
++
++int	main(void)
++{
++	test_spearman_perfect_positive();
++	test_spearman_perfect_negative();
++	test_spearman_with_ties();
++	test_spearman_zero_variance_fails_closed();
++	test_spearman_degenerate_inputs();
++	test_kendall_perfect_positive();
++	test_kendall_perfect_negative();
++	test_kendall_no_relationship();
++	test_normalized_depth_endpoints();
++	test_normalized_depth_degenerate();
++	test_deterministic_random_reproducible();
++	test_deterministic_random_different_seeds_differ();
++	test_deterministic_random_exact_q8_count();
++	test_deterministic_random_clamped_and_degenerate();
++	test_pareto_frontier_basic();
++	test_pareto_frontier_identical_points_both_survive();
++	test_pareto_frontier_degenerate();
++	printf("test_sensitivity_analysis: all tests passed\n");
++	return (0);
++}

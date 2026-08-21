@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #105: performance stability (5 CPU + 7 Vulkan repeated runs) for one representative profile-based mixed-layer config PER MODEL, single prompt (factual_recall_1), ctx=2048, gen_tokens=32.",
+  "configs": {
+    "135m": {"q8_layer_count": 15, "q8_layers": [1, 2, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21, 22, 23, 27], "source": "profile_135m_train21.json top-15 (same config as Task #102/#104)"},
+    "360m": {"q8_layer_count": 16, "q8_layers": [1, 7, 13, 14, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 29, 30], "source": "profile_360m_train21.json top-16 (same config as Task #102/#104)"}
+  },
+  "gen_tok_per_s_stability": {
+    "cpu": {
+      "135m": {"n": 5, "mean": 65.577, "median": 66.147, "min": 62.378, "max": 68.505, "stdev": 2.442},
+      "360m": {"n": 5, "mean": 23.958, "median": 24.086, "min": 21.908, "max": 25.352, "stdev": 1.328}
+    },
+    "vulkan": {
+      "135m": {"n": 7, "mean": 278.638, "median": 283.356, "min": 258.167, "max": 284.368, "stdev": 9.885},
+      "360m": {"n": 7, "mean": 157.098, "median": 157.434, "min": 156.029, "max": 157.849, "stdev": 0.677}
+    }
+  },
+  "provenance": {
+    "backend_cpu": "build-cpu-rc1, CPU-only",
+    "backend_vulkan": "build-vulkan, real GTX 1650, --gpu-layers all",
+    "context_size": 2048,
+    "prompt": "factual_recall_1"
+  },
+  "findings": [
+    "360M Vulkan throughput is extremely stable (stdev=0.677 tok/s on a mean of 157.1 tok/s, <0.5% relative spread) -- the tightest of any measured config in this phase.",
+    "135M Vulkan throughput shows more spread (stdev=9.885 tok/s on a mean of 278.6 tok/s, ~3.5% relative) than 360M Vulkan, driven by one lower outlier run (258.2 tok/s vs a median of 283.4) -- consistent with this being a shared, memory-constrained dev host with real background load during the run, the same caveat Phase 11C's own CPU numbers carried, not evidence of a genuine KV-mix throughput effect.",
+    "CPU throughput for both models is stable within a normal range (135M: 3.7% relative stdev; 360M: 5.5% relative stdev), comparable in magnitude to Phase 11C's own CPU spread (5.5-7.8 tok/s stdev on 50-61 tok/s means for 135M all_q8/all_q5/mixed).",
+    "No systematic throughput penalty from per-layer type heterogeneity is evident at either model size on either backend -- consistent with Phase 11B/11C's own finding that mixed Q8/Q5 KV does not measurably slow decode relative to a uniform-type cache."
+  ]
+}

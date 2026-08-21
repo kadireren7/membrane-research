@@ -1,0 +1,96 @@
+{
+  "n_layer_135m": 30,
+  "n_layer_360m": 32,
+  "top10_135m_native": [
+    19,
+    27,
+    12,
+    22,
+    21,
+    16,
+    23,
+    10,
+    13,
+    11
+  ],
+  "top10_360m_native": [
+    30,
+    23,
+    18,
+    13,
+    19,
+    1,
+    22,
+    25,
+    24,
+    16
+  ],
+  "top10_135m_normalized_depth": [
+    0.655,
+    0.931,
+    0.414,
+    0.759,
+    0.724,
+    0.552,
+    0.793,
+    0.345,
+    0.448,
+    0.379
+  ],
+  "top10_360m_normalized_depth": [
+    0.968,
+    0.742,
+    0.581,
+    0.419,
+    0.613,
+    0.032,
+    0.71,
+    0.806,
+    0.774,
+    0.516
+  ],
+  "top10_360m_mapped_to_135m_index_space": [
+    28,
+    22,
+    17,
+    12,
+    18,
+    1,
+    21,
+    23,
+    22,
+    15
+  ],
+  "top10_overlap_after_depth_mapping": 0.4,
+  "top5_overlap_after_depth_mapping": 0.4,
+  "top10_depth_quintile_buckets_135m": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "top10_depth_quintile_buckets_360m": [
+    0,
+    2,
+    3,
+    4
+  ],
+  "depth_quintile_bucket_overlap": [
+    2,
+    3,
+    4
+  ],
+  "note": "Exact-layer-index overlap after normalized-depth mapping is modest (4/10 at k=10) -- layer 27 in 135M does NOT directly correspond to layer 27 in 360M by architecture, and even the depth-based mapping only partially aligns. However, at a COARSER granularity (quintile depth-region: which fifth of the network the most-sensitive layers fall in), both models concentrate their most-sensitive layers in the mid-to-late region (quintiles 2-4 of 5), avoiding the earliest layers -- a real, if coarse, cross-model regularity. Both models also share one striking finding: their single MOST sensitive layer sits very near (but not at) the end of the network (135M layer 19 then 27; 360M layer 30 of 32) -- not the literal final layer, and not early/middle layers either.",
+  "provenance": {
+    "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+    "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "model_identity": "SmolLM2-135M-Instruct-f16 + SmolLM2-360M-Instruct-f16",
+    "backend": "CPU",
+    "context_size": 2048,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1",
+    "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+    "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede"
+  }
+}

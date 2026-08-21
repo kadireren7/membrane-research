@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 3: fresh, real measurements (product membrane-run CLI, Vulkan/GTX 1650, SmolLM2-360M, --gpu-layers all) to find Point A (Q8 comfortable), Point B (Q8 fails, adaptive resolves to Q5, Q5 succeeds -- the PRIMARY constrained point), and Point C (even whole-cache Q5 fails from the product's own conservative estimate). Point B was revised once during this section: an initial candidate (ctx=135000) satisfied the product-forced-Q5 precondition but turned out to have so much raw hardware headroom that even a full 32/32 all-Q8 mixed layout succeeded via the research probe (see point_b_candidate_rejected below) -- useless for a meaningful Q8-budget search. ctx=180000 (matching Phase 11D's own established boundary) was confirmed fresh via the product CLI and used as the actual Primary Point B instead.",
+  "method": "membrane-run --kv q8|q5|adaptive --gpu-layers all --ctx N --gen-tokens 1, one real prompt (\"Hello\"), --json. The product's own gpu_layers estimator (gpu_policy in the JSON output) rejects cleanly (exit 5) before attempting a real allocation whenever its conservative estimate (KV + safety_reserve_bytes + estimated_model_bytes) exceeds device_free_bytes -- this IS the real, current product behavior being measured, not a simulation of it.",
+  "point_a_comfortable": {
+    "ctx": 100000,
+    "requested_kv": "adaptive",
+    "selected_kv": "q8",
+    "adaptive_reason": "Q8_FULL_RESIDENCY",
+    "gpu_layers_selected": 32,
+    "kv_allocated_bytes": 2176000000,
+    "headroom_bytes": 660099905,
+    "note": "clearly comfortable control point, not edge-of-boundary"
+  },
+  "point_b_primary_constrained": {
+    "ctx": 180000,
+    "explicit_q8": {"exit_code": 5, "result": "clean rejection, no crash", "error": "insufficient estimated device memory: 32 layers need ~629391360 bytes, only 0 available after KV (3916800000) and reserve (682937535) out of 4148428800 free"},
+    "adaptive": {"exit_code": 0, "selected_kv": "q5", "adaptive_reason": "Q5_REQUIRED_FOR_FULL_RESIDENCY", "gpu_layers_selected": 32, "kv_allocated_bytes": 2764800000},
+    "explicit_q5": {"exit_code": 0, "gpu_layers_selected": 32, "kv_allocated_bytes": 2764800000, "headroom_bytes": 71299905},
+    "precondition_satisfied": true,
+    "precondition_check": "explicit Q8 cannot safely achieve full (32/32) residency (fails by a wide margin, 0 bytes available for weights vs 629391360 needed); product adaptive genuinely resolves to Q5 on its own; explicit Q5 safely achieves full residency with only ~68MB of the product's own conservative headroom to spare -- a genuinely tight, meaningful constrained point, not a trivial one",
+    "why_this_ctx_and_not_135000": "at ctx=135000 (see point_b_candidate_rejected) the product's conservative headroom for Q5 was so large (~727MB) that a full raw-hardware Q8-budget search never encountered a real boundary; ctx=180000 matches Phase 11D's own established real memory-pressure boundary and has much tighter headroom (~68MB, i.e. ~1.9 layers' worth by the product's own conservative math), making it the genuinely informative constrained point for Sections 5-15"
+  },
+  "point_b_candidate_rejected": {
+    "ctx": 135000,
+    "explicit_q8": {"exit_code": 5, "result": "clean rejection, no crash", "error": "insufficient estimated device memory: 32 layers need ~629391360 bytes, only 527891265 available after KV (2937600000) and reserve (682937535) out of 4148428800 free"},
+    "adaptive": {"exit_code": 0, "selected_kv": "q5", "adaptive_reason": "Q5_REQUIRED_FOR_FULL_RESIDENCY", "gpu_layers_selected": 32, "kv_allocated_bytes": 2073600000},
+    "explicit_q5": {"exit_code": 0, "gpu_layers_selected": 32, "kv_allocated_bytes": 2073600000, "headroom_bytes": 762499905},
+    "why_rejected_as_primary": "satisfies the product-level forced-Q5 precondition (Q8 fails, adaptive->Q5, Q5 succeeds) exactly like ctx=180000 does, but a full raw-hardware mixed Q8-count sweep at this ctx via the research probe (0/1/2/4/6/8/12/16/20/24/28/32 Q8 layers, --capacity-only) found EVERY count including all-32-Q8 succeeds at the raw allocation level -- the product's conservative safety_reserve_bytes margin (~651MB) is so much larger than what this ctx actually needs that it leaves no real memory boundary within [0,32] Q8 layers to search. Retained here as a real, disclosed data point showing how much the product's conservative margin can dwarf the true hardware requirement in the moderate-pressure regime -- directly relevant to Section 6/7's overhead-calibration and safety-margin work."
+  },
+  "point_a2_q8_edge_reference": {
+    "ctx": 130000,
+    "explicit_q8": {"exit_code": 0, "gpu_layers_selected": 32, "kv_allocated_bytes": 2828800000, "headroom_bytes": 7299905},
+    "note": "extra reference point: Q8's OWN edge (barely succeeds, ~7MB headroom) -- shows the true product-level Q8-vs-Q5 transition is narrow, between ctx=130000 and ctx=135000; not used as Point A itself (too razor-thin to be a clean 'comfortable' control), kept for context"
+  },
+  "point_c_extreme": {
+    "ctx": 186000,
+    "product_explicit_q5": {"exit_code": 5, "result": "clean rejection", "error": "insufficient estimated device memory: 32 layers need ~629391360 bytes, only 608531265 available after KV (2856960000) and reserve (682937535) out of 4148428800 free"},
+    "raw_hardware_capacity_reference": {
+      "method": "membrane-kv-mixed-layer --capacity-only (research probe, no product conservative reserve applied)",
+      "pure_q5_at_ctx_186000": {"context_creation_succeeded": true, "theoretical_mixed_bytes": 2856960000},
+      "single_q8_layer_at_ctx_186000": {"q8_layer_count": 1, "context_creation_succeeded": true, "theoretical_mixed_bytes": 2894160000},
+      "pure_q5_at_ctx_200000": {"context_creation_succeeded": false, "failure_stage": "compute buffer allocation"},
+      "note": "IMPORTANT, DISCLOSED FINDING: the raw hardware can still successfully allocate whole-cache Q5 (and even a 1-layer mixed config) at ctx=186000 -- the PRODUCT rejects this earlier due to its own conservative safety_reserve_bytes margin (~651MB) plus its weight-budget check, not because the hardware itself is out of room. This is the product being appropriately conservative, not a bug -- but it means 'Point C' as defined from the product's real behavior (ctx=186000) sits meaningfully below the true raw hardware ceiling (somewhere between ctx=186000 and ctx=200000, not pinned further -- not needed for this phase's scope)."
+    },
+    "definition_used_for_point_c": "ctx=186000, defined as the point where the PRODUCT's own whole-cache Q5 already fails closed -- the correct product-relevant 'extreme' point, since a mixed config (which always costs >= pure-Q5 bytes for any Q8 count > 0) cannot be safer than pure Q5 from the product's own estimator at the same ctx once Q5 itself is rejected by that estimator's math."
+  },
+  "byte_formula_confirmed": {
+    "bytes_per_layer_q8_per_token": 680,
+    "bytes_per_layer_q5_per_token": 480,
+    "cross_check_at_ctx_135000": "864000000 (all-Q8 minus all-Q5 KV bytes) minus 762499905 (Q5's measured headroom_bytes) = 101500095, which exactly equals the real Q8-rejection shortfall (629391360 - 527891265 = 101500095) reported by the product's own error message -- confirms the byte formula and the product's real gpu_policy arithmetic agree exactly"
+  }
+}

@@ -1,0 +1,4 @@
+{"schema_version": 1, "capacity_only": true, "n_layer": 32, "ctx": 180000, "gpu_layers_requested": -1, "q8_layer_count": 8, "theoretical_mixed_bytes": 3052800000, "context_creation_succeeded": true, "_config_name": "early_8q8"}
+{"schema_version": 1, "capacity_only": true, "n_layer": 32, "ctx": 180000, "gpu_layers_requested": -1, "q8_layer_count": 8, "theoretical_mixed_bytes": 3052800000, "context_creation_succeeded": true, "_config_name": "late_8q8"}
+{"schema_version": 1, "capacity_only": true, "n_layer": 32, "ctx": 180000, "gpu_layers_requested": -1, "q8_layer_count": 8, "theoretical_mixed_bytes": 3052800000, "context_creation_succeeded": true, "_config_name": "random_8q8_seed42"}
+{"schema_version": 1, "capacity_only": true, "n_layer": 32, "ctx": 180000, "gpu_layers_requested": -1, "q8_layer_count": 8, "theoretical_mixed_bytes": 3052800000, "context_creation_succeeded": true, "_config_name": "sensitivity_8q8"}

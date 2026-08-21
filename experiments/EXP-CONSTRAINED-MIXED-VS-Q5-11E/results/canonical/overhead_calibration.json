@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Sections 6/7: measured overhead model at PRIMARY POINT B, built from real external VRAM measurement (vram.json), the product's own reported gpu_policy fields (from a live membrane-run --kv q5 --json run), and real compute-buffer sizes printed by llama.cpp's own allocator during actual context creation.",
+  "raw_measured_components": {
+    "gguf_file_size_bytes": 725553792,
+    "product_estimated_model_bytes": 629391360,
+    "product_safety_reserve_bytes": 682937535,
+    "product_device_total_bytes_vulkan_reported": 4552916992,
+    "product_device_free_bytes_vulkan_reported": 4148428800,
+    "nvidia_smi_total_vram_mib": 4096,
+    "compute_buffer_vulkan1_mib": 97.4121,
+    "compute_buffer_vulkan_host_mib": 89.9258,
+    "note_on_vulkan_vs_nvidia_smi_total_mismatch": "Vulkan reports device_total_bytes=4552916992 (4341.3 MiB) while nvidia-smi reports a flat 4096 MiB card total -- a ~245 MiB discrepancy between the two accounting sources for the SAME physical device. This is itself a disclosed finding: any safety margin derived purely from the Vulkan-reported total would be systematically optimistic relative to nvidia-smi's number, and vice versa. All headroom/prediction-error numbers below use nvidia-smi's externally observed peak (the ground truth for 'did it actually fit'), not either tool's reported total."
+  },
+  "prediction_models_compared": {
+    "product_conservative_formula": {
+      "formula": "predicted_total = estimated_model_bytes + kv_bytes + safety_reserve_bytes",
+      "whole_q5_predicted_mib": 3888.0,
+      "whole_q5_observed_external_peak_mib": 3437,
+      "whole_q5_prediction_error_mib": 451.0,
+      "direction": "overprediction (safe direction -- the product is more conservative than reality requires)",
+      "note": "this is the formula visible in the product's own real error messages (boundary_scan.json's explicit-Q8-rejection message); it is deliberately conservative, and the ~451 MiB overprediction at whole-Q5 is why Q5 still succeeds with only ~68 MiB of the product's OWN reported headroom even though the true hardware has far more slack than that."
+    },
+    "tighter_empirical_model": {
+      "formula": "predicted_total = measured_weight_vram_estimate + kv_bytes + measured_compute_buffer_bytes, where measured_weight_vram_estimate = whole_q5_observed_peak - whole_q5_kv_bytes - compute_buffer_bytes (i.e. calibrated FROM the whole-Q5 measurement itself, not an independent prediction for that point)",
+      "derived_weight_vram_estimate_mib": 612.94,
+      "compute_buffer_total_mib": 187.34,
+      "mixed_top8_predicted_mib": 3711.3,
+      "mixed_top8_observed_external_peak_mib": 3713,
+      "mixed_top8_prediction_error_mib": 1.7,
+      "mixed_top8_prediction_error_pct": 0.046,
+      "note": "extremely tight prediction (<0.05% error) for the ONE held-out point (mixed top-8) not used to calibrate the model -- much tighter than the product's ~451 MiB conservative overprediction. This looks like a strong result, but see false_safe_boundary_check below before drawing a productization conclusion from it."
+    }
+  },
+  "false_safe_boundary_check": {
+    "purpose": "Section 7 explicitly requires checking whether ANY simple margin model correctly predicts the real top-8-succeeds/top-9-fails boundary from q8_count_sweep.json, not just whether it fits one interpolation point well.",
+    "q8_count_9_kv_bytes": 3088800000,
+    "tighter_model_predicted_total_mib_at_count_9": 3746.6,
+    "nvidia_smi_total_vram_mib": 4096,
+    "tighter_model_would_predict": "SUCCESS (3746.6 MiB predicted < 4096 MiB card total, ~350 MiB of predicted headroom)",
+    "actual_measured_result_at_count_9": "FAILURE (context_creation_succeeded=false, failure_stage='compute buffer allocation (ggml_gallocr_reserve_n_impl, size 102111232, ErrorOutOfDeviceMemory)', identical failure signature independently reproduced in Phase 11D and again in this phase -- see q8_count_sweep.json)",
+    "verdict": "FALSE SAFE. The tighter empirical model, despite predicting the mixed top-8 steady-state peak almost exactly, would have wrongly certified top-9 as safe. The two measured compute-buffer sizes (97.41 MiB reserved successfully at count<=8; the SAME ~97.38 MiB size is what fails to allocate at count=9) show the compute buffer's REQUESTED size does not grow with Q8 count -- what changes is how much room is left for it once KV+weights have already been allocated, and that remaining room evidently runs out somewhere between the count-8 and count-9 KV byte totals in a way this phase's steady-state peak measurements (taken AFTER successful allocation, not during a failing attempt) do not fully explain. This reproduces and sharpens Phase 11D's own disclosed conclusion (memory: 'theoretical KV-byte headroom alone is insufficient because compute-buffer/allocator overhead matters') -- a simple additive correction is measurably tighter than the product's current blanket reserve, but is NOT yet safe to use as a drop-in replacement for it near a real allocation boundary, because it produces at least one confirmed false-safe case at the exact boundary this phase set out to search."
+  },
+  "conclusion": "Neither the product's current conservative formula nor a tighter measured-overhead correction perfectly predicts the real allocation boundary. The product's formula is safe but wastes real headroom (~451 MiB at whole-Q5). The tighter model is far more accurate on average but produced a false-safe result exactly at the one true boundary measured in this phase. Recommendation: do not replace the product's safety_reserve_bytes with this tighter model without allocation-time (not just steady-state) VRAM instrumentation around the compute-buffer reservation step specifically -- this is a backend-accounting gap, not a KV-byte-math gap."
+}

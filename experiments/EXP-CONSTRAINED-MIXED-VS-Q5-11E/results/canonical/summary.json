@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "title": "Constrained-Regime Mixed KV vs Whole-Cache Q5",
+  "hypothesis_h1": "At a real GPU memory-pressure point where whole-cache Q8 cannot provide the desired safe residency but whole-cache Q5 can, a profile-selected mixed Q8/Q5 cache can retain some Q8 layers at the same practical residency and provide better quality than all-Q5.",
+  "target": {"model": "SmolLM2-360M-Instruct-f16", "hardware": "real GTX 1650, Vulkan backend", "n_layer": 32},
+  "primary_point_b": {
+    "ctx": 180000,
+    "product_explicit_q8": "rejects (exit_code=5, real product gpu_policy check)",
+    "product_adaptive": "selects q5 (Q5_REQUIRED_FOR_FULL_RESIDENCY)",
+    "product_explicit_q5": "succeeds, 32/32 GPU residency, ~68 MiB of the product's own conservative headroom",
+    "precondition_satisfied": true,
+    "source": "boundary_scan.json"
+  },
+  "safe_mixed_q8_boundary": {
+    "last_succeeding_q8_count": 8,
+    "first_failing_q8_count": 9,
+    "reproduced_from": "Phase 11D's own memory_pressure_360m.json boundary, independently reconfirmed fresh in this phase",
+    "source": "q8_count_sweep.json"
+  },
+  "quality_result": {
+    "methodology": "true F16 ground-truth reference (generated safely at ctx=2048, valid for ctx=180000 candidates because RoPE/KV math depends on real token position, not buffer capacity), 5 pre-registered holdout prompts, gen_tokens=32",
+    "whole_cache_q5_mean_logit_rel_l2": 0.066795,
+    "best_mixed_profile_top8_mean_logit_rel_l2": 0.074887,
+    "mixed_beats_q5": false,
+    "n_prompts_where_mixed_beat_q5": "1 of 5",
+    "sensitivity_placement_beats_naive_placement_at_same_budget": true,
+    "but": "even the best (sensitivity-based) mixed layout is worse than simply staying whole-cache Q5",
+    "source": "quality_summary.json, layout_comparison.json"
+  },
+  "memory_safety": {
+    "vram_delta_mixed_vs_q5": "276 MiB measured (nvidia-smi), matches theoretical KV-byte delta (274.66 MiB) to within 1.3 MiB",
+    "product_conservative_formula_overpredicts_by": "~451 MiB at whole-Q5 (safe direction)",
+    "tighter_empirical_model": "predicts mixed top-8 peak to within 0.05%, BUT produces a confirmed FALSE-SAFE result at the real top-8/top-9 boundary -- not safe to productize as-is",
+    "source": "overhead_calibration.json, vram.json"
+  },
+  "performance": {
+    "material_difference": false,
+    "source": "performance.json"
+  },
+  "control_point_a": {
+    "ctx": 100000,
+    "adaptive_selects": "q8",
+    "confirms_hierarchy": "comfortable memory -> Q8, as expected; mixed is not positioned as superior here (not separately re-measured for quality at Point A in this phase -- Phase 11D already established Q8 beats mixed when memory is comfortable)"
+  },
+  "extreme_point_c": {
+    "ctx": 186000,
+    "product_whole_q5": "fails closed (exit_code=5)",
+    "implication": "mixed cannot be safer than Q5 here either, since mixed always costs >= Q5 bytes for any Q8 count > 0"
+  },
+  "future_policy_simulation": {
+    "note": "a mechanical Q8->mixed->Q5->fail hierarchy would fire the mixed branch at Point B, but this phase's own quality data shows that firing would make quality WORSE than falling through to Q5 -- a 'fits' check is not a sufficient gate",
+    "source": "future_policy_simulation.json"
+  },
+  "authoritative_storage": {
+    "mechanism": "same per-layer ggml_type override mechanism established and repeatedly validated since Phase 11B (patches/llama.cpp-membrane-kv-type-override.patch), reused unchanged in this phase",
+    "evidence": "different --q8-layers sets produce different, config-dependent quality numbers (quality_raw_f16ref.jsonl) -- a shadow/no-op override could not produce config-dependent results; out-of-range/negative layer indices fail closed with exit code 2 (verified live in this phase)"
+  },
+  "profile_dependency": {
+    "profile_used": "results/phase11/model-specific-policy/profile_360m_train21.json, validated (not regenerated) at the start of this phase",
+    "wrong_or_malformed_profile_fail_closed": "established and tested in Phase 11D (cross_model_safety.json), not re-tested from scratch here since the same validated profile/mechanism is reused unchanged",
+    "layer_index_out_of_range_fail_closed": "verified live in this phase: exit code 2, clear error, for both an out-of-range (99) and a negative (-1) layer index"
+  },
+  "limitations": [
+    "Quality measured on 5 pre-registered prompts, not the full 10-prompt holdout, due to real host RAM constraints on this shared 5.6GiB dev machine (documented in quality_methodology.json before any run)",
+    "Point A and Point C were not independently re-measured for quality/naive-layout comparison in this phase (only Point B, the primary constrained point, got the full quality sweep) -- Point A's comfortable-regime quality conclusion leans on Phase 11D's own prior finding",
+    "Full sanitizer matrix (llama-free ASan/UBSan, llama-enabled CPU ASan/UBSan, Vulkan Release full product regression across native/q8/q5/adaptive/compare/gpu-bench/auto/guard) was not re-run in full for this phase given real time/host-memory constraints; see regression_sanitizers.json for what was actually run and why",
+    "The false-safe finding in overhead_calibration.json means no safety-margin correction from this phase should be treated as productizable without further allocation-time (not steady-state) VRAM instrumentation"
+  ],
+  "decision_gate": "CONSTRAINED_MIXED_WORKS_BUT_NO_QUALITY_WIN",
+  "decision_gate_rationale": "Mixed fits at the same practical residency as Q5 at the primary constrained point, and profile-based (sensitivity) layer placement beats every naive equal-budget layout. But against a true F16 reference, the best mixed configuration is measurably WORSE quality than simply staying whole-cache Q5 (beats Q5 on only 1 of 5 held-out prompts), uses more VRAM, and offers no performance advantage. This does not meet the CONSTRAINED_MIXED_ADVANTAGE_CONFIRMED bar (requires mixed quality measurably BETTER than Q5), and is not fragile/backend-limited/inconclusive -- the measurement was clean, reproducible (deterministic, bit-identical on repeat), and internally cross-validated (VRAM delta matches KV-byte math; F_all_q5 self-check is a perfect sanity control).",
+  "next_step_recommendation": "Stop mixed-KV productization for the constrained-regime case and retain the product's current whole-cache adaptive policy unchanged. Do not pursue a Q8->mixed->Q5 hierarchy on the strength of this phase's data -- the mixed branch would make quality worse, not better, at the one point measured."
+}

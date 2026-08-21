@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #100: cross-model safety rejection tests against membrane_profile_validate(), driven with REAL model fingerprints (parsed from the actual GGUF metadata of both SmolLM2 models earlier in this phase) and the REAL train21 rankings from the committed profile JSON files -- not just synthetic test fixtures. Verifies the profile-application safety gate fails closed on every wrong-model / malformed scenario.",
+  "fingerprints_used": {
+    "135m": {"architecture": "llama", "n_layer": 30, "n_embd": 576, "n_head": 9, "n_head_kv": 3, "n_embd_head": 64},
+    "360m": {"architecture": "llama", "n_layer": 32, "n_embd": 960, "n_head": 15, "n_head_kv": 5, "n_embd_head": 64}
+  },
+  "cases": [
+    {"label": "135_on_135_correct", "scenario": "135M profile applied to 135M model (matching fingerprint)", "expected_reason": "OK", "actual_ok": true, "actual_reason": "OK"},
+    {"label": "360_on_360_correct", "scenario": "360M profile applied to 360M model (matching fingerprint)", "expected_reason": "OK", "actual_ok": true, "actual_reason": "OK"},
+    {"label": "135_profile_on_360_model", "scenario": "135M profile applied to the real 360M model fingerprint", "expected_reason": "MISMATCH", "actual_ok": false, "actual_reason": "MISMATCH"},
+    {"label": "360_profile_on_135_model", "scenario": "360M profile applied to the real 135M model fingerprint", "expected_reason": "MISMATCH", "actual_ok": false, "actual_reason": "MISMATCH"},
+    {"label": "135_profile_wrong_arch", "scenario": "matching numeric fields, architecture string changed to gemma3", "expected_reason": "MISMATCH", "actual_ok": false, "actual_reason": "MISMATCH"},
+    {"label": "135_profile_wrong_headkv", "scenario": "every field matches except n_head_kv (3 vs 4)", "expected_reason": "MISMATCH", "actual_ok": false, "actual_reason": "MISMATCH"},
+    {"label": "135_profile_truncated_rank", "scenario": "profile fingerprint claims n_layer=30 but the ranking array supplied has only 29 entries (internal inconsistency)", "expected_reason": "INVALID", "actual_ok": false, "actual_reason": "INVALID"},
+    {"label": "135_profile_duplicate_layer", "scenario": "30-entry ranking with layer 6 appearing twice and layer 7 missing (not a valid permutation)", "expected_reason": "INVALID", "actual_ok": false, "actual_reason": "INVALID"}
+  ],
+  "all_cases_matched_expected_reason": true,
+  "conclusion": "Every wrong-model, wrong-fingerprint-field, and malformed-ranking scenario tested against real model fingerprints and real profile rankings fails closed with the correct machine-readable reason code (MISMATCH or INVALID as appropriate). No case returned ok=1 for an unsafe application."
+}

@@ -98,8 +98,28 @@ not promoted) and
 (Q5_1 clears the quality bar Q4 missed — `Q5_PRODUCT_CANDIDATE`,
 shipped as `--kv q5` via [kadireren7/membrane#19](https://github.com/kadireren7/membrane/pull/19)).
 
-A third,
-[`EXP-KV-RAM-VRAM-TIERING-12A`](experiments/EXP-KV-RAM-VRAM-TIERING-12A/README.md),
+A four-phase chain —
+[`EXP-MIXED-Q8-Q5-FEASIBILITY-11B`](experiments/EXP-MIXED-Q8-Q5-FEASIBILITY-11B/README.md)
+through
+[`EXP-CONSTRAINED-MIXED-VS-Q5-11E`](experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/README.md)
+(11B → 11C → 11D → 11E) — asked whether going *finer* than Q5's
+whole-cache choice, to per-layer mixed Q8/Q5 KV, was worth the added
+complexity. It worked mechanically at every phase (11B), a
+sensitivity-based layer-selection policy generalized well enough to
+beat naive baselines on held-out prompts (11C), a real per-model policy
+pipeline was built and measured honestly against the product's actual
+shipped whole-cache adaptive policy — and lost in the regime that
+matters most (11D, `MODEL_SPECIFIC_POLICY_WORKS_BUT_NO_ADAPTIVE_ADVANTAGE`)
+— and, at the one real boundary where mixed KV had its best case (where
+adaptive is forced down to whole-cache Q5), it was still measurably
+worse quality than simply staying Q5 (11E,
+`CONSTRAINED_MIXED_WORKS_BUT_NO_QUALITY_WIN`). No phase in this chain
+was productized; the chain's value is the negative result itself —
+it justified *not* building a Q8→mixed→Q5 hierarchy on top of the
+shipped adaptive policy ([PR #20](https://github.com/kadireren7/membrane/pull/20)).
+
+Separately,
+[`EXP-KV-RAM-VRAM-TIERING-12A`](experiments/EXP-KV-RAM-VRAM-TIERING-12A/README.md)
 preserves Phase 12A: a real, working GPU↔host KV copy mechanism was
 proven, but true KV-only placement (independent of weight placement)
 was proven *not* achievable with the public API available at the time

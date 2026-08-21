@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 2: live hardware/model/backend state, recorded fresh at the start of Phase 11E, before any boundary scan.",
+  "gpu": {
+    "adapter_name": "NVIDIA GeForce GTX 1650",
+    "vulkan_device_index_in_llama_cpp": "Vulkan1 (GPU1 in vulkaninfo enumeration -- GPU0 is an integrated AMD Radeon Graphics (RADV RENOIR), GPU2 is llvmpipe CPU fallback; llama.cpp's default device selection resolves to the discrete NVIDIA GPU as 'Vulkan1', consistent with all prior Phase 11B/11C/11D logs)",
+    "driver_version": "580.159.03",
+    "cuda_version_reported": "13.0",
+    "total_vram_mib": 4096,
+    "reserved_vram_mib": 380,
+    "free_vram_mib_at_snapshot": 3716,
+    "used_vram_mib_at_snapshot": 2,
+    "bar1_total_mib": 256,
+    "vulkan_api_version": "1.4.318 (device-reported)",
+    "vulkan_instance_version": "1.3.280"
+  },
+  "host": {
+    "total_ram_gib": 5.6,
+    "note": "shared, memory-constrained dev host -- used consistently for all prior Phase 11B/C/D work; see dev-machine-memory-constraints note"
+  },
+  "model": {
+    "identity": "SmolLM2-360M-Instruct-f16",
+    "architecture": "llama",
+    "n_layer": 32,
+    "n_embd": 960,
+    "n_head": 15,
+    "n_head_kv": 5,
+    "n_embd_head": 64,
+    "native_context_length_metadata": 8192,
+    "note": "target contexts in this phase (ctx ~131072-200000) exceed the model's own trained context_length metadata -- this is intentional, matching Phase 11B/11C/11D's own precedent of using KV-cache-capacity contexts far beyond native trained length purely to reach the real memory-pressure boundary, not to claim coherent long-context generation quality at that length"
+  },
+  "profile_validation": {
+    "profile_file": "results/phase11/model-specific-policy/profile_360m_train21.json",
+    "fingerprint_matches_fresh_gguf_read": true,
+    "ranking_is_full_permutation_of_32_layers": true,
+    "top8_q8_layers": [1, 13, 18, 19, 23, 24, 25, 30],
+    "top9_q8_layers": [1, 13, 18, 19, 21, 23, 24, 25, 30],
+    "action": "profile validated successfully -- NOT regenerated, per Section 2 instruction (\"Do not regenerate the ranking unless profile validation fails\")"
+  }
+}

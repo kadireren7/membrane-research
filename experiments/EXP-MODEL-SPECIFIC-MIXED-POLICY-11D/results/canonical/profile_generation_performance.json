@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #106: profile-generation performance, measured, not assumed. Two distinct costs are reported separately because they are NOT the same thing -- collapsing them would misleadingly call the whole pipeline 'cheap'.",
+  "reanalysis_only_cost": {
+    "description": "scripts/build_model_profile.py: pure reanalysis of Phase 11C's ALREADY-EXISTING raw ablation JSONL (rankings.json), zero new inference. This is the only step that is genuinely cheap.",
+    "method": "5 repeated runs, timed via the standard time(1) utility (wall clock + max RSS), both models built per run",
+    "wall_seconds": [0.23, 0.08, 0.10, 0.10, 0.11],
+    "max_rss_kb": [17656, 18336, 18596, 18324, 18380],
+    "mean_wall_seconds": 0.124,
+    "conclusion": "genuinely cheap: well under 1 second, well under 20MB RSS, for both models combined"
+  },
+  "raw_ablation_sweep_cost": {
+    "description": "The cost this reanalysis is NOT counting: producing the raw per-layer single-ablation data in the first place (what Phase 11C actually ran, and what a brand-new model would require before any profile could be built at all -- this is the real, non-cheap cost of a model-specific profile).",
+    "phase11c_original_sweep_not_separately_timed": "Phase 11C's original 135M/360M raw ablation sweeps (32 configs x 31 prompts each) were not instrumented with per-run wall-clock logging at the time, so their exact historical duration cannot be reported here.",
+    "current_measurement_basis": "Task #98's live 360M held-out naive-layout sweep (this same phase, same host, same build-cpu-rc1 binary, CPU-only, ctx=2048, gen_tokens=32), which is directly comparable in per-run shape (one membrane-kv-mixed-layer invocation per config, 10 prompts per invocation)",
+    "measured_360m_rate": "5 completed runs in 235 elapsed seconds = ~47s per 10-prompt run",
+    "extrapolation_to_a_full_31_prompt_32_config_ablation_sweep": {
+      "method": "47s/run * (31 prompts / 10 prompts) * 32 configs, linear in prompt count -- an ESTIMATE, not a direct measurement",
+      "estimated_seconds": 4662,
+      "estimated_minutes": 77.7
+    },
+    "caveat": "This is an order-of-magnitude estimate extrapolated from a same-session, same-host, comparable-shape measurement -- not a re-run of the actual full ablation sweep. It should be read as 'on the order of an hour on this CPU-only host for one model', not as a precise figure."
+  },
+  "conclusion": "The reanalysis step alone (what most of Task #95/#96 actually ran) is genuinely sub-second and cheap. The step that makes a NEW model's profile possible in the first place -- the raw per-layer ablation sweep -- is on the order of an hour of CPU-only inference per model on this host, and must not be described as cheap or ignored when scoping how expensive it is to onboard a new model to this workflow."
+}

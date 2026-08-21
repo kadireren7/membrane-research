@@ -1,0 +1,1119 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2033fb4..70c013c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -228,6 +228,17 @@ target_link_libraries(membrane_model_profile PUBLIC
+ target_include_directories(membrane_model_profile PUBLIC
+   tools/membrane-kv-mixed-layer)
+ 
++# Phase 11E: Q8 -> mixed -> Q5 -> fail-closed hierarchy simulation and
++# Q8-layer-count boundary-search arithmetic, RESEARCH ONLY (experiment/
++# constrained-mixed-vs-q5 branch) -- llama-free, standalone (no
++# dependency on the other membrane_* research libraries above). Never
++# linked into membrane-run/membrane-llama-run; does not modify or
++# depend on tools/membrane-run/adaptive_kv_policy.*.
++add_library(membrane_constrained_policy_sim STATIC
++  tools/membrane-kv-mixed-layer/constrained_policy_sim.c)
++target_include_directories(membrane_constrained_policy_sim PUBLIC
++  tools/membrane-kv-mixed-layer)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -639,6 +650,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_model_profile COMMAND test_model_profile)
+ 
++  add_executable(test_constrained_policy_sim
++    tools/membrane-kv-mixed-layer/test_constrained_policy_sim.c)
++  target_link_libraries(test_constrained_policy_sim PRIVATE
++    membrane_constrained_policy_sim)
++  target_include_directories(test_constrained_policy_sim PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_constrained_policy_sim COMMAND test_constrained_policy_sim)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 6fdb1e8..125a71f 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -2083,6 +2083,238 @@ def _c96():
+ 	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
+ 
+ 
++V11E_DIR = REPO_ROOT / "results" / "phase11" / "constrained-mixed-vs-q5"
++_V11E_CACHE = {}
++
++
++def _load_v11e(name):
++	key = name
++	if key not in _V11E_CACHE:
++		path = V11E_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V11E_CACHE[key] = rows
++		else:
++			_V11E_CACHE[key] = json.loads(path.read_text())
++	return _V11E_CACHE[key]
++
++
++@check("Phase 11E: boundary_scan.json's forced-Q5 precondition at "
++	"PRIMARY POINT B is real -- explicit Q8 rejects (exit_code=5), "
++	"product adaptive resolves to q5, explicit Q5 succeeds at full "
++	"(32/32) residency")
++def _c97():
++	bs = _load_v11e("boundary_scan.json")
++	b = bs.get("point_b_primary_constrained", {})
++	bad = []
++	if not b.get("precondition_satisfied"):
++		bad.append("precondition_satisfied is not true")
++	if b.get("explicit_q8", {}).get("exit_code") != 5:
++		bad.append(f"explicit_q8 exit_code={b.get('explicit_q8', {}).get('exit_code')!r}, expected 5")
++	if b.get("adaptive", {}).get("selected_kv") != "q5":
++		bad.append(f"adaptive selected_kv={b.get('adaptive', {}).get('selected_kv')!r}, expected q5")
++	if b.get("explicit_q5", {}).get("gpu_layers_selected") != 32:
++		bad.append(f"explicit_q5 gpu_layers_selected={b.get('explicit_q5', {}).get('gpu_layers_selected')!r}, expected 32")
++	return len(bad) == 0, "; ".join(bad) if bad else "forced-Q5 precondition confirmed real at PRIMARY POINT B"
++
++
++@check("Phase 11E: q8_count_sweep.json's safe-boundary claim (top-8 "
++	"succeeds, top-9 fails) is exactly reproducible from "
++	"raw_q8_budget_search_180k.jsonl")
++def _c98():
++	sweep = _load_v11e("q8_count_sweep.json")
++	raw = _load_v11e("raw_q8_budget_search_180k.jsonl")
++	succeeded = {r["q8_count"]: r["raw"]["context_creation_succeeded"] for r in raw}
++	ok_counts = sorted(c for c, ok in succeeded.items() if ok)
++	fail_counts = sorted(c for c, ok in succeeded.items() if not ok)
++	recomputed_last_ok = max(ok_counts) if ok_counts else -1
++	recomputed_first_fail = min(fail_counts) if fail_counts else None
++	claimed = sweep.get("boundary", {})
++	bad = []
++	if recomputed_last_ok != claimed.get("last_succeeding_q8_count"):
++		bad.append(f"recomputed last_succeeding={recomputed_last_ok} != claimed {claimed.get('last_succeeding_q8_count')}")
++	if recomputed_first_fail != claimed.get("first_failing_q8_count"):
++		bad.append(f"recomputed first_failing={recomputed_first_fail} != claimed {claimed.get('first_failing_q8_count')}")
++	if any(c > recomputed_last_ok for c in ok_counts if c < (recomputed_first_fail or 1 << 30)):
++		pass  # monotonic within tested range implicitly checked by the two comparisons above
++	return len(bad) == 0, "; ".join(bad) if bad else f"boundary (last_ok={recomputed_last_ok}, first_fail={recomputed_first_fail}) reproduces exactly from raw data"
++
++
++@check("Phase 11E: quality_summary.json's primary_h1_test mean_rel_l2 "
++	"figures for whole-cache-Q5 (F_all_q5) and profile-mixed "
++	"(A_profile_sensitivity) are recomputed exactly from "
++	"quality_raw_f16ref.jsonl, and mixed_beats_q5_on_mean_rel_l2 "
++	"matches the real inequality between them")
++def _c99():
++	qs = _load_v11e("quality_summary.json")
++	raw = _load_v11e("quality_raw_f16ref.jsonl")
++	by_cfg = {}
++	for r in raw:
++		if r.get("stage") == "compare":
++			by_cfg.setdefault(r["config"], []).append(r["raw"]["logit_rel_l2"])
++	bad = []
++	for cfg in ("F_all_q5", "A_profile_sensitivity"):
++		vals = by_cfg.get(cfg, [])
++		if not vals:
++			bad.append(f"{cfg}: no raw rows found")
++			continue
++		recomputed = sum(vals) / len(vals)
++		claimed = qs["summary_by_config"][cfg]["mean_logit_rel_l2"]
++		if abs(recomputed - claimed) > 1e-9:
++			bad.append(f"{cfg}: recomputed mean_logit_rel_l2={recomputed} != claimed {claimed}")
++	q5_mean = qs["summary_by_config"]["F_all_q5"]["mean_logit_rel_l2"]
++	mixed_mean = qs["summary_by_config"]["A_profile_sensitivity"]["mean_logit_rel_l2"]
++	real_inequality = mixed_mean < q5_mean
++	claimed_flag = qs["primary_h1_test"]["mixed_beats_q5_on_mean_rel_l2"]
++	if real_inequality != claimed_flag:
++		bad.append(f"mixed_beats_q5_on_mean_rel_l2={claimed_flag} but mixed_mean={mixed_mean} vs q5_mean={q5_mean} gives {real_inequality}")
++	if claimed_flag is not False:
++		bad.append(f"expected mixed_beats_q5_on_mean_rel_l2=False (the measured, disclosed finding), got {claimed_flag}")
++	return len(bad) == 0, "; ".join(bad) if bad else "H1 quality numbers and beats-Q5 flag recomputed exactly, matches the disclosed no-win finding"
++
++
++@check("Phase 11E: layout_comparison.json's sensitivity_beats_all_naive "
++	"claim is recomputed exactly from quality_summary.json's own "
++	"per-config means (profile-sensitivity mean rel_l2 strictly below "
++	"every naive layout's mean rel_l2)")
++def _c100():
++	lc = _load_v11e("layout_comparison.json")
++	naive = lc.get("naive_layouts_mean_rel_l2", {})
++	sens = lc.get("profile_sensitivity_mean_rel_l2")
++	bad = []
++	if not naive or sens is None:
++		return False, "missing profile_sensitivity_mean_rel_l2 or naive_layouts_mean_rel_l2"
++	recomputed_best_naive = min(naive.values())
++	if abs(recomputed_best_naive - lc.get("best_naive_mean_rel_l2", -1)) > 1e-9:
++		bad.append(f"recomputed best_naive={recomputed_best_naive} != claimed {lc.get('best_naive_mean_rel_l2')}")
++	recomputed_flag = sens < recomputed_best_naive
++	if recomputed_flag != lc.get("sensitivity_beats_all_naive"):
++		bad.append(f"recomputed sensitivity_beats_all_naive={recomputed_flag} != claimed {lc.get('sensitivity_beats_all_naive')}")
++	return len(bad) == 0, "; ".join(bad) if bad else "sensitivity-vs-naive claim recomputed exactly"
++
++
++@check("Phase 11E: Q5 and mixed are compared at the SAME GPU residency "
++	"at PRIMARY POINT B -- boundary_scan.json's explicit_q5 and "
++	"q8_count_sweep.json's q8_count=8 entry both report/imply full "
++	"32/32 residency, never a partial-vs-full mismatch")
++def _c101():
++	bs = _load_v11e("boundary_scan.json")
++	sweep = _load_v11e("q8_count_sweep.json")
++	bad = []
++	if bs["point_b_primary_constrained"]["explicit_q5"]["gpu_layers_selected"] != 32:
++		bad.append("explicit_q5 gpu_layers_selected != 32")
++	count8 = next((r for r in sweep["results"] if r["q8_count"] == 8), None)
++	if count8 is None or not count8.get("context_creation_succeeded"):
++		bad.append("q8_count=8 entry missing or did not succeed")
++	sweep_text = json.dumps(sweep)
++	if "gpu_layers_requested" not in sweep_text and "--gpu-layers all" not in sweep_text:
++		bad.append("sweep artifact does not document --gpu-layers all anywhere (matched-residency requirement undocumented)")
++	return len(bad) == 0, "; ".join(bad) if bad else "same (full 32/32) residency confirmed for both Q5 and mixed top-8 at PRIMARY POINT B"
++
++
++@check("Phase 11E: overhead_calibration.json's prediction_error fields "
++	"are recomputed exactly from its own raw_measured_components and "
++	"prediction_models_compared inputs")
++def _c102():
++	oc = _load_v11e("overhead_calibration.json")
++	bad = []
++	pcf = oc["prediction_models_compared"]["product_conservative_formula"]
++	recomputed_err = abs(pcf["whole_q5_predicted_mib"] - pcf["whole_q5_observed_external_peak_mib"])
++	if abs(recomputed_err - pcf["whole_q5_prediction_error_mib"]) > 0.5:
++		bad.append(f"product formula: recomputed error={recomputed_err} != claimed {pcf['whole_q5_prediction_error_mib']}")
++	tem = oc["prediction_models_compared"]["tighter_empirical_model"]
++	recomputed_err2 = abs(tem["mixed_top8_predicted_mib"] - tem["mixed_top8_observed_external_peak_mib"])
++	if abs(recomputed_err2 - tem["mixed_top8_prediction_error_mib"]) > 0.5:
++		bad.append(f"tighter model: recomputed error={recomputed_err2} != claimed {tem['mixed_top8_prediction_error_mib']}")
++	fsc = oc["false_safe_boundary_check"]
++	if "FALSE SAFE" not in fsc.get("verdict", ""):
++		bad.append("false_safe_boundary_check.verdict does not disclose the false-safe finding")
++	return len(bad) == 0, "; ".join(bad) if bad else "prediction-error arithmetic recomputed exactly; false-safe finding disclosed"
++
++
++@check("Phase 11E: no unsupported product claims -- '--kv mixed' never "
++	"documented as a real/shipped flag without disclaiming it, no "
++	"undisclaimed 'merged' claim, product CLI (tools/membrane-run/"
++	"product_cli.cpp) unmodified by this phase and contains no "
++	"'mixed' reference")
++def _c103():
++	bad = []
++	for path in sorted(V11E_DIR.glob("*.json")):
++		text = path.read_text()
++		if re.search(r"--kv\s+mixed\b", text) and not re.search(
++				r"does not exist as a public flag|not a real, shipped flag|no --kv mixed\b|no product CLI exposure|never expose|research-only|research only", text, re.IGNORECASE):
++			bad.append(f"{path.name}: documents '--kv mixed' without disclaiming it as unshipped")
++		if re.search(r"\bmerged\b", text, re.IGNORECASE) and not re.search(
++				r"not merged|never merged|do not merge", text, re.IGNORECASE):
++			bad.append(f"{path.name}: mentions 'merged' without an explicit not-merged disclaimer")
++	product_cli = REPO_ROOT / "tools" / "membrane-run" / "product_cli.cpp"
++	if product_cli.exists() and "mixed" in product_cli.read_text().lower():
++		bad.append("tools/membrane-run/product_cli.cpp references 'mixed' -- forbidden by this phase")
++	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported product claims, product CLI untouched"
++
++
++@check("Phase 11E: no absolute filesystem paths anywhere in any "
++	"constrained-mixed-vs-q5 artifact file (JSON or JSONL)")
++def _c104():
++	hits = []
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	for path in sorted(V11E_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		text = path.read_text()
++		found = [m for m in pattern.findall(text) if not m.startswith(("/proc", "/tmp", "/tools", "/results"))]
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all constrained-mixed-vs-q5 artifact files"
++
++
++@check("Phase 11E: manifest.json exists, valid JSON, schema_version 1, "
++	"lists every actual .json/.jsonl file in the directory and no "
++	"others")
++def _c105():
++	if not (V11E_DIR / "manifest.json").exists():
++		return False, f"{V11E_DIR}/manifest.json does not exist"
++	m = _load_v11e("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V11E_DIR.glob("*") if p.suffix in (".json", ".jsonl")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
++@check("Phase 11E: summary.json's decision_gate is one of the five "
++	"valid values and matches the measured mixed_beats_q5 finding "
++	"(no-win/false when mixed did not beat Q5)")
++def _c106():
++	s = _load_v11e("summary.json")
++	qs = _load_v11e("quality_summary.json")
++	valid = {
++		"CONSTRAINED_MIXED_ADVANTAGE_CONFIRMED",
++		"CONSTRAINED_MIXED_WORKS_BUT_NO_QUALITY_WIN",
++		"CONSTRAINED_MIXED_TOO_FRAGILE",
++		"CONSTRAINED_MIXED_BACKEND_LIMITED",
++		"CONSTRAINED_MIXED_INCONCLUSIVE",
++	}
++	bad = []
++	gate = s.get("decision_gate")
++	if gate not in valid:
++		bad.append(f"decision_gate={gate!r} not one of the five valid values")
++	mixed_beats_q5 = qs["primary_h1_test"]["mixed_beats_q5_on_mean_rel_l2"]
++	if mixed_beats_q5 and gate != "CONSTRAINED_MIXED_ADVANTAGE_CONFIRMED":
++		bad.append(f"quality data shows mixed beat Q5 but decision_gate={gate!r}")
++	if not mixed_beats_q5 and gate == "CONSTRAINED_MIXED_ADVANTAGE_CONFIRMED":
++		bad.append("decision_gate claims ADVANTAGE_CONFIRMED but quality data shows mixed did not beat Q5")
++	return len(bad) == 0, "; ".join(bad) if bad else f"decision_gate={gate!r} is valid and consistent with the measured quality finding"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -2110,6 +2342,7 @@ def main() -> int:
+ 			_c74, _c75, _c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83,
+ 			_c84, _c85, _c86, _c87,
+ 			_c88, _c89, _c90, _c91, _c92, _c93, _c94, _c95, _c96,
++			_c97, _c98, _c99, _c100, _c101, _c102, _c103, _c104, _c105, _c106,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-mixed-layer/CMakeLists.txt b/tools/membrane-kv-mixed-layer/CMakeLists.txt
+index 9f7cbe5..004f77a 100644
+--- a/tools/membrane-kv-mixed-layer/CMakeLists.txt
++++ b/tools/membrane-kv-mixed-layer/CMakeLists.txt
+@@ -7,3 +7,16 @@ target_link_libraries(membrane-kv-mixed-layer PRIVATE membrane_runtime_core
+ target_include_directories(membrane-kv-mixed-layer PRIVATE
+   ${CMAKE_SOURCE_DIR}/tools/membrane-llama-runtime
+   ${CMAKE_SOURCE_DIR}/tools/membrane-kv-mixed-layer)
++
++# Phase 11E, Section 9: sequential (never-two-contexts) dump/compare
++# tool for quality comparisons at memory-pressure points where even a
++# single F16 reference context cannot safely fit. Research-only, same
++# scope/branch restrictions as membrane-kv-mixed-layer above.
++add_executable(membrane-kv-sequential-compare sequential_compare.cpp)
++set_target_properties(membrane-kv-sequential-compare PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-sequential-compare PRIVATE
++  membrane_runtime_core llama)
++target_include_directories(membrane-kv-sequential-compare PRIVATE
++  ${CMAKE_SOURCE_DIR}/tools/membrane-llama-runtime)
+diff --git a/tools/membrane-kv-mixed-layer/constrained_policy_sim.c b/tools/membrane-kv-mixed-layer/constrained_policy_sim.c
+new file mode 100644
+index 0000000..a1965f2
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/constrained_policy_sim.c
+@@ -0,0 +1,50 @@
++#include <stddef.h>
++
++#include "constrained_policy_sim.h"
++
++int	membrane_constrained_policy_select(int q8_full_resides,
++		int profile_available, int mixed_safe, int q5_safe)
++{
++	if (q8_full_resides)
++		return (MEMBRANE_CONSTRAINED_MODE_Q8);
++	if (profile_available && mixed_safe)
++		return (MEMBRANE_CONSTRAINED_MODE_MIXED);
++	if (q5_safe)
++		return (MEMBRANE_CONSTRAINED_MODE_Q5);
++	return (MEMBRANE_CONSTRAINED_MODE_FAIL_CLOSED);
++}
++
++int	membrane_safe_q8_count_boundary(const int32_t *q8_counts,
++		const int *succeeded, int n_entries, int32_t *out_boundary)
++{
++	int		i;
++	int		j;
++	int32_t	best;
++	int		have_best;
++
++	*out_boundary = -1;
++	if (n_entries <= 0 || q8_counts == NULL || succeeded == NULL)
++		return (0);
++	have_best = 0;
++	best = -1;
++	for (i = 0; i < n_entries; i++)
++	{
++		if (!succeeded[i])
++			continue;
++		for (j = 0; j < n_entries; j++)
++			if (q8_counts[j] < q8_counts[i] && !succeeded[j])
++				return (0);
++		if (!have_best || q8_counts[i] > best)
++		{
++			best = q8_counts[i];
++			have_best = 1;
++		}
++	}
++	if (!have_best)
++	{
++		*out_boundary = -1;
++		return (1);
++	}
++	*out_boundary = best;
++	return (1);
++}
+diff --git a/tools/membrane-kv-mixed-layer/constrained_policy_sim.h b/tools/membrane-kv-mixed-layer/constrained_policy_sim.h
+new file mode 100644
+index 0000000..a844ab3
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/constrained_policy_sim.h
+@@ -0,0 +1,57 @@
++#ifndef MEMBRANE_KV_CONSTRAINED_POLICY_SIM_H
++# define MEMBRANE_KV_CONSTRAINED_POLICY_SIM_H
++
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 11E, Section 21/23: llama-free (no ggml/llama header) pure
++ * arithmetic for the OFFLINE, research-only Q8 -> mixed -> Q5 -> fail
++ * hierarchy simulation and the Q8-layer-count boundary search this
++ * phase used. RESEARCH ONLY -- never linked into membrane-run;
++ * product --kv adaptive (tools/membrane-run/adaptive_kv_policy.*) is
++ * untouched by this phase and this module.
++ */
++
++# define MEMBRANE_CONSTRAINED_MODE_Q8			0
++# define MEMBRANE_CONSTRAINED_MODE_MIXED		1
++# define MEMBRANE_CONSTRAINED_MODE_Q5			2
++# define MEMBRANE_CONSTRAINED_MODE_FAIL_CLOSED	3
++
++/*
++ * Mirrors results/phase11/constrained-mixed-vs-q5/future_policy_
++ * simulation.json's policy_pseudocode exactly:
++ *   if Q8 full-resides: Q8
++ *   elif mixed profile available and safe: mixed
++ *   elif Q5 safe: Q5
++ *   else: fail closed
++ * profile_available must be 0 whenever the caller has no validated
++ * profile for this model -- mixed is never selected without one
++ * (Section 22: missing/wrong profile fails closed, never silently
++ * falls back to a naive layout).
++ */
++int	membrane_constrained_policy_select(int q8_full_resides,
++		int profile_available, int mixed_safe, int q5_safe);
++
++/*
++ * Section 5's boundary search, generalized: given a list of
++ * (q8_count, succeeded) pairs NOT necessarily sorted or contiguous,
++ * finds the largest q8_count with succeeded=1 such that every
++ * smaller tested q8_count in the list also succeeded (a monotonic
++ * safe boundary). Returns 1 and sets *out_boundary if the list is
++ * well-formed and monotonic (once a count fails, no larger tested
++ * count is recorded as succeeding); returns 0 (fails closed, *out_
++ * boundary set to -1) if the data is non-monotonic (a real anomaly
++ * worth flagging, not silently averaged over) or n_entries <= 0.
++ */
++int	membrane_safe_q8_count_boundary(const int32_t *q8_counts,
++		const int *succeeded, int n_entries, int32_t *out_boundary);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-mixed-layer/sequential_compare.cpp b/tools/membrane-kv-mixed-layer/sequential_compare.cpp
+new file mode 100644
+index 0000000..a806ffb
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/sequential_compare.cpp
+@@ -0,0 +1,547 @@
++/*
++ * Phase 11E, Section 9: sequential (never-two-contexts) quality
++ * comparison for regimes where even a single F16 reference context
++ * cannot safely fit (Point B's ctx=180000 -- an F16 KV cache there
++ * would need roughly 2x Q8's bytes, which already fails). The
++ * existing membrane-kv-mixed-layer probe holds ref_ctx (F16) and
++ * cand_ctx open SIMULTANEOUSLY in one process -- safe at Phase 11B/
++ * 11C's smaller test contexts, unsafe here.
++ *
++ * This tool splits that into two SEPARATE process invocations, never
++ * holding more than one context at a time:
++ *
++ *   --mode dump: creates ONE context (a whole-cache reference config,
++ *     e.g. Q5_1 -- the real product fallback this phase is measuring
++ *     against, NOT F16/Q8 which cannot fit at Point B), free-runs
++ *     generation, writes its own tokens + per-step logits to a file,
++ *     exits (context freed before this process even exits).
++ *
++ *   --mode compare: creates ONE context (the candidate -- a mixed
++ *     Q8/Q5 layer map, or another whole-cache config for a sanity
++ *     self-check), teacher-forces over the DUMPED reference's own
++ *     token sequence, and reports the same top1_preservation/
++ *     logit_rel_l2/delta_nll trio every other MEMBRANE Q8/Q5 tool
++ *     reports -- comparing candidate's logits against the dumped
++ *     reference's logits at each position, plus a free-running
++ *     candidate pass for genuine (unforced) token_identity/
++ *     first_divergence, matching the existing probe's own
++ *     methodology exactly, just without ever needing two live
++ *     contexts.
++ *
++ * This is NOT a claim of a Q8/F16 "ground truth" reference -- the
++ * reference here is explicitly whichever whole-cache config --mode
++ * dump was run with (Q5_1 for this phase's primary comparison), and
++ * every artifact that consumes this tool's output must say so.
++ */
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#include "llama.h"
++#include "runtime_core.h"
++
++static int	die(const char *msg)
++{
++	fprintf(stderr, "membrane-kv-sequential-compare: %s\n", msg);
++	return (0);
++}
++
++static std::string	read_file(const char *path)
++{
++	FILE		*f;
++	std::string	s;
++	char		buf[4096];
++	size_t		n;
++
++	f = fopen(path, "rb");
++	if (f == NULL)
++		return (s);
++	while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
++		s.append(buf, n);
++	fclose(f);
++	return (s);
++}
++
++static bool	tokenize_prompt(const llama_vocab *vocab, const std::string &text,
++				std::vector<llama_token> *out)
++{
++	int	n;
++
++	out->resize(text.size() + 8);
++	n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
++			out->data(), (int32_t)out->size(), true, false);
++	if (n < 0)
++		return (die("tokenization failed"), false);
++	out->resize(n);
++	return (true);
++}
++
++static ggml_type	layer_map_cb(int32_t il, bool is_v, void *user_data)
++{
++	std::vector<ggml_type>	*map;
++
++	(void)is_v;
++	map = (std::vector<ggml_type> *)user_data;
++	if (il < 0 || (size_t)il >= map->size())
++		return (GGML_TYPE_F16);
++	return ((*map)[(size_t)il]);
++}
++
++static llama_context	*make_context(llama_model *model, int n_ctx,
++						ggml_type type_k, ggml_type type_v,
++						ggml_type (*override_cb)(int32_t, bool, void *),
++						void *override_ud)
++{
++	llama_context_params	cp;
++
++	cp = llama_context_default_params();
++	cp.n_ctx = (uint32_t)n_ctx;
++	cp.n_batch = 256;
++	cp.n_threads = 4;
++	cp.n_threads_batch = 4;
++	cp.type_k = type_k;
++	cp.type_v = type_v;
++	cp.no_perf = true;
++	cp.kv_type_override = override_cb;
++	cp.kv_type_override_ud = override_ud;
++	if (type_k != GGML_TYPE_F16 || type_v != GGML_TYPE_F16
++			|| override_cb != NULL)
++		cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
++	return (llama_init_from_model(model, cp));
++}
++
++static bool	decode_prompt(llama_context *ctx,
++				const std::vector<llama_token> &tokens, int n_batch)
++{
++	size_t	off;
++	size_t	n;
++
++	off = 0;
++	while (off < tokens.size())
++	{
++		n = tokens.size() - off;
++		if (n > (size_t)n_batch)
++			n = (size_t)n_batch;
++		if (llama_decode(ctx,
++				llama_batch_get_one((llama_token *)tokens.data() + off,
++					(int32_t)n)) != 0)
++			return (die("llama_decode (prompt) failed"), false);
++		off += n;
++	}
++	return (true);
++}
++
++static int	argmax(const float *v, int n)
++{
++	int	best;
++	int	i;
++
++	best = 0;
++	for (i = 1; i < n; i++)
++		if (v[i] > v[best])
++			best = i;
++	return (best);
++}
++
++typedef struct s_pass_result
++{
++	std::vector<llama_token>			tokens;
++	std::vector<std::vector<float>>	logits;
++}	pass_result_t;
++
++static bool	run_gen(llama_context *ctx, const llama_vocab *vocab,
++				int gen_steps, const std::vector<llama_token> *forced,
++				pass_result_t *out)
++{
++	llama_token	tok;
++	const float	*logits;
++	int32_t		n_vocab;
++	int			i;
++
++	n_vocab = llama_vocab_n_tokens(vocab);
++	i = 0;
++	while (i < gen_steps)
++	{
++		logits = llama_get_logits_ith(ctx, -1);
++		if (logits == NULL)
++			return (die("llama_get_logits_ith failed"), false);
++		out->logits.emplace_back(logits, logits + n_vocab);
++		if (forced != NULL && i < (int)forced->size())
++			tok = (*forced)[i];
++		else
++			tok = argmax(logits, n_vocab);
++		out->tokens.push_back(tok);
++		if (llama_decode(ctx, llama_batch_get_one(&tok, 1)) != 0)
++			return (die("llama_decode (gen) failed"), false);
++		i++;
++	}
++	return (true);
++}
++
++/* Dump file format (all little-endian, native host byte order -- this
++ * tool only ever reads what it itself wrote, on the same host):
++ *   int32 n_vocab
++ *   int32 n_prompt_tokens
++ *   int32 n_gen_tokens
++ *   int32[n_prompt_tokens] prompt_tokens
++ *   int32[n_gen_tokens]    gen_tokens (the reference's own free-run choices)
++ *   float[n_gen_tokens * n_vocab] gen_logits (row-major, one row per step)
++ */
++static bool	write_dump(const char *path, const std::vector<llama_token> &prompt_tokens,
++				const pass_result_t &free_pass, int32_t n_vocab)
++{
++	FILE	*f;
++	int32_t	np;
++	int32_t	ng;
++
++	f = fopen(path, "wb");
++	if (f == NULL)
++		return (die("cannot open dump file for writing"), false);
++	np = (int32_t)prompt_tokens.size();
++	ng = (int32_t)free_pass.tokens.size();
++	fwrite(&n_vocab, sizeof(int32_t), 1, f);
++	fwrite(&np, sizeof(int32_t), 1, f);
++	fwrite(&ng, sizeof(int32_t), 1, f);
++	fwrite(prompt_tokens.data(), sizeof(llama_token), (size_t)np, f);
++	fwrite(free_pass.tokens.data(), sizeof(llama_token), (size_t)ng, f);
++	for (int32_t i = 0; i < ng; i++)
++		fwrite(free_pass.logits[(size_t)i].data(), sizeof(float),
++			(size_t)n_vocab, f);
++	fclose(f);
++	return (true);
++}
++
++typedef struct s_dump_data
++{
++	int32_t							n_vocab;
++	std::vector<llama_token>		prompt_tokens;
++	std::vector<llama_token>		gen_tokens;
++	std::vector<std::vector<float>>	gen_logits;
++}	dump_data_t;
++
++static bool	read_dump(const char *path, dump_data_t *out)
++{
++	FILE	*f;
++	int32_t	np;
++	int32_t	ng;
++
++	f = fopen(path, "rb");
++	if (f == NULL)
++		return (die("cannot open dump file for reading"), false);
++	if (fread(&out->n_vocab, sizeof(int32_t), 1, f) != 1
++			|| fread(&np, sizeof(int32_t), 1, f) != 1
++			|| fread(&ng, sizeof(int32_t), 1, f) != 1)
++		return (fclose(f), die("dump file truncated (header)"), false);
++	out->prompt_tokens.resize((size_t)np);
++	out->gen_tokens.resize((size_t)ng);
++	if (fread(out->prompt_tokens.data(), sizeof(llama_token), (size_t)np, f)
++				!= (size_t)np
++			|| fread(out->gen_tokens.data(), sizeof(llama_token), (size_t)ng, f)
++				!= (size_t)ng)
++		return (fclose(f), die("dump file truncated (tokens)"), false);
++	out->gen_logits.resize((size_t)ng);
++	for (int32_t i = 0; i < ng; i++)
++	{
++		out->gen_logits[(size_t)i].resize((size_t)out->n_vocab);
++		if (fread(out->gen_logits[(size_t)i].data(), sizeof(float),
++				(size_t)out->n_vocab, f) != (size_t)out->n_vocab)
++			return (fclose(f), die("dump file truncated (logits)"), false);
++	}
++	fclose(f);
++	return (true);
++}
++
++typedef struct s_prompt_metrics
++{
++	double	top1_preservation;
++	double	logit_rel_l2;
++	double	delta_nll;
++	bool	token_identity;
++	int32_t	first_divergence;
++}	prompt_metrics_t;
++
++static bool	compare_against_dump(const dump_data_t &ref,
++				const pass_result_t &cand_free, const pass_result_t &cand_forced,
++				prompt_metrics_t *out)
++{
++	membrane_runtime_behavior_accum_t		*acc;
++	membrane_runtime_behavior_summary_t	summary;
++	membrane_runtime_step_logit_diff_t		diff;
++	size_t									n;
++	size_t									i;
++	double									nll_ref;
++	double									nll_cand;
++	bool									identical;
++
++	n = ref.gen_logits.size() < cand_forced.logits.size()
++		? ref.gen_logits.size() : cand_forced.logits.size();
++	acc = membrane_runtime_behavior_create();
++	if (acc == NULL)
++		return (false);
++	identical = true;
++	out->first_divergence = -1;
++	i = 0;
++	while (i < ref.gen_tokens.size() && i < cand_free.tokens.size())
++	{
++		if (identical && cand_free.tokens[i] != ref.gen_tokens[i])
++		{
++			identical = false;
++			out->first_divergence = (int32_t)i;
++		}
++		i++;
++	}
++	i = 0;
++	while (i < n)
++	{
++		membrane_runtime_compare_logits(ref.gen_logits[i].data(),
++			cand_forced.logits[i].data(), ref.n_vocab, 5, &diff);
++		nll_ref = membrane_runtime_nll(ref.gen_logits[i].data(), ref.n_vocab,
++				ref.gen_tokens[i]);
++		nll_cand = membrane_runtime_nll(cand_forced.logits[i].data(),
++				ref.n_vocab, ref.gen_tokens[i]);
++		membrane_runtime_behavior_add_step(acc, &diff, nll_ref, nll_cand);
++		i++;
++	}
++	membrane_runtime_behavior_finalize(acc, &summary);
++	membrane_runtime_behavior_destroy(acc);
++	out->logit_rel_l2 = summary.logit_rel_l2_mean;
++	out->top1_preservation = summary.top1_preservation_rate;
++	out->delta_nll = summary.delta_nll;
++	out->token_identity = identical;
++	return (true);
++}
++
++typedef struct s_opts
++{
++	const char					*mode;	/* "dump" or "compare" */
++	const char					*model_path;
++	const char					*prompt_path;
++	const char					*file_path;	/* --out for dump, --in for compare */
++	int							n_ctx;
++	int							gen_tokens;
++	std::vector<int32_t>		q8_layers;
++	const char					*kv_type;	/* "native"|"q5"|"q8", whole-cache,
++											 * used by BOTH dump (reference
++											 * config) and compare (candidate
++											 * self-check config when
++											 * q8_layers is empty) */
++	int32_t						gpu_layers;
++	bool						want_json;
++}	opts_t;
++
++static int	parse_int_list(const char *s, std::vector<int32_t> *out)
++{
++	std::string	item;
++	const char	*p;
++
++	out->clear();
++	if (s == NULL || s[0] == '\0')
++		return (0);
++	p = s;
++	while (*p != '\0')
++	{
++		item.clear();
++		while (*p != '\0' && *p != ',')
++			item.push_back(*p++);
++		if (!item.empty())
++			out->push_back((int32_t)strtol(item.c_str(), NULL, 10));
++		if (*p == ',')
++			p++;
++	}
++	return (0);
++}
++
++static int	parse_args(int argc, char **argv, opts_t *o)
++{
++	int	i;
++
++	o->mode = NULL;
++	o->model_path = NULL;
++	o->prompt_path = NULL;
++	o->file_path = NULL;
++	o->n_ctx = 2048;
++	o->gen_tokens = 32;
++	o->kv_type = "q5";
++	o->gpu_layers = 0;
++	o->want_json = false;
++	i = 1;
++	while (i < argc)
++	{
++		if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc)
++			o->mode = argv[++i];
++		else if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
++			o->model_path = argv[++i];
++		else if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc)
++			o->prompt_path = argv[++i];
++		else if (strcmp(argv[i], "--out") == 0 && i + 1 < argc)
++			o->file_path = argv[++i];
++		else if (strcmp(argv[i], "--in") == 0 && i + 1 < argc)
++			o->file_path = argv[++i];
++		else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc)
++			o->n_ctx = atoi(argv[++i]);
++		else if (strcmp(argv[i], "--gen-tokens") == 0 && i + 1 < argc)
++			o->gen_tokens = atoi(argv[++i]);
++		else if (strcmp(argv[i], "--q8-layers") == 0 && i + 1 < argc)
++			parse_int_list(argv[++i], &o->q8_layers);
++		else if (strcmp(argv[i], "--kv-type") == 0 && i + 1 < argc)
++			o->kv_type = argv[++i];
++		else if (strcmp(argv[i], "--gpu-layers") == 0 && i + 1 < argc)
++		{
++			++i;
++			o->gpu_layers = strcmp(argv[i], "all") == 0
++				? -1 : (int32_t)atoi(argv[i]);
++		}
++		else if (strcmp(argv[i], "--json") == 0)
++			o->want_json = true;
++		else
++			return (die("unknown or malformed option"), 1);
++		i++;
++	}
++	if (o->mode == NULL || o->model_path == NULL || o->file_path == NULL)
++		return (die("--mode, --model, and --out/--in are required"), 1);
++	if (strcmp(o->mode, "dump") == 0 && o->prompt_path == NULL)
++		return (die("--mode dump requires --prompt"), 1);
++	if (strcmp(o->mode, "compare") != 0 && strcmp(o->mode, "dump") != 0)
++		return (die("--mode must be dump or compare"), 1);
++	return (0);
++}
++
++static void	kv_type_for_name(const char *name, ggml_type *out)
++{
++	if (strcmp(name, "q8") == 0)
++		*out = GGML_TYPE_Q8_0;
++	else if (strcmp(name, "q5") == 0)
++		*out = GGML_TYPE_Q5_1;
++	else
++		*out = GGML_TYPE_F16;
++}
++
++int	main(int argc, char **argv)
++{
++	opts_t	o;
++
++	if (parse_args(argc, argv, &o) != 0)
++		return (2);
++	llama_backend_init();
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = o.gpu_layers;
++	llama_model	*model = llama_model_load_from_file(o.model_path, mp);
++	if (model == NULL)
++		return (die("model load failed"), llama_backend_free(), 3);
++	const llama_vocab	*vocab = llama_model_get_vocab(model);
++	int32_t				n_vocab = llama_vocab_n_tokens(vocab);
++	int32_t				n_layer = llama_model_n_layer(model);
++
++	if (strcmp(o.mode, "dump") == 0)
++	{
++		std::string					text = read_file(o.prompt_path);
++		std::vector<llama_token>	tokens;
++		pass_result_t				free_pass;
++		ggml_type					t;
++
++		if (text.empty() || !tokenize_prompt(vocab, text, &tokens))
++			return (llama_model_free(model), llama_backend_free(), 4);
++		kv_type_for_name(o.kv_type, &t);
++		llama_context	*ctx = make_context(model, o.n_ctx, t, t, NULL, NULL);
++		if (ctx == NULL)
++			return (die("reference context creation failed"),
++				llama_model_free(model), llama_backend_free(), 5);
++		if (!decode_prompt(ctx, tokens, 256)
++				|| !run_gen(ctx, vocab, o.gen_tokens, NULL, &free_pass))
++			return (llama_free(ctx), llama_model_free(model),
++				llama_backend_free(), 4);
++		if (!write_dump(o.file_path, tokens, free_pass, n_vocab))
++			return (llama_free(ctx), llama_model_free(model),
++				llama_backend_free(), 6);
++		if (o.want_json)
++			printf("{\"schema_version\":1,\"mode\":\"dump\",\"kv_type\":\"%s\","
++				"\"ctx\":%d,\"n_prompt_tokens\":%zu,\"n_gen_tokens\":%d,"
++				"\"n_vocab\":%d,\"out\":\"%s\"}\n",
++				o.kv_type, o.n_ctx, tokens.size(), o.gen_tokens, n_vocab,
++				o.file_path);
++		llama_free(ctx);
++		llama_model_free(model);
++		llama_backend_free();
++		return (0);
++	}
++
++	/* --mode compare */
++	dump_data_t	ref;
++
++	if (!read_dump(o.file_path, &ref))
++		return (llama_model_free(model), llama_backend_free(), 6);
++	if (ref.n_vocab != n_vocab)
++		return (die("dump file n_vocab does not match this model"),
++			llama_model_free(model), llama_backend_free(), 7);
++
++	std::vector<ggml_type>	type_map;
++	ggml_type				(*override_cb)(int32_t, bool, void *) = NULL;
++	void					*override_ud = NULL;
++	ggml_type				whole_type = GGML_TYPE_Q5_1;
++
++	if (!o.q8_layers.empty())
++	{
++		type_map.assign((size_t)n_layer, GGML_TYPE_Q5_1);
++		for (int32_t idx : o.q8_layers)
++		{
++			if (idx < 0 || idx >= n_layer)
++				return (die("--q8-layers index out of range"),
++					llama_model_free(model), llama_backend_free(), 2);
++			type_map[(size_t)idx] = GGML_TYPE_Q8_0;
++		}
++		override_cb = layer_map_cb;
++		override_ud = &type_map;
++	}
++	else
++		kv_type_for_name(o.kv_type, &whole_type);
++
++	llama_context	*cctx;
++
++	if (override_cb != NULL)
++		cctx = make_context(model, o.n_ctx, GGML_TYPE_F16, GGML_TYPE_F16,
++				override_cb, override_ud);
++	else
++		/* whole-cache candidate self-check path -- type_k/type_v must
++		 * be the requested uniform type directly (no override
++		 * callback needed for a uniform cache). */
++		cctx = make_context(model, o.n_ctx, whole_type, whole_type, NULL,
++				NULL);
++	if (cctx == NULL)
++		return (die("candidate context creation failed"),
++			llama_model_free(model), llama_backend_free(), 5);
++
++	pass_result_t	cand_free;
++	pass_result_t	cand_forced;
++
++	if (!decode_prompt(cctx, ref.prompt_tokens, 256)
++			|| !run_gen(cctx, vocab, (int)ref.gen_tokens.size(), NULL,
++				&cand_free))
++		return (llama_free(cctx), llama_model_free(model),
++			llama_backend_free(), 4);
++	llama_memory_seq_rm(llama_get_memory(cctx), 0, -1, -1);
++	if (!decode_prompt(cctx, ref.prompt_tokens, 256)
++			|| !run_gen(cctx, vocab, (int)ref.gen_tokens.size(),
++				&ref.gen_tokens, &cand_forced))
++		return (llama_free(cctx), llama_model_free(model),
++			llama_backend_free(), 4);
++
++	prompt_metrics_t	pm;
++
++	if (!compare_against_dump(ref, cand_free, cand_forced, &pm))
++		return (llama_free(cctx), llama_model_free(model),
++			llama_backend_free(), 4);
++	if (o.want_json)
++		printf("{\"schema_version\":1,\"mode\":\"compare\","
++			"\"q8_layer_count\":%zu,\"top1_preservation\":%.6f,"
++			"\"logit_rel_l2\":%.6f,\"delta_nll\":%.6f,"
++			"\"token_identity\":%s,\"first_divergence\":%d}\n",
++			o.q8_layers.size(), pm.top1_preservation, pm.logit_rel_l2,
++			pm.delta_nll, pm.token_identity ? "true" : "false",
++			pm.first_divergence);
++	llama_free(cctx);
++	llama_model_free(model);
++	llama_backend_free();
++	return (0);
++}
+diff --git a/tools/membrane-kv-mixed-layer/test_constrained_policy_sim.c b/tools/membrane-kv-mixed-layer/test_constrained_policy_sim.c
+new file mode 100644
+index 0000000..2389684
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/test_constrained_policy_sim.c
+@@ -0,0 +1,132 @@
++#include <string.h>
++
++#include "constrained_policy_sim.h"
++#include "test_helpers.h"
++
++static void	test_select_q8_when_full_resides(void)
++{
++	TEST_ASSERT(membrane_constrained_policy_select(1, 1, 1, 1)
++		== MEMBRANE_CONSTRAINED_MODE_Q8,
++		"Q8 wins whenever it full-resides, regardless of mixed/Q5 state");
++	TEST_ASSERT(membrane_constrained_policy_select(1, 0, 0, 0)
++		== MEMBRANE_CONSTRAINED_MODE_Q8,
++		"Q8 wins even with no profile and Q5 unsafe -- Q8 full residency "
++		"alone is sufficient");
++}
++
++static void	test_select_mixed_only_with_profile(void)
++{
++	TEST_ASSERT(membrane_constrained_policy_select(0, 1, 1, 1)
++		== MEMBRANE_CONSTRAINED_MODE_MIXED,
++		"mixed selected when Q8 fails but profile+mixed are both safe");
++	TEST_ASSERT(membrane_constrained_policy_select(0, 0, 1, 1)
++		== MEMBRANE_CONSTRAINED_MODE_Q5,
++		"mixed_safe=1 alone is not enough -- no profile means mixed is "
++		"never selected (Section 22: missing profile fails closed to Q5, "
++		"never a silent naive layout)");
++}
++
++static void	test_select_q5_fallback(void)
++{
++	TEST_ASSERT(membrane_constrained_policy_select(0, 1, 0, 1)
++		== MEMBRANE_CONSTRAINED_MODE_Q5,
++		"Q5 selected when mixed is unsafe but Q5 is safe");
++	TEST_ASSERT(membrane_constrained_policy_select(0, 0, 0, 1)
++		== MEMBRANE_CONSTRAINED_MODE_Q5,
++		"Q5 selected with no profile at all, as long as Q5 itself is safe");
++}
++
++static void	test_select_fail_closed(void)
++{
++	TEST_ASSERT(membrane_constrained_policy_select(0, 1, 0, 0)
++		== MEMBRANE_CONSTRAINED_MODE_FAIL_CLOSED,
++		"fails closed when nothing is safe, even with a valid profile");
++	TEST_ASSERT(membrane_constrained_policy_select(0, 0, 0, 0)
++		== MEMBRANE_CONSTRAINED_MODE_FAIL_CLOSED,
++		"fails closed, never silently native/uncompressed");
++}
++
++static void	test_boundary_matches_phase11e_measurement(void)
++{
++	/* results/phase11/constrained-mixed-vs-q5/q8_count_sweep.json,
++	 * PRIMARY POINT B (ctx=180000): counts 0,1,2,4,6,7,8 succeed,
++	 * 9 and 10 fail. */
++	int32_t	counts[9] = {0, 1, 2, 4, 6, 7, 8, 9, 10};
++	int		ok[9] = {1, 1, 1, 1, 1, 1, 1, 0, 0};
++	int32_t	boundary;
++
++	TEST_ASSERT(membrane_safe_q8_count_boundary(counts, ok, 9, &boundary)
++		== 1, "well-formed monotonic sweep resolves");
++	TEST_ASSERT(boundary == 8,
++		"recovers the exact measured boundary (top-8 succeeds, top-9 "
++		"fails) from this phase's own raw data shape");
++}
++
++static void	test_boundary_all_fail(void)
++{
++	int32_t	counts[3] = {0, 1, 2};
++	int		ok[3] = {0, 0, 0};
++	int32_t	boundary;
++
++	TEST_ASSERT(membrane_safe_q8_count_boundary(counts, ok, 3, &boundary)
++		== 1, "all-fail sweep still resolves (well-formed, trivially "
++		"monotonic)");
++	TEST_ASSERT(boundary == -1,
++		"no safe count reported when every tested count failed, not a "
++		"silent 0");
++}
++
++static void	test_boundary_non_monotonic_fails_closed(void)
++{
++	/* count=1 fails but count=2 (a LARGER count) reports success --
++	 * this cannot happen with real KV-byte monotonicity and must be
++	 * flagged, not silently trusted. */
++	int32_t	counts[3] = {0, 1, 2};
++	int		ok[3] = {1, 0, 1};
++	int32_t	boundary;
++
++	TEST_ASSERT(membrane_safe_q8_count_boundary(counts, ok, 3, &boundary)
++		== 0, "non-monotonic sweep data is rejected, not silently "
++		"resolved to some value");
++	TEST_ASSERT(boundary == -1, "out_boundary left at -1 on rejection");
++}
++
++static void	test_boundary_degenerate_inputs(void)
++{
++	int32_t	boundary;
++	int32_t	one_count[1] = {0};
++	int		one_ok[1] = {1};
++
++	TEST_ASSERT(membrane_safe_q8_count_boundary(NULL, NULL, 0, &boundary)
++		== 0, "n_entries<=0 fails closed");
++	TEST_ASSERT(boundary == -1, "out_boundary set to -1 on failure");
++	TEST_ASSERT(membrane_safe_q8_count_boundary(one_count, one_ok, 1,
++			&boundary) == 1, "single-entry sweep resolves");
++	TEST_ASSERT(boundary == 0, "single succeeding entry is its own boundary");
++}
++
++static void	test_select_deterministic_repeated_calls(void)
++{
++	int	a;
++	int	b;
++
++	a = membrane_constrained_policy_select(0, 1, 1, 1);
++	b = membrane_constrained_policy_select(0, 1, 1, 1);
++	TEST_ASSERT(a == b, "identical inputs produce identical mode across "
++		"calls");
++}
++
++int	main(void)
++{
++	test_select_q8_when_full_resides();
++	test_select_mixed_only_with_profile();
++	test_select_q5_fallback();
++	test_select_fail_closed();
++	test_boundary_matches_phase11e_measurement();
++	test_boundary_all_fail();
++	test_boundary_non_monotonic_fails_closed();
++	test_boundary_degenerate_inputs();
++	test_select_deterministic_repeated_calls();
++	printf("test_constrained_policy_sim: all tests passed\n");
++	return (0);
++}

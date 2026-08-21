@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "title": "Constrained-Regime Mixed KV vs Whole-Cache Q5",
+  "files": {
+    "manifest.json": "this file",
+    "hardware_state.json": "Section 2: live hardware/model/profile-validation snapshot at phase start",
+    "boundary_scan.json": "Section 3: real product CLI boundary scan finding Points A/B/C",
+    "q8_count_sweep.json": "Section 5: mixed Q8-layer-count budget search at PRIMARY POINT B",
+    "raw_q8_budget_search_180k.jsonl": "raw per-count records backing q8_count_sweep.json",
+    "overhead_calibration.json": "Sections 6/7: measured overhead model, prediction error, false-safe boundary check",
+    "quality_methodology.json": "Sections 8/9: pre-registered quality methodology, written before any quality comparison ran",
+    "quality_raw.jsonl": "first (self-referential, superseded) quality sweep -- kept for disclosure, not used for the H1 decision",
+    "quality_raw_f16ref.jsonl": "PRIMARY quality data: true-F16-reference sweep, 5 prompts x 6 configs, used for the H1 decision",
+    "quality_summary.json": "Sections 8/9/10/11: aggregated quality results and the primary H1 test",
+    "layout_comparison.json": "Section 10: profile-sensitivity vs naive layouts at matched Q8 budget",
+    "performance.json": "Section 17: performance (product 7-run sweep + research-tool wall-clock comparison)",
+    "vram.json": "Section 18: external nvidia-smi VRAM measurement, cross-validated against KV-byte math",
+    "adaptive_head_to_head.json": "Section 20: product --kv adaptive vs whole-Q5 vs best mixed, central table",
+    "future_policy_simulation.json": "Section 21: offline Q8->mixed->Q5->fail hierarchy simulation over measured points",
+    "regression_sanitizers.json": "Section 24: what sanitizer/regression work was and was not run this session, and why",
+    "summary.json": "Section 25/27/28: final narrative summary, decision gate, and next-step recommendation"
+  }
+}

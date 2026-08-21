@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+  "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "research_questions_answered": {
+    "1_prompt_stability": {
+      "answer": "PARTIAL -- individual prompt-vs-prompt rank correlation is modest (135M mean Spearman rho=0.364, 360M mean rho=0.466; both well short of 1.0), but a SMALL SET of layers (135M: 19, 27; 360M: 30, 23) are overwhelmingly more sensitive than the rest in nearly every prompt.",
+      "evidence": "rankings.json (per-prompt Spearman/Kendall), category_rankings.json (support frequency)"
+    },
+    "2_category_stability": {
+      "answer": "YES, strongly -- category-vs-global Spearman rho ranges 0.55-0.87 (135M) and 0.61-0.93 (360M), and the top-5 most sensitive layers per category overlap heavily across all 11 categories (layers 19/27 in 135M appear in every single category top-5).",
+      "evidence": "category_rankings.json"
+    },
+    "3_model_stability": {
+      "answer": "PARTIAL -- exact-layer-index overlap after normalized-depth mapping is modest (top10_overlap_after_depth_mapping=0.40), but both models concentrate their most-sensitive layers in the mid-to-late depth region (quintiles 2-4 of 5) and each model has ONE standout near-final-layer that dominates sensitivity (135M layer 27 at depth 0.93; 360M layer 30 at depth 0.97).",
+      "evidence": "cross_model.json"
+    },
+    "4_context_stability": {
+      "answer": "YES, fairly strongly -- on the same 5 prompts, ctx=2048 vs ctx=8192 rankings correlate at Spearman rho=0.71, Kendall tau=0.51, top-10 overlap=80%, with the top-2 layers identical and in the same order at both context sizes. Caveat: these short prompts consumed similar actual token counts at both ctx settings -- this tests KV-cache-capacity effects, not long-context-usage effects specifically.",
+      "evidence": "context_stability.json"
+    },
+    "5_policy_usefulness": {
+      "answer": "YES, clearly on rel_l2 -- a ranking built ONLY from 21 train prompts beat EVERY naive layout (early/late/alternating/random) on logit_rel_l2 at EVERY intermediate Q8-budget tested (4/8/12/15/20/24 layers), evaluated on 10 held-out prompts never seen during ranking construction. Mixed but still favorable on top1_preservation (5/6 budgets) and delta_nll (wins at higher budgets, random sometimes better at low budgets).",
+      "evidence": "holdout_policy.json, pareto.json"
+    }
+  },
+  "stable_sensitive_layers": {
+    "135m_top5_by_support": [
+      [
+        "19",
+        27
+      ],
+      [
+        "27",
+        26
+      ],
+      [
+        "21",
+        13
+      ],
+      [
+        "22",
+        13
+      ],
+      [
+        "12",
+        12
+      ]
+    ],
+    "360m_top5_by_support": [
+      [
+        "30",
+        31
+      ],
+      [
+        "23",
+        23
+      ],
+      [
+        "18",
+        14
+      ],
+      [
+        "13",
+        13
+      ],
+      [
+        "19",
+        12
+      ]
+    ],
+    "note": "layer: count-of-31-prompts-in-top-20pct-sensitivity-band"
+  },
+  "unstable_task_dependent_evidence": {
+    "note": "Beyond the 2-3 dominant layers per model, the remaining ~27-29 layers show much lower and more prompt-dependent support (see category_rankings.json support_by_layer for the full distribution) -- consistent with modest prompt-vs-prompt rank correlation on the FULL ranking even though the TOP few layers are highly stable."
+  },
+  "memory_pressure_finding": "At the real GTX 1650 ctx=180000/360M boundary, all 4 layer-selection strategies for an 8-of-32 Q8 budget cost identical memory and all achieve full residency -- confirming sensitivity-based selection is a zero-memory-cost choice at this real hardware boundary (quality-at-boundary itself not measured, by design, to avoid real OOM risk).",
+  "decision_gate_inputs": {
+    "cross_prompt_stability": "weak-to-modest for the full ranking, strong for the top 2-3 layers",
+    "cross_category_stability": "strong",
+    "cross_model_stability": "modest at exact-index level, moderate at depth-region level",
+    "cross_context_stability": "strong (with the important actual-token-count caveat disclosed)",
+    "holdout_policy_beats_naive": "yes, consistently on rel_l2; mostly yes on top1; mixed on delta_nll"
+  }
+}

@@ -1,0 +1,182 @@
+{
+  "experiment_id": "EXP-LAYER-SENSITIVITY-GENERALIZATION-11C",
+  "phase": "11C",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/layer-sensitivity-generalization",
+  "source_head_sha": "eaeb25fed8c12bf924f5f42a3d78cd151cd130ca",
+  "parent_experiment": "EXP-MIXED-Q8-Q5-FEASIBILITY-11B",
+  "parent_head_sha": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+  "base_sha": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+  "date": "2026-08-16",
+  "purpose": "Test whether Phase 11B's single-model/single-context/5-prompt sensitivity ranking generalizes: across a full 31-prompt set and 11 task categories (prompt/category stability), across SmolLM2-135M vs 360M (model stability), across ctx=2048 vs ctx=8192 (context stability), and whether a ranking built only from held-out training prompts beats naive layouts on prompts it never saw (policy usefulness).",
+  "literal_verdict": null,
+  "literal_verdict_note": "This phase's own summary.json does not record a single decision_gate/classification-style literal constant like its sibling phases -- its result is a structured multi-question answer set (research_questions_answered) plus a decision_gate_inputs object. Reporting the literal fields directly rather than inventing a constant that doesn't exist in source.",
+  "verdict_summary": "Mixed, precisely disclosed: (1) full-ranking prompt-to-prompt stability is only modest (Spearman rho 0.36-0.47), but a small set of 2-3 layers per model are overwhelmingly and consistently the most sensitive across nearly every prompt; (2) category-level stability is strong (rho 0.55-0.93, same top layers dominate every category); (3) cross-model stability is modest at exact layer-index level but moderate at normalized-depth level (both models' most-sensitive layer sits at ~93-97% depth); (4) cross-context (2048 vs 8192) stability is fairly strong (rho 0.71, top-2 layers identical and same order) with a disclosed caveat that both settings consumed similar actual token counts; (5) a ranking built from only 21 training prompts clearly beat every naive layout on logit_rel_l2 at every held-out Q8-budget tested, and won or tied on top1_preservation at 5/6 budgets -- delta_nll was mixed, with random sometimes winning at low budgets. Net: the top few sensitive layers are stable and the resulting policy usefully beats naive baselines out-of-sample, but the full ranking's stability is genuinely partial, not strong across the board -- disclosed as such, not glossed over.",
+  "verdict_source": "results/canonical/summary.json: research_questions_answered (all 5 sub-answers), decision_gate_inputs; results/canonical/holdout_policy.json: headline_finding (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "Real GTX 1650 (Vulkan backend) and same host's CPU",
+  "models": [
+    "SmolLM2-135M-Instruct-f16",
+    "SmolLM2-360M-Instruct-f16"
+  ],
+  "llama_cpp_pin": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "membrane_pin": "1c0cb4fbcc08bed9556ee6298e49791f9b5c8f9f",
+  "follow_up": "The held-out-policy win (research question 5) and the strong category/context stability motivated Phase 11D: build an actual per-model calibrated policy pipeline (fingerprint -> profile -> policy) and compare it head-to-head against the shipped whole-cache adaptive policy, not just naive layouts. Source HEAD bb0b69a290c8de609bdce5494bb9b616972f39b9.",
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/category_rankings.json",
+      "source_path": "results/phase11/generalization/category_rankings.json",
+      "source_sha256": "e3ed2a9461c9bd7cf3d486f4f6b415584696e24c921b9b889af9ffed369eb70c",
+      "migrated_sha256": "e3ed2a9461c9bd7cf3d486f4f6b415584696e24c921b9b889af9ffed369eb70c",
+      "size_bytes": 51592,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/context_stability.json",
+      "source_path": "results/phase11/generalization/context_stability.json",
+      "source_sha256": "c1edad227b426c0d918f1a6e7b98e0f5098c42f1a91ebfd411b83cf897a890df",
+      "migrated_sha256": "c1edad227b426c0d918f1a6e7b98e0f5098c42f1a91ebfd411b83cf897a890df",
+      "size_bytes": 1825,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/cross_model.json",
+      "source_path": "results/phase11/generalization/cross_model.json",
+      "source_sha256": "3faaf85ea1de47d6cd20f67c3758f0adf2dfa897f89f538864083283476d8fb9",
+      "migrated_sha256": "3faaf85ea1de47d6cd20f67c3758f0adf2dfa897f89f538864083283476d8fb9",
+      "size_bytes": 2323,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/holdout_policy.json",
+      "source_path": "results/phase11/generalization/holdout_policy.json",
+      "source_sha256": "2031d369f0aa1f297eb3fb9fe647a4407b522ef4ca85686904b8c542d741bced",
+      "migrated_sha256": "2031d369f0aa1f297eb3fb9fe647a4407b522ef4ca85686904b8c542d741bced",
+      "size_bytes": 13059,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/manifest.json",
+      "source_path": "results/phase11/generalization/manifest.json",
+      "source_sha256": "6491ce5ad2493c377cd96c869c07dbe9f6deb32f64ef7796a03e11a582fad33d",
+      "migrated_sha256": "6491ce5ad2493c377cd96c869c07dbe9f6deb32f64ef7796a03e11a582fad33d",
+      "size_bytes": 2583,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/pareto.json",
+      "source_path": "results/phase11/generalization/pareto.json",
+      "source_sha256": "c9b1f1423d90863c1778c9c0a29bf9239e96083d678a9adf875d563b31a09100",
+      "migrated_sha256": "c9b1f1423d90863c1778c9c0a29bf9239e96083d678a9adf875d563b31a09100",
+      "size_bytes": 7722,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/performance.json",
+      "source_path": "results/phase11/generalization/performance.json",
+      "source_sha256": "8f41248c6408a5193e0d343da67ea3d6e6f8b9542c640e9647bbd61ad0725c5f",
+      "migrated_sha256": "8f41248c6408a5193e0d343da67ea3d6e6f8b9542c640e9647bbd61ad0725c5f",
+      "size_bytes": 2763,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/pressure_boundary.json",
+      "source_path": "results/phase11/generalization/pressure_boundary.json",
+      "source_sha256": "1c8b65e7994cd74e510889b8b79250ea45b41fe171ab9ea43966377741e767af",
+      "migrated_sha256": "1c8b65e7994cd74e510889b8b79250ea45b41fe171ab9ea43966377741e767af",
+      "size_bytes": 3210,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/prompts.json",
+      "source_path": "results/phase11/generalization/prompts.json",
+      "source_sha256": "992b251fec55599b1d5f8524f0fb21ffece8ab6fa13690d403de332caf4b7441",
+      "migrated_sha256": "992b251fec55599b1d5f8524f0fb21ffece8ab6fa13690d403de332caf4b7441",
+      "size_bytes": 7280,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/rankings.json",
+      "source_path": "results/phase11/generalization/rankings.json",
+      "source_sha256": "66b8ee48fa8a53cb887335d5277d83c8ca4a3065bb3c9dec445dd58381d2f035",
+      "migrated_sha256": "66b8ee48fa8a53cb887335d5277d83c8ca4a3065bb3c9dec445dd58381d2f035",
+      "size_bytes": 848661,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_135m_ctx2048.jsonl",
+      "source_path": "results/phase11/generalization/raw_135m_ctx2048.jsonl",
+      "source_sha256": "078a0432a43fcde90104cf030d7a024fa7fc2f4fc95fcbd7b33544ee38fc7975",
+      "migrated_sha256": "078a0432a43fcde90104cf030d7a024fa7fc2f4fc95fcbd7b33544ee38fc7975",
+      "size_bytes": 188593,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_360m_ctx2048.jsonl",
+      "source_path": "results/phase11/generalization/raw_360m_ctx2048.jsonl",
+      "source_sha256": "faba18d659908dd63a78168fe94a836172d5c2bd23eed31bf6b2ca3b7566df8a",
+      "migrated_sha256": "faba18d659908dd63a78168fe94a836172d5c2bd23eed31bf6b2ca3b7566df8a",
+      "size_bytes": 201082,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_ctx8192.jsonl",
+      "source_path": "results/phase11/generalization/raw_ctx8192.jsonl",
+      "source_sha256": "dfd4bef20140cb552f5ddb041a41ad34b620a751b3f7db3494c9af65e50e7c67",
+      "migrated_sha256": "dfd4bef20140cb552f5ddb041a41ad34b620a751b3f7db3494c9af65e50e7c67",
+      "size_bytes": 54152,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_holdout_policy_135m.jsonl",
+      "source_path": "results/phase11/generalization/raw_holdout_policy_135m.jsonl",
+      "source_sha256": "4519422871f52280894d8c2226895479d5a50eccf3d63861d27dba2897655ffc",
+      "migrated_sha256": "4519422871f52280894d8c2226895479d5a50eccf3d63861d27dba2897655ffc",
+      "size_bytes": 80646,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_performance_cpu.jsonl",
+      "source_path": "results/phase11/generalization/raw_performance_cpu.jsonl",
+      "source_sha256": "d3771720ad44986e03461b4b7c187246e047cb8001eb03307f3fd86643217876",
+      "migrated_sha256": "d3771720ad44986e03461b4b7c187246e047cb8001eb03307f3fd86643217876",
+      "size_bytes": 15902,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_performance_vulkan.jsonl",
+      "source_path": "results/phase11/generalization/raw_performance_vulkan.jsonl",
+      "source_sha256": "31e8b816eee94e2c65a8f4966d8e9f8892f0232c56b1460f3efa003403988c54",
+      "migrated_sha256": "31e8b816eee94e2c65a8f4966d8e9f8892f0232c56b1460f3efa003403988c54",
+      "size_bytes": 22180,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/raw_pressure_boundary.jsonl",
+      "source_path": "results/phase11/generalization/raw_pressure_boundary.jsonl",
+      "source_sha256": "53840722671123799e26183920e911fb38feed7b00e49adb9274f2c8cd56b944",
+      "migrated_sha256": "53840722671123799e26183920e911fb38feed7b00e49adb9274f2c8cd56b944",
+      "size_bytes": 925,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/results/canonical/summary.json",
+      "source_path": "results/phase11/generalization/summary.json",
+      "source_sha256": "367b0f39cd5cc90daded43dadce5f310e47091fb4e5d7116feb9df5fcfbf79af",
+      "migrated_sha256": "367b0f39cd5cc90daded43dadce5f310e47091fb4e5d7116feb9df5fcfbf79af",
+      "size_bytes": 4269,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-LAYER-SENSITIVITY-GENERALIZATION-11C/patches/phase11c-layer-sensitivity-generalization.patch",
+      "source_path": "(derived) git diff 8fc37408685ac8dac2d1e59edcfab5961136177b..eaeb25fed8c12bf924f5f42a3d78cd151cd130ca -- . ':(exclude)results/phase11/generalization/*'",
+      "source_sha256": "4da0905c03e89984fc43a837013afc775d37f41db1e659081ba6daab3782cf41",
+      "migrated_sha256": "4da0905c03e89984fc43a837013afc775d37f41db1e659081ba6daab3782cf41",
+      "size_bytes": 37605,
+      "category": "B_experiment_implementation"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "phase": "11C",
+  "note": "Phase 11C: layer-sensitivity generalization research (does Phase 11B's single-model/single-context/5-prompt sensitivity ranking generalize across prompts, categories, models, and context sizes?). RESEARCH ONLY -- experiment/layer-sensitivity-generalization branch, built on experiment/mixed-q8-q5-layer-feasibility (Phase 11B), never merged, never a product CLI. All data from real membrane-kv-mixed-layer invocations on this host.",
+  "membrane_commit": "1c0cb4fbcc08bed9556ee6298e49791f9b5c8f9f",
+  "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "files": {
+    "manifest.json": "this file",
+    "prompts.json": "the 31-prompt set, category grouping, train/holdout split and its selection rule",
+    "raw_135m_ctx2048.jsonl": "Stage A: 30-layer single-ablation sweep, SmolLM2-135M, ctx=2048, full 31 prompts",
+    "raw_360m_ctx2048.jsonl": "Stage B: 32-layer single-ablation sweep, SmolLM2-360M, ctx=2048",
+    "raw_ctx8192.jsonl": "Stage C: 30-layer single-ablation sweep, SmolLM2-135M, ctx=8192, 5-prompt pre-registered subset",
+    "raw_holdout_policy_135m.jsonl": "raw per-config records behind holdout_policy.json (held-out prompt evaluation)",
+    "raw_pressure_boundary.jsonl": "raw per-config records behind pressure_boundary.json",
+    "raw_performance_cpu.jsonl": "raw per-run records behind performance.json (CPU)",
+    "raw_performance_vulkan.jsonl": "raw per-run records behind performance.json (Vulkan)",
+    "rankings.json": "per-prompt and global rel_l2/delta_nll/top1 rankings PLUS rank-stability (Spearman/Kendall) for all three sweeps: 135m_ctx2048, 360m_ctx2048, 135m_ctx8192 -- one consolidated file, not three separate ones",
+    "category_rankings.json": "per-category and task-group rankings + stable-sensitive-layer support frequencies, for both 135M and 360M (ctx=2048)",
+    "cross_model.json": "135M vs 360M normalized-depth comparison",
+    "context_stability.json": "ctx=2048 vs ctx=8192 comparison (135M)",
+    "holdout_policy.json": "train-derived ranking evaluated on held-out prompts, 5 non-endpoint layouts x 6 intermediate Q8-budgets plus the all-Q8/all-Q5 endpoints",
+    "pareto.json": "held-out Pareto frontier (by top1 and by rel_l2, reported separately)",
+    "pressure_boundary.json": "real GTX 1650 memory-pressure boundary test, 4 layer-selection strategies for 8/32 Q8 layers",
+    "performance.json": "repeated-run throughput stability (5 CPU + 7 Vulkan runs)",
+    "summary.json": "top-level findings summary, stable/unstable layers, decision-gate inputs"
+  }
+}

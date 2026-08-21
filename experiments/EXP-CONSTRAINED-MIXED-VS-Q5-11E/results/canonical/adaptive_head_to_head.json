@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 20: real product `membrane-run --kv adaptive` at PRIMARY POINT B (ctx=180000), compared to whole-cache Q5 and the best research mixed config. Source data for the adaptive row is boundary_scan.json's point_b_primary_constrained.adaptive block (already a real, live product invocation, not re-run here to avoid a redundant heavy GPU call -- reproduced verbatim below with full provenance).",
+  "central_table": [
+    {
+      "config": "whole_cache_adaptive (product, real membrane-run --kv adaptive --gpu-layers all --ctx 180000)",
+      "selected_mode": "q5",
+      "adaptive_reason": "Q5_REQUIRED_FOR_FULL_RESIDENCY",
+      "gpu_layers_selected": 32,
+      "kv_bytes": 2764800000,
+      "external_vram_peak_mib": 3437,
+      "mean_logit_rel_l2_vs_f16": 0.066795,
+      "mean_top1_preservation_vs_f16": 0.99375,
+      "source": "boundary_scan.json point_b_primary_constrained.adaptive + vram.json whole_cache_q5_peak_mib (adaptive selects the identical q5 config, so the Q5 quality/VRAM measurements apply directly) + quality_summary.json F_all_q5"
+    },
+    {
+      "config": "whole_cache_q5 (explicit, identical bytes/behavior to what adaptive selects here)",
+      "selected_mode": "q5",
+      "gpu_layers_selected": 32,
+      "kv_bytes": 2764800000,
+      "external_vram_peak_mib": 3437,
+      "mean_logit_rel_l2_vs_f16": 0.066795,
+      "mean_top1_preservation_vs_f16": 0.99375
+    },
+    {
+      "config": "best_profile_mixed (research-only, top-8 Q8 layers, membrane-kv-sequential-compare)",
+      "gpu_layers_selected": 32,
+      "kv_bytes": 3052800000,
+      "external_vram_peak_mib": 3713,
+      "mean_logit_rel_l2_vs_f16": 0.074887,
+      "mean_top1_preservation_vs_f16": 0.9375,
+      "note": "beats every naive equal-budget mixed layout, but is WORSE than whole-cache Q5 on both quality metrics -- see quality_summary.json primary_h1_test"
+    }
+  ],
+  "conclusion": "At PRIMARY POINT B, the product's real --kv adaptive already selects whole-cache Q5 (the correct, memory-safe choice by construction). The research-only best mixed config uses ~276 MiB more VRAM and is measurably WORSE quality than what adaptive already does. There is no case at this measured point where a mixed policy would improve on the product's current adaptive behavior."
+}

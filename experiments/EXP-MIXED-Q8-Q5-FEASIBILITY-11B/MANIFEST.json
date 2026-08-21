@@ -1,0 +1,45 @@
+{
+  "experiment_id": "EXP-MIXED-Q8-Q5-FEASIBILITY-11B",
+  "phase": "11B",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/mixed-q8-q5-layer-feasibility",
+  "source_head_sha": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+  "parent_experiment": null,
+  "parent_head_sha": null,
+  "base_sha": "d6e6189d0417858bfcf3d51c766eaa4be5fe46e1",
+  "base_sha_note": "First phase of the Phase 11B-11E mixed Q8/Q5 chain; base is main's tip at the time (\"feat: add adaptive Q8/Q5 KV policy\", PR #20) -- the whole-cache adaptive policy this chain compares itself against throughout.",
+  "date": "2026-08-16",
+  "purpose": "Determine whether per-layer heterogeneous Q8_0/Q5_1 KV storage (as opposed to the already-shipped whole-cache adaptive Q8-or-Q5 choice) is mechanically feasible using existing MEMBRANE infrastructure (the Phase 4.1 kv_type_override patch), and whether a sensitivity-based layer-selection policy beats naive equal-memory layouts.",
+  "literal_verdict": "B_MIXED_LAYER_EXISTING_MEMBRANE_INFRA_EXISTS",
+  "verdict_summary": "Mixed per-layer Q8_0/Q5_1 KV works mechanically with zero llama.cpp/upstream changes -- it reuses the already-accepted, already-shipped kv_type_override callback unchanged. A sensitivity-based (highest-error-first) layer-selection policy beat every naive layout (early/late/alternating/random) at equal memory on a small 5-prompt sample (best delta_nll, competitive logit_rel_l2, best top1_preservation). Generation throughput across all-Q8/all-Q5/mixed was statistically indistinguishable at this small model's scale (differences within run-to-run noise) -- feasible and mechanically safe, but no throughput advantage demonstrated, and the positive quality result was disclosed as a small, single-model, single-context sample motivating the generalization check in Phase 11C.",
+  "verdict_source": "results/canonical/mixed-layer-q8-q5-feasibility.json: feasibility_classification, sensitivity_based_policy_vs_naive.note, performance.note (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "Real GTX 1650 (Vulkan backend) for GPU throughput numbers; same host's CPU for CPU throughput numbers",
+  "models": [
+    "SmolLM2-135M-Instruct-f16"
+  ],
+  "llama_cpp_pin": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "membrane_pin": "c51b24695dfa56e0740f930f5ece7c79a077e16c",
+  "follow_up": "This phase's own limitations (5-prompt subset, single model, single context) directly motivated Phase 11C's generalization study (does the sensitivity ranking hold across more prompts, categories, models, and context sizes?). Source HEAD eaeb25fed8c12bf924f5f42a3d78cd151cd130ca.",
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-MIXED-Q8-Q5-FEASIBILITY-11B/results/canonical/mixed-layer-q8-q5-feasibility.json",
+      "source_path": "results/phase11/mixed-layer-q8-q5-feasibility.json",
+      "source_sha256": "45ed20c335aa3642dfedee3284c6e6c5070946cab41f7d017f32e47503cd2004",
+      "migrated_sha256": "45ed20c335aa3642dfedee3284c6e6c5070946cab41f7d017f32e47503cd2004",
+      "size_bytes": 42569,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MIXED-Q8-Q5-FEASIBILITY-11B/patches/phase11b-mixed-q8-q5-feasibility.patch",
+      "source_path": "(derived) git diff d6e6189d0417858bfcf3d51c766eaa4be5fe46e1..8fc37408685ac8dac2d1e59edcfab5961136177b -- . ':(exclude)results/phase11/mixed-layer-q8-q5-feasibility.json'",
+      "source_sha256": "8d3c23a6cb2b5f77e488fd3d13363c9cc232681d14193011b399c530cc3be7f2",
+      "migrated_sha256": "8d3c23a6cb2b5f77e488fd3d13363c9cc232681d14193011b399c530cc3be7f2",
+      "size_bytes": 50472,
+      "category": "B_experiment_implementation"
+    }
+  ]
+}

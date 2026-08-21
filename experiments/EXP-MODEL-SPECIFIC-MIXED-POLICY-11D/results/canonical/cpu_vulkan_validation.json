@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #102: CPU + Vulkan validation of profile-based layer selection for both models, on the same 5-prompt deterministic subset Phase 11B's own validation matrices used (factual_recall_1, instruction_following_1, code_reasoning_1, multistep_reasoning_2, prose_continuation_1). The Q8-count-based and memory-budget-based selection functions are confirmed identical at matching count/budget (see budget_sweep.json Task #99 -- membrane_memory_budget_policy promotes layers in the same rank order membrane_mixed_layer_policy_from_ranking does, so a byte budget whose greedy walk stops at N layers produces the exact same layer set as the Q8-count policy at count=N), so one profile-derived layer set per model validates both policy paths.",
+  "configs": {
+    "135m": {"q8_layer_count": 15, "q8_layers": [1, 2, 10, 11, 12, 13, 15, 16, 17, 19, 20, 21, 22, 23, 27], "source": "profile_135m_train21.json top-15 (also the exact set membrane_memory_budget_policy selects at budget=21000000, per Task #99)"},
+    "360m": {"q8_layer_count": 16, "q8_layers": [1, 7, 13, 14, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 29, 30], "source": "profile_360m_train21.json top-16 (also the exact set membrane_memory_budget_policy selects at budget=38000000, per Task #99)"}
+  },
+  "results": [
+    {"backend": "cpu", "model": "135m", "mean_top1_preservation": 0.9688, "mean_logit_rel_l2": 0.0474, "mean_delta_nll": 0.0110, "theoretical_mixed_bytes": 21381120},
+    {"backend": "vulkan", "model": "135m", "mean_top1_preservation": 0.9812, "mean_logit_rel_l2": 0.0442, "mean_delta_nll": 0.0048, "theoretical_mixed_bytes": 21381120},
+    {"backend": "cpu", "model": "360m", "mean_top1_preservation": 0.9750, "mean_logit_rel_l2": 0.0401, "mean_delta_nll": 0.0042, "theoretical_mixed_bytes": 38010880},
+    {"backend": "vulkan", "model": "360m", "mean_top1_preservation": 0.9750, "mean_logit_rel_l2": 0.0378, "mean_delta_nll": 0.0045, "theoretical_mixed_bytes": 38010880}
+  ],
+  "byte_accounting_cross_check": {
+    "135m_theoretical_bytes_identical_cpu_vulkan": true,
+    "360m_theoretical_bytes_identical_cpu_vulkan": true,
+    "135m_matches_task99_budget_sweep_q8_count_15": true,
+    "360m_matches_task99_budget_sweep_q8_count_16": true,
+    "note": "Storage byte accounting is exact ggml_row_size() math, computed identically regardless of backend -- confirmed by exact equality with Task #99's independently-computed budget_sweep.json values for the same q8_layer_count."
+  },
+  "vram_measurement_limitation": {
+    "attempted": "external nvidia-smi memory.used snapshot immediately before/after each Vulkan invocation, following Phase 11B's precedent",
+    "result": "both before and after readings were 2 MiB (GPU idle baseline) for both models -- the probe subprocess had already exited and freed its VRAM by the time the post-run nvidia-smi query ran, unlike Phase 11B's original measurement which polled DURING a long-lived run",
+    "conclusion": "this before/after snapshot is NOT a valid VRAM measurement for these short single-shot runs and is not reported as one -- Phase 11B's own vram_peak_mib figures (measured via live polling during a longer-running process) remain the authoritative VRAM evidence that heterogeneous KV occupies GPU memory proportional to the mix; this task does not repeat or supersede that measurement"
+  },
+  "conclusion": "Both models' profile-derived mixed-layer layouts run successfully on both CPU and Vulkan backends with no crashes and no fallback. Quality metrics are close between backends (small, expected Vulkan-vs-CPU kernel differences, consistent in direction with Phase 11B's own CPU/Vulkan comparison). Storage byte accounting is exactly backend-independent and cross-checks exactly against Task #99's independently-computed byte sweep."
+}

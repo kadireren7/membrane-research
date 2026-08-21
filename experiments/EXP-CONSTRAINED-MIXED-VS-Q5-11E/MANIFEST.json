@@ -1,0 +1,172 @@
+{
+  "experiment_id": "EXP-CONSTRAINED-MIXED-VS-Q5-11E",
+  "phase": "11E",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/constrained-mixed-vs-q5",
+  "source_head_sha": "96b93b1de8acd35cce50055b91ce2ae8d6246039",
+  "parent_experiment": "EXP-MODEL-SPECIFIC-MIXED-POLICY-11D",
+  "parent_head_sha": "bb0b69a290c8de609bdce5494bb9b616972f39b9",
+  "base_sha": "bb0b69a290c8de609bdce5494bb9b616972f39b9",
+  "date": "2026-08-16",
+  "purpose": "At a real GPU memory-pressure point where whole-cache Q8 cannot provide safe residency but whole-cache Q5 can (SmolLM2-360M, ctx=180000, real GTX 1650), test H1: does a profile-selected mixed Q8/Q5 layout retain some Q8 layers at the same practical residency as whole-cache Q5, with measurably better quality against a true F16 ground-truth reference -- the terminal, apples-to-apples comparison Phase 11D left open.",
+  "literal_verdict": "CONSTRAINED_MIXED_WORKS_BUT_NO_QUALITY_WIN",
+  "verdict_summary": "Mixed KV mechanically fits at the same practical residency as whole-cache Q5 at the primary constrained point (VRAM delta 276 MiB measured, matching theoretical KV-byte delta to within 1.3 MiB), and profile-based sensitivity layer placement beats every naive equal-budget layout. But measured against a true F16 reference, the best mixed configuration (top-8 Q8 layers) is measurably WORSE quality than simply staying whole-cache Q5 -- it beat Q5 on only 1 of 5 held-out prompts (mean logit_rel_l2 0.0749 vs Q5's 0.0668) -- while using more VRAM and offering no performance advantage. The measurement was clean, deterministic/bit-identical on repeat, and internally cross-validated. A second finding disclosed as a real safety caveat, not swept aside: the tighter empirical VRAM model that predicts mixed peak usage to within 0.05% produces a confirmed FALSE-SAFE result right at the real top-8/top-9 layer boundary -- not safe to productize as-is even if the quality result had gone the other way.",
+  "verdict_source": "results/canonical/summary.json: decision_gate, decision_gate_rationale, quality_result, memory_safety, next_step_recommendation (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "productization_note": "Not productized itself -- this phase's own next_step_recommendation is to stop mixed-KV productization for the constrained-regime case and retain the product's existing whole-cache adaptive policy (PR #20, kadireren7/membrane commit d6e6189d0417858bfcf3d51c766eaa4be5fe46e1) unchanged. This phase's value is the negative result that justified NOT building a Q8->mixed->Q5 hierarchy on top of the already-shipped Q5 (PR #19, commit d101fc80d535b09adecd90345312d50774bd821c) and adaptive (PR #20) features.",
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "Real GTX 1650 (Vulkan backend, nvidia-smi VRAM readings) and same host's CPU",
+  "models": [
+    "SmolLM2-360M-Instruct-f16"
+  ],
+  "llama_cpp_pin": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "follow_up": "None -- this is the terminal decision point of the Phase 11B-11E chain. next_step_recommendation explicitly says to stop mixed-KV productization and retain the product's current whole-cache adaptive policy unchanged; no Phase 11F was started.",
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/adaptive_head_to_head.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/adaptive_head_to_head.json",
+      "source_sha256": "3d0e55f9533fc9b2710129bb62bf92a4b6b3717ad86572d8af06e49ab4f2399a",
+      "migrated_sha256": "3d0e55f9533fc9b2710129bb62bf92a4b6b3717ad86572d8af06e49ab4f2399a",
+      "size_bytes": 2325,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/boundary_scan.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/boundary_scan.json",
+      "source_sha256": "bff62ede809590401e6408e0f55bd78fd8e9851f340209edf3af33d0336e52d9",
+      "migrated_sha256": "bff62ede809590401e6408e0f55bd78fd8e9851f340209edf3af33d0336e52d9",
+      "size_bytes": 7369,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/future_policy_simulation.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/future_policy_simulation.json",
+      "source_sha256": "82a279a4cd0e754093445efaa5b2084a98009b3df0ceebab2734b5141d3203a2",
+      "migrated_sha256": "82a279a4cd0e754093445efaa5b2084a98009b3df0ceebab2734b5141d3203a2",
+      "size_bytes": 3427,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/hardware_state.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/hardware_state.json",
+      "source_sha256": "2f1d7ff0076665a77af98d8f1d912cf5aa2f4c6d1eb8c24f3829f7dd9781bd47",
+      "migrated_sha256": "2f1d7ff0076665a77af98d8f1d912cf5aa2f4c6d1eb8c24f3829f7dd9781bd47",
+      "size_bytes": 2169,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/layout_comparison.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/layout_comparison.json",
+      "source_sha256": "14ed4137f453e601433c03dcae6032160ac5d0161328a6f9140795ce2280e0d1",
+      "migrated_sha256": "14ed4137f453e601433c03dcae6032160ac5d0161328a6f9140795ce2280e0d1",
+      "size_bytes": 2437,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/manifest.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/manifest.json",
+      "source_sha256": "676d9d880f8f6df220fc04dd074b052794482fe01fa25fc9eb3f6a8e544c7b49",
+      "migrated_sha256": "676d9d880f8f6df220fc04dd074b052794482fe01fa25fc9eb3f6a8e544c7b49",
+      "size_bytes": 1936,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/overhead_calibration.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/overhead_calibration.json",
+      "source_sha256": "1bdd508c0422aca13dff87a4134247bda9dd5509dadda9c1970d48a4521d81f6",
+      "migrated_sha256": "1bdd508c0422aca13dff87a4134247bda9dd5509dadda9c1970d48a4521d81f6",
+      "size_bytes": 5847,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/performance.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/performance.json",
+      "source_sha256": "c2170b891ddea4fd536eadd03adc4f719686f59add39f2f913a6bf7a68afd9b0",
+      "migrated_sha256": "c2170b891ddea4fd536eadd03adc4f719686f59add39f2f913a6bf7a68afd9b0",
+      "size_bytes": 2563,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/q8_count_sweep.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/q8_count_sweep.json",
+      "source_sha256": "9d3ba673f5d5984adc5634a6f16937a0edbbe14362ac9d64b1f72b9261c8b607",
+      "migrated_sha256": "9d3ba673f5d5984adc5634a6f16937a0edbbe14362ac9d64b1f72b9261c8b607",
+      "size_bytes": 3313,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/quality_methodology.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/quality_methodology.json",
+      "source_sha256": "8e5b4492f0031cab4b99ba6e79cb173a7fcdb533a04df689cd4170877b45a522",
+      "migrated_sha256": "8e5b4492f0031cab4b99ba6e79cb173a7fcdb533a04df689cd4170877b45a522",
+      "size_bytes": 5381,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/quality_raw.jsonl",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/quality_raw.jsonl",
+      "source_sha256": "7dc862a17800a8b8a21087f71cbb4888ac1359706a7d44aaca63570091be52a5",
+      "migrated_sha256": "7dc862a17800a8b8a21087f71cbb4888ac1359706a7d44aaca63570091be52a5",
+      "size_bytes": 10365,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/quality_raw_f16ref.jsonl",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/quality_raw_f16ref.jsonl",
+      "source_sha256": "1a0fadb2a21ab422724f5d04fa0879b8425b4ea111305676d59359068481c342",
+      "migrated_sha256": "1a0fadb2a21ab422724f5d04fa0879b8425b4ea111305676d59359068481c342",
+      "size_bytes": 10364,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/quality_summary.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/quality_summary.json",
+      "source_sha256": "5f8fc9c3396d4a857f06b6f897d18478ea5451c149d49bde2ff20cfb4476e949",
+      "migrated_sha256": "5f8fc9c3396d4a857f06b6f897d18478ea5451c149d49bde2ff20cfb4476e949",
+      "size_bytes": 6063,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/raw_q8_budget_search_180k.jsonl",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/raw_q8_budget_search_180k.jsonl",
+      "source_sha256": "02a74eddbaecfb16eac024455f999fbe9c60d3fb2f59c5386c505886201d2465",
+      "migrated_sha256": "02a74eddbaecfb16eac024455f999fbe9c60d3fb2f59c5386c505886201d2465",
+      "size_bytes": 1849,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/regression_sanitizers.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/regression_sanitizers.json",
+      "source_sha256": "a69c71de853accabec13cb33e0c2f0210ce4fbf3e4d89d1d6bdb0ec255e5f05e",
+      "migrated_sha256": "a69c71de853accabec13cb33e0c2f0210ce4fbf3e4d89d1d6bdb0ec255e5f05e",
+      "size_bytes": 3751,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/summary.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/summary.json",
+      "source_sha256": "178340a30405721cf6330e677e59bad73583ec995a357b7ffee12fb2d0530b14",
+      "migrated_sha256": "178340a30405721cf6330e677e59bad73583ec995a357b7ffee12fb2d0530b14",
+      "size_bytes": 6587,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/results/canonical/vram.json",
+      "source_path": "results/phase11/constrained-mixed-vs-q5/vram.json",
+      "source_sha256": "a51c554ad6ea9ce67f0eff21de09ca06f4b4eba8be473a12dace59755fd474fa",
+      "migrated_sha256": "a51c554ad6ea9ce67f0eff21de09ca06f4b4eba8be473a12dace59755fd474fa",
+      "size_bytes": 1762,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-CONSTRAINED-MIXED-VS-Q5-11E/patches/phase11e-constrained-mixed-vs-q5.patch",
+      "source_path": "(derived) git diff bb0b69a290c8de609bdce5494bb9b616972f39b9..96b93b1de8acd35cce50055b91ce2ae8d6246039 -- . ':(exclude)results/phase11/constrained-mixed-vs-q5/*'",
+      "source_sha256": "51109806bb40973d7e4ebed2f15cb8f9ccbf3e76f946e6553f688ebcfe83da21",
+      "migrated_sha256": "51109806bb40973d7e4ebed2f15cb8f9ccbf3e76f946e6553f688ebcfe83da21",
+      "size_bytes": 41766,
+      "category": "B_experiment_implementation"
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 10 view, extracted from quality_summary.json's layout_comparison_section10 for a dedicated artifact.",
+  "definition": "at the SAME q8_count=8 / SAME KV-byte budget / SAME residency, does profile-sensitivity placement beat naive placements on mean logit_rel_l2 (measured against the same true F16 reference)?",
+  "profile_sensitivity_mean_rel_l2": 0.0748868,
+  "naive_layouts_mean_rel_l2": {
+    "B_early_contiguous": 0.08524860000000001,
+    "C_late_contiguous": 0.0855776,
+    "D_alternating": 0.086032,
+    "E_random_seeded": 0.0824538
+  },
+  "best_naive_mean_rel_l2": 0.0824538,
+  "sensitivity_beats_all_naive": true,
+  "finding": "Yes -- profile-sensitivity placement still beats every naive equal-budget layout on mean logit_rel_l2 in the forced-Q5 constrained regime (consistent with Phase 11C/11D's finding in the comfortable-memory regime). But ALL mixed layouts, sensitivity-based or naive, are worse than whole-cache Q5 on this metric at PRIMARY POINT B -- sensitivity placement is the best mixed strategy, but 'best mixed' is still not competitive with the simpler whole-cache-Q5 fallback here.",
+  "raw_per_prompt": {
+    "factual_recall_3": {
+      "F_all_q5": 0.094332,
+      "A_profile_sensitivity": 0.092629,
+      "B_early_contiguous": 0.091001,
+      "C_late_contiguous": 0.125845,
+      "D_alternating": 0.114817,
+      "E_random_seeded": 0.103778
+    },
+    "instruction_following_3": {
+      "F_all_q5": 0.058798,
+      "A_profile_sensitivity": 0.065319,
+      "B_early_contiguous": 0.076369,
+      "C_late_contiguous": 0.064399,
+      "D_alternating": 0.080501,
+      "E_random_seeded": 0.072626
+    },
+    "multistep_reasoning_3": {
+      "F_all_q5": 0.051741,
+      "A_profile_sensitivity": 0.061089,
+      "B_early_contiguous": 0.073204,
+      "C_late_contiguous": 0.06502,
+      "D_alternating": 0.066067,
+      "E_random_seeded": 0.07073
+    },
+    "arithmetic_reasoning_3": {
+      "F_all_q5": 0.057158,
+      "A_profile_sensitivity": 0.068963,
+      "B_early_contiguous": 0.091175,
+      "C_late_contiguous": 0.089725,
+      "D_alternating": 0.076119,
+      "E_random_seeded": 0.076816
+    },
+    "logical_reasoning_3": {
+      "F_all_q5": 0.071946,
+      "A_profile_sensitivity": 0.086434,
+      "B_early_contiguous": 0.094494,
+      "C_late_contiguous": 0.082899,
+      "D_alternating": 0.092656,
+      "E_random_seeded": 0.088319
+    }
+  }
+}

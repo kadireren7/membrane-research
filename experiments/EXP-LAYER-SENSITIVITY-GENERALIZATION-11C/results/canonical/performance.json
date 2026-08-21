@@ -1,0 +1,80 @@
+{
+  "cpu": {
+    "all_q8": {
+      "n": 5,
+      "mean": 61.1620062,
+      "median": 62.81996,
+      "min": 52.109231,
+      "max": 65.866094,
+      "stdev": 5.544175668078863
+    },
+    "all_q5": {
+      "n": 5,
+      "mean": 50.5187162,
+      "median": 47.812363,
+      "min": 42.122549,
+      "max": 62.713558,
+      "stdev": 7.809347043667396
+    },
+    "mixed": {
+      "n": 5,
+      "mean": 53.321041199999996,
+      "median": 53.654433,
+      "min": 44.073688,
+      "max": 60.16392,
+      "stdev": 5.842916559446977
+    }
+  },
+  "vulkan": {
+    "all_q8": {
+      "n": 7,
+      "mean": 285.90621714285714,
+      "median": 286.940999,
+      "min": 281.114672,
+      "max": 289.7904,
+      "stdev": 3.420611678767137
+    },
+    "all_q5": {
+      "n": 7,
+      "mean": 281.1166192857143,
+      "median": 281.725748,
+      "min": 278.791895,
+      "max": 283.191028,
+      "stdev": 1.73434656975855
+    },
+    "mixed": {
+      "n": 7,
+      "mean": 282.55688,
+      "median": 282.707627,
+      "min": 279.378486,
+      "max": 285.712291,
+      "stdev": 2.368775217483147
+    }
+  },
+  "provenance_cpu": {
+    "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+    "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "model_identity": "SmolLM2-135M-Instruct-f16",
+    "backend": "CPU",
+    "context_size": 2048,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1",
+    "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+    "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede"
+  },
+  "provenance_vulkan": {
+    "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+    "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "model_identity": "SmolLM2-135M-Instruct-f16",
+    "backend": "Vulkan (real GTX 1650)",
+    "context_size": 2048,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1",
+    "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+    "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede"
+  },
+  "mixed_config_layers": "2,10,11,12,13,14,15,16,17,19,20,21,22,23,27",
+  "note": "Vulkan throughput is tight and consistent across all-Q8/all-Q5/mixed (stdev 1.7-3.4 tok/s on means around 281-286 tok/s) -- no systematic penalty or benefit from heterogeneous tensor types, matching Phase 11B's finding. CPU throughput shows more spread (stdev 5.5-7.8 tok/s on means 50-61 tok/s) on this shared, memory-constrained dev host -- plausibly reflecting real background system load during this long session rather than a genuine KV-type effect; reported as measured, not adjusted."
+}

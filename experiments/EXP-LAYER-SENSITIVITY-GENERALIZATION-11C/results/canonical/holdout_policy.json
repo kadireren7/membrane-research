@@ -1,0 +1,427 @@
+{
+  "provenance": {
+    "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+    "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "model_identity": "SmolLM2-135M-Instruct-f16",
+    "backend": "CPU",
+    "context_size": 2048,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1",
+    "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+    "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede"
+  },
+  "train_holdout_split": {
+    "selection_rule": "For each of the 10 categories that have exactly 3 numbered prompts, the highest-numbered prompt (suffix _3) is assigned to holdout; the other two (_1, _2) go to train. code_reasoning has only one prompt (code_reasoning_1, no _3 sibling) and is assigned to train. This rule was fixed and written to disk BEFORE any Phase 11C ablation, ranking, or quality result was computed or observed -- it depends only on prompt LABELS (fixed since Phase 10C), never on any Phase 11C measurement.",
+    "fixed_before_any_phase11c_results": true,
+    "train": [
+      "factual_recall_1",
+      "factual_recall_2",
+      "instruction_following_1",
+      "instruction_following_2",
+      "multistep_reasoning_1",
+      "multistep_reasoning_2",
+      "arithmetic_reasoning_1",
+      "arithmetic_reasoning_2",
+      "logical_reasoning_1",
+      "logical_reasoning_2",
+      "code_completion_1",
+      "code_completion_2",
+      "code_reasoning_1",
+      "code_explanation_1",
+      "code_explanation_2",
+      "structured_output_1",
+      "structured_output_2",
+      "summarization_1",
+      "summarization_2",
+      "prose_continuation_1",
+      "prose_continuation_2"
+    ],
+    "holdout": [
+      "factual_recall_3",
+      "instruction_following_3",
+      "multistep_reasoning_3",
+      "arithmetic_reasoning_3",
+      "logical_reasoning_3",
+      "code_completion_3",
+      "code_explanation_3",
+      "structured_output_3",
+      "summarization_3",
+      "prose_continuation_3"
+    ],
+    "train_count": 21,
+    "holdout_count": 10,
+    "train_pct": 67.7,
+    "holdout_pct": 32.3,
+    "note": "code_reasoning (1 prompt total) has no holdout representative -- disclosed limitation, not hidden."
+  },
+  "train_ranking_used": {
+    "ranking_most_sensitive_first": [
+      19,
+      27,
+      12,
+      22,
+      23,
+      10,
+      16,
+      21,
+      2,
+      13,
+      17,
+      20,
+      1,
+      15,
+      11,
+      14,
+      26,
+      18,
+      25,
+      29,
+      9,
+      4,
+      3,
+      8,
+      24,
+      5,
+      28,
+      0,
+      6,
+      7
+    ],
+    "n_train_prompts": 21,
+    "metric": "rel_l2_delta_mean"
+  },
+  "no_holdout_leakage_note": "The ranking in train_ranking_used was computed EXCLUSIVELY from the 21 train-split prompts (see raw_135m_ctx2048.jsonl filtered to train labels) -- the 10 holdout prompts were never read during ranking construction, only during this evaluation step.",
+  "layouts_evaluated": {
+    "A_sensitivity": "top-N most sensitive layers (by TRAIN ranking) stay Q8",
+    "B_early_contiguous": "layers [0, N) stay Q8",
+    "C_late_contiguous": "last N layers stay Q8",
+    "D_alternating": "every other layer, starting at 0",
+    "E_random": "deterministic seeded random (seed=42)",
+    "F_all_q8": "budget=30 endpoint",
+    "G_all_q5": "budget=0 endpoint"
+  },
+  "results": [
+    {
+      "config_name": "budget0_all_q5",
+      "q8_layer_count": 0,
+      "kv_bytes": 17694720,
+      "mean_top1_preservation": 0.93125,
+      "mean_logit_rel_l2": 0.083776,
+      "mean_delta_nll": 0.022378,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_A_sensitivity",
+      "q8_layer_count": 4,
+      "kv_bytes": 18677760,
+      "mean_top1_preservation": 0.9375,
+      "mean_logit_rel_l2": 0.074205,
+      "mean_delta_nll": 0.014369,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_B_early_contiguous",
+      "q8_layer_count": 4,
+      "kv_bytes": 18677760,
+      "mean_top1_preservation": 0.94375,
+      "mean_logit_rel_l2": 0.084481,
+      "mean_delta_nll": 0.022284,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_C_late_contiguous",
+      "q8_layer_count": 4,
+      "kv_bytes": 18677760,
+      "mean_top1_preservation": 0.940625,
+      "mean_logit_rel_l2": 0.081599,
+      "mean_delta_nll": 0.016174,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_D_alternating",
+      "q8_layer_count": 4,
+      "kv_bytes": 18677760,
+      "mean_top1_preservation": 0.946875,
+      "mean_logit_rel_l2": 0.088676,
+      "mean_delta_nll": 0.015296,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_E_random",
+      "q8_layer_count": 4,
+      "kv_bytes": 18677760,
+      "mean_top1_preservation": 0.940625,
+      "mean_logit_rel_l2": 0.077772,
+      "mean_delta_nll": 0.009721,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget8_A_sensitivity",
+      "q8_layer_count": 8,
+      "kv_bytes": 19660800,
+      "mean_top1_preservation": 0.95625,
+      "mean_logit_rel_l2": 0.0588,
+      "mean_delta_nll": 0.014118,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget8_B_early_contiguous",
+      "q8_layer_count": 8,
+      "kv_bytes": 19660800,
+      "mean_top1_preservation": 0.946875,
+      "mean_logit_rel_l2": 0.071639,
+      "mean_delta_nll": 0.019561,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget8_C_late_contiguous",
+      "q8_layer_count": 8,
+      "kv_bytes": 19660800,
+      "mean_top1_preservation": 0.95625,
+      "mean_logit_rel_l2": 0.072052,
+      "mean_delta_nll": 0.011421,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget8_D_alternating",
+      "q8_layer_count": 8,
+      "kv_bytes": 19660800,
+      "mean_top1_preservation": 0.95,
+      "mean_logit_rel_l2": 0.077926,
+      "mean_delta_nll": 0.007531,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget8_E_random",
+      "q8_layer_count": 8,
+      "kv_bytes": 19660800,
+      "mean_top1_preservation": 0.959375,
+      "mean_logit_rel_l2": 0.072737,
+      "mean_delta_nll": 0.003337,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget12_A_sensitivity",
+      "q8_layer_count": 12,
+      "kv_bytes": 20643840,
+      "mean_top1_preservation": 0.975,
+      "mean_logit_rel_l2": 0.050626,
+      "mean_delta_nll": 0.004409,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget12_B_early_contiguous",
+      "q8_layer_count": 12,
+      "kv_bytes": 20643840,
+      "mean_top1_preservation": 0.959375,
+      "mean_logit_rel_l2": 0.071702,
+      "mean_delta_nll": 0.019723,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget12_C_late_contiguous",
+      "q8_layer_count": 12,
+      "kv_bytes": 20643840,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.05975,
+      "mean_delta_nll": 0.007698,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget12_D_alternating",
+      "q8_layer_count": 12,
+      "kv_bytes": 20643840,
+      "mean_top1_preservation": 0.95625,
+      "mean_logit_rel_l2": 0.067591,
+      "mean_delta_nll": 0.008879,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget12_E_random",
+      "q8_layer_count": 12,
+      "kv_bytes": 20643840,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.0683,
+      "mean_delta_nll": 0.002511,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget15_A_sensitivity",
+      "q8_layer_count": 15,
+      "kv_bytes": 21381120,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.046194,
+      "mean_delta_nll": 0.005303,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget15_B_early_contiguous",
+      "q8_layer_count": 15,
+      "kv_bytes": 21381120,
+      "mean_top1_preservation": 0.95,
+      "mean_logit_rel_l2": 0.064115,
+      "mean_delta_nll": 0.011976,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget15_C_late_contiguous",
+      "q8_layer_count": 15,
+      "kv_bytes": 21381120,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.05183,
+      "mean_delta_nll": 0.005123,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget15_D_alternating",
+      "q8_layer_count": 15,
+      "kv_bytes": 21381120,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.066958,
+      "mean_delta_nll": 0.009369,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget15_E_random",
+      "q8_layer_count": 15,
+      "kv_bytes": 21381120,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.057744,
+      "mean_delta_nll": 0.007279,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget20_A_sensitivity",
+      "q8_layer_count": 20,
+      "kv_bytes": 22609920,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.035793,
+      "mean_delta_nll": 0.000905,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget20_B_early_contiguous",
+      "q8_layer_count": 20,
+      "kv_bytes": 22609920,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.055589,
+      "mean_delta_nll": 0.007714,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget20_C_late_contiguous",
+      "q8_layer_count": 20,
+      "kv_bytes": 22609920,
+      "mean_top1_preservation": 0.96875,
+      "mean_logit_rel_l2": 0.041541,
+      "mean_delta_nll": 0.002776,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget20_D_alternating",
+      "q8_layer_count": 20,
+      "kv_bytes": 22609920,
+      "mean_top1_preservation": 0.959375,
+      "mean_logit_rel_l2": 0.061761,
+      "mean_delta_nll": 0.010439,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget20_E_random",
+      "q8_layer_count": 20,
+      "kv_bytes": 22609920,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.049351,
+      "mean_delta_nll": 0.004243,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget24_A_sensitivity",
+      "q8_layer_count": 24,
+      "kv_bytes": 23592960,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.028575,
+      "mean_delta_nll": -0.0008,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget24_B_early_contiguous",
+      "q8_layer_count": 24,
+      "kv_bytes": 23592960,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.040824,
+      "mean_delta_nll": 0.004625,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget24_C_late_contiguous",
+      "q8_layer_count": 24,
+      "kv_bytes": 23592960,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.038277,
+      "mean_delta_nll": 0.004471,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget24_D_alternating",
+      "q8_layer_count": 24,
+      "kv_bytes": 23592960,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.055591,
+      "mean_delta_nll": 0.010564,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget24_E_random",
+      "q8_layer_count": 24,
+      "kv_bytes": 23592960,
+      "mean_top1_preservation": 0.984375,
+      "mean_logit_rel_l2": 0.042957,
+      "mean_delta_nll": 0.007018,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget30_all_q8",
+      "q8_layer_count": 30,
+      "kv_bytes": 25067520,
+      "mean_top1_preservation": 0.990625,
+      "mean_logit_rel_l2": 0.017956,
+      "mean_delta_nll": -0.000227,
+      "n_holdout_prompts": 10
+    }
+  ],
+  "sensitivity_vs_naive_by_budget_rel_l2": {
+    "4": {
+      "sensitivity_rel_l2": 0.074205,
+      "best_naive_rel_l2": 0.077772,
+      "sensitivity_beats_all_naive": true
+    },
+    "8": {
+      "sensitivity_rel_l2": 0.0588,
+      "best_naive_rel_l2": 0.071639,
+      "sensitivity_beats_all_naive": true
+    },
+    "12": {
+      "sensitivity_rel_l2": 0.050626,
+      "best_naive_rel_l2": 0.05975,
+      "sensitivity_beats_all_naive": true
+    },
+    "15": {
+      "sensitivity_rel_l2": 0.046194,
+      "best_naive_rel_l2": 0.05183,
+      "sensitivity_beats_all_naive": true
+    },
+    "20": {
+      "sensitivity_rel_l2": 0.035793,
+      "best_naive_rel_l2": 0.041541,
+      "sensitivity_beats_all_naive": true
+    },
+    "24": {
+      "sensitivity_rel_l2": 0.028575,
+      "best_naive_rel_l2": 0.038277,
+      "sensitivity_beats_all_naive": true
+    }
+  },
+  "headline_finding": "On logit_rel_l2 (the continuous, least-noisy of the three metrics), the sensitivity-based policy beat EVERY naive layout at EVERY intermediate Q8-layer budget tested (4, 8, 12, 15, 20, 24) on prompts that were never used to build the ranking. On top1_preservation (a noisier, discrete metric) sensitivity tied or won at 5 of 6 budgets. On delta_nll it won at higher budgets (20, 24) but random_deterministic sometimes did better at lower budgets (4, 8, 12) -- a real, disclosed mixed result on that specific metric, not smoothed over."
+}

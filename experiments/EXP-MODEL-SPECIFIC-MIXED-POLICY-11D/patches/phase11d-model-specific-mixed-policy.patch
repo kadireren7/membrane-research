@@ -1,0 +1,1491 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 53e127c..2033fb4 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -215,6 +215,19 @@ target_link_libraries(membrane_sensitivity_analysis PUBLIC
+ target_include_directories(membrane_sensitivity_analysis PUBLIC
+   tools/membrane-kv-mixed-layer)
+ 
++# Phase 11D: model fingerprint / profile validation / memory-budget
++# layer-selection policy, RESEARCH ONLY (experiment/model-specific-
++# mixed-policy branch) -- llama-free, links against
++# membrane_mixed_layer_policy to reuse its permutation-validation
++# logic rather than re-implementing it. Never linked into
++# membrane-run/membrane-llama-run.
++add_library(membrane_model_profile STATIC
++  tools/membrane-kv-mixed-layer/model_profile.c)
++target_link_libraries(membrane_model_profile PUBLIC
++  membrane_mixed_layer_policy)
++target_include_directories(membrane_model_profile PUBLIC
++  tools/membrane-kv-mixed-layer)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -619,6 +632,13 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_sensitivity_analysis COMMAND test_sensitivity_analysis)
+ 
++  add_executable(test_model_profile
++    tools/membrane-kv-mixed-layer/test_model_profile.c)
++  target_link_libraries(test_model_profile PRIVATE membrane_model_profile)
++  target_include_directories(test_model_profile PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_model_profile COMMAND test_model_profile)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/build_calibration_holdout_quality.py b/scripts/build_calibration_holdout_quality.py
+new file mode 100644
+index 0000000..579f2d8
+--- /dev/null
++++ b/scripts/build_calibration_holdout_quality.py
+@@ -0,0 +1,103 @@
++#!/usr/bin/env python3
++"""
++Phase 11D Task #97: held-out quality comparison across calibration sizes.
++Combines:
++  - NEW real membrane-kv-mixed-layer runs (135M, CPU, ctx=2048, gen=32,
++    10 held-out prompts never used in any ranking construction) for
++    calibration sizes 5 and 10, at Q8 budgets 8 and 15
++  - REUSED Phase 11C results for calibration size 21 (train) at the same
++    two budgets, taken directly from holdout_policy.json's
++    budget8_A_sensitivity / budget15_A_sensitivity records (A_sensitivity
++    IS the size-21 train ranking -- no rerun needed, exact same config)
++
++All three sizes' Q8-layer sets and mean_logit_rel_l2/top1/delta_nll on the
++identical 10 held-out prompts are reported side by side.
++"""
++import json
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++GEN = REPO / "results" / "phase11" / "generalization"
++OUT = REPO / "results" / "phase11" / "model-specific-policy"
++
++NEW_RUNS = {
++    ("5", 8): "/tmp/cal_size5_budget8.json",
++    ("5", 15): "/tmp/cal_size5_budget15.json",
++    ("10", 8): "/tmp/cal_size10_budget8.json",
++    ("10", 15): "/tmp/cal_size10_budget15.json",
++}
++
++
++def main():
++    cal = json.loads((OUT / "calibration_size_analysis.json").read_text())
++    hp = json.loads((GEN / "holdout_policy.json").read_text())
++    hp_by_config = {r["config_name"]: r for r in hp["results"]}
++
++    entries = []
++    for size in ("5", "10", "21"):
++        ranking = cal["results"]["135m"][size]["ranking_most_sensitive_first"]
++        for budget in (8, 15):
++            q8_layers = sorted(ranking[:budget])
++            if size == "21":
++                src = hp_by_config[f"budget{budget}_A_sensitivity"]
++                entries.append({
++                    "calibration_size": 21,
++                    "q8_budget": budget,
++                    "q8_layers": q8_layers,
++                    "mean_top1_preservation": src["mean_top1_preservation"],
++                    "mean_logit_rel_l2": src["mean_logit_rel_l2"],
++                    "mean_delta_nll": src["mean_delta_nll"],
++                    "n_holdout_prompts": src["n_holdout_prompts"],
++                    "source": "reused Phase 11C holdout_policy.json (budget{}_A_sensitivity, identical config, no rerun)".format(budget),
++                })
++            else:
++                data = json.loads(Path(NEW_RUNS[(size, budget)]).read_text())
++                agg = data["aggregate"]
++                entries.append({
++                    "calibration_size": int(size),
++                    "q8_budget": budget,
++                    "q8_layers": q8_layers,
++                    "mean_top1_preservation": agg["mean_top1_preservation"],
++                    "mean_logit_rel_l2": agg["mean_logit_rel_l2"],
++                    "mean_delta_nll": agg["mean_delta_nll"],
++                    "n_holdout_prompts": agg["n_prompts"],
++                    "source": "new membrane-kv-mixed-layer run, build-cpu-rc1, CPU, ctx=2048, gen_tokens=32",
++                })
++
++    report = {
++        "schema_version": 1,
++        "phase": "11D",
++        "model": "135m",
++        "note": (
++            "Held-out quality (10 held-out prompts, never touched during any "
++            "ranking construction) for calibration-set-size rankings at Q8 "
++            "budgets 8 and 15. Sizes 5 and 10 are new real inference; size 21 "
++            "is reused directly from Phase 11C's holdout_policy.json since "
++            "A_sensitivity there IS the size-21 train ranking at identical "
++            "config -- rerunning it would be redundant duplicate compute."
++        ),
++        "entries": entries,
++        "naive_layout_reference_at_budget8": {
++            "B_early_contiguous": hp_by_config["budget8_B_early_contiguous"]["mean_logit_rel_l2"],
++            "C_late_contiguous": hp_by_config["budget8_C_late_contiguous"]["mean_logit_rel_l2"],
++            "D_alternating": hp_by_config["budget8_D_alternating"]["mean_logit_rel_l2"],
++            "E_random": hp_by_config["budget8_E_random"]["mean_logit_rel_l2"],
++        },
++        "naive_layout_reference_at_budget15": {
++            "B_early_contiguous": hp_by_config["budget15_B_early_contiguous"]["mean_logit_rel_l2"],
++            "C_late_contiguous": hp_by_config["budget15_C_late_contiguous"]["mean_logit_rel_l2"],
++            "D_alternating": hp_by_config["budget15_D_alternating"]["mean_logit_rel_l2"],
++            "E_random": hp_by_config["budget15_E_random"]["mean_logit_rel_l2"],
++        },
++    }
++
++    out_path = OUT / "calibration_size_holdout_quality.json"
++    out_path.write_text(json.dumps(report, indent=2) + "\n")
++    print(f"wrote {out_path}")
++    for e in entries:
++        print(f"  size={e['calibration_size']:>2} budget={e['q8_budget']:>2} "
++              f"rel_l2={e['mean_logit_rel_l2']:.4f} top1={e['mean_top1_preservation']:.4f}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/build_calibration_sizes.py b/scripts/build_calibration_sizes.py
+new file mode 100644
+index 0000000..fb7cfb2
+--- /dev/null
++++ b/scripts/build_calibration_sizes.py
+@@ -0,0 +1,92 @@
++#!/usr/bin/env python3
++"""
++Phase 11D Section 5: PRE-REGISTER the calibration-prompt-subsets used for
++the calibration-set-size investigation, BEFORE any ranking, correlation, or
++quality metric is computed from them. This file must be run (and its output
++committed / inspected) before calibration_size_analysis.py is ever run.
++
++Selection rule (fixed by prompt LABELS and the category order already fixed
++in prompts.json since Phase 10C -- never by any Phase 11C/11D measurement):
++round-robin across the 11 categories in their prompts.json order, taking
++each category's train prompts in numeric-suffix order (_1 before _2).
++code_reasoning has only one train prompt (code_reasoning_1) and simply drops
++out of the second round. This produces a category-diverse prefix at every
++size instead of exhausting one category before touching the next.
++
++Sizes: 5, 10, 15, 21 (= the full pre-registered train set, Phase 11C's own
++train/holdout split) are prefixes of this round-robin train order. Size 31
++is the full 31-prompt set (all 21 train + all 10 holdout, appended in the
++holdout list's own prompts.json order) -- used ONLY as a data-ceiling
++reference ranking, never as a held-out-validated operational profile
++(there is no held-out data left once 31 prompts are used for calibration).
++"""
++import json
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++GEN = REPO / "results" / "phase11" / "generalization"
++OUT = REPO / "results" / "phase11" / "model-specific-policy"
++
++
++def main():
++    prompts = json.loads((GEN / "prompts.json").read_text())
++    categories = list(prompts["categories"].keys())
++    train = set(prompts["train_holdout_split"]["train"])
++    holdout_order = prompts["train_holdout_split"]["holdout"]
++
++    # round 1: each category's train prompt suffix _1 (in category order)
++    round1 = []
++    for cat in categories:
++        for name in prompts["categories"][cat]:
++            if name in train and name.endswith("_1"):
++                round1.append(name)
++                break
++    # round 2: each category's train prompt suffix _2 (in category order),
++    # skipping categories with no _2 train prompt (code_reasoning)
++    round2 = []
++    for cat in categories:
++        for name in prompts["categories"][cat]:
++            if name in train and name.endswith("_2"):
++                round2.append(name)
++                break
++
++    train_round_robin = round1 + round2
++    assert set(train_round_robin) == train, (set(train_round_robin), train)
++    assert len(train_round_robin) == 21, len(train_round_robin)
++
++    sizes = {
++        "5": train_round_robin[:5],
++        "10": train_round_robin[:10],
++        "15": train_round_robin[:15],
++        "21": train_round_robin[:21],
++        "31": train_round_robin + holdout_order,
++    }
++    assert len(sizes["31"]) == 31
++
++    doc = {
++        "schema_version": 1,
++        "phase": "11D",
++        "note": __doc__.strip(),
++        "selection_rule": (
++            "Round-robin across the 11 categories in prompts.json's own "
++            "fixed category order, train prompts only, numeric suffix _1 "
++            "before _2 within each category; code_reasoning (1 train "
++            "prompt) drops out after round 1. Sizes 5/10/15/21 are prefixes "
++            "of this 21-element order; size 31 appends the 10 holdout "
++            "prompts (in prompts.json's fixed holdout order) after all 21 "
++            "train prompts."
++        ),
++        "fixed_before_any_phase11d_ranking_or_quality_result": True,
++        "train_round_robin_order": train_round_robin,
++        "sizes": sizes,
++    }
++    OUT.mkdir(parents=True, exist_ok=True)
++    out_path = OUT / "calibration_sizes.json"
++    out_path.write_text(json.dumps(doc, indent=2) + "\n")
++    print(f"wrote {out_path}")
++    for k, v in sizes.items():
++        print(f"  size {k}: {v}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/build_holdout_policy_360m.py b/scripts/build_holdout_policy_360m.py
+new file mode 100644
+index 0000000..3ebef60
+--- /dev/null
++++ b/scripts/build_holdout_policy_360m.py
+@@ -0,0 +1,110 @@
++#!/usr/bin/env python3
++"""
++Phase 11D Task #98: held-out naive-layout comparison for 360M, the exact
++same methodology Phase 11C ran for 135M (results/phase11/generalization/
++holdout_policy.json), just never run for 360M there. Consumes the raw
++per-config JSON emitted by run_360m_holdout_sweep.sh (10 held-out prompts,
++never touched by the train21 ranking construction).
++"""
++import json
++import subprocess
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++OUT = REPO / "results" / "phase11" / "model-specific-policy"
++RAW_PATH = Path("/tmp/claude-1000/-home-kadirerenaltintas-membrane/"
++                 "c73a6507-4d97-4c38-9698-232cbf51aef5/scratchpad/holdout_360m_raw.jsonl")
++
++
++def git_commit():
++    return subprocess.check_output(["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True).strip()
++
++
++def main():
++    rows = [json.loads(l) for l in RAW_PATH.read_text().splitlines() if l.strip()]
++    assert len(rows) == 32, f"expected 32 configs, got {len(rows)}"
++
++    results = []
++    by_config = {}
++    for row in rows:
++        cfg = row["config_name"]
++        agg = row["raw"]["aggregate"]
++        entry = {
++            "config_name": cfg,
++            "q8_layer_count": row["raw"]["q8_layer_count"],
++            "kv_bytes": row["raw"]["theoretical_mixed_bytes"],
++            "mean_top1_preservation": agg["mean_top1_preservation"],
++            "mean_logit_rel_l2": agg["mean_logit_rel_l2"],
++            "mean_delta_nll": agg["mean_delta_nll"],
++            "n_holdout_prompts": agg["n_prompts"],
++        }
++        results.append(entry)
++        by_config[cfg] = entry
++
++    budgets = [4, 9, 13, 16, 21, 26]
++    sensitivity_vs_naive = {}
++    for b in budgets:
++        sens = by_config[f"budget{b}_A_sensitivity"]["mean_logit_rel_l2"]
++        naive_vals = [by_config[f"budget{b}_{tag}"]["mean_logit_rel_l2"]
++                      for tag in ("B_early_contiguous", "C_late_contiguous", "D_alternating", "E_random")]
++        best_naive = min(naive_vals)
++        sensitivity_vs_naive[str(b)] = {
++            "sensitivity_rel_l2": sens,
++            "best_naive_rel_l2": best_naive,
++            "sensitivity_beats_all_naive": sens < best_naive,
++        }
++
++    all_beat = all(v["sensitivity_beats_all_naive"] for v in sensitivity_vs_naive.values())
++
++    doc = {
++        "schema_version": 1,
++        "phase": "11D",
++        "note": ("Task #98: 360M held-out naive-layout comparison, same methodology as Phase 11C's "
++                 "holdout_policy.json (135M) -- A_sensitivity uses the real train21 ranking "
++                 "(profile_360m_train21.json), B/C/D/E are naive comparison layouts, all evaluated "
++                 "on the same 10 held-out prompts never touched during ranking construction."),
++        "provenance": {
++            "membrane_commit": git_commit(),
++            "model_identity": "SmolLM2-360M-Instruct-f16",
++            "backend": "CPU",
++            "context_size": 2048,
++            "random_seed": 42,
++            "q8_type": "Q8_0",
++            "q5_type": "Q5_1",
++        },
++        "train_ranking_used": {
++            "source": "results/phase11/model-specific-policy/profile_360m_train21.json",
++            "n_train_prompts": 21,
++            "metric": "rel_l2_delta_mean",
++        },
++        "layouts_evaluated": {
++            "A_sensitivity": "top-N most sensitive layers (by profile_360m_train21.json) stay Q8",
++            "B_early_contiguous": "layers [0, N) stay Q8",
++            "C_late_contiguous": "last N layers stay Q8",
++            "D_alternating": "every other layer, starting at 0",
++            "E_random": "deterministic seeded random (seed=42)",
++            "budget0_all_q5": "budget=0 endpoint",
++            "budget32_all_q8": "budget=32 endpoint",
++        },
++        "results": results,
++        "sensitivity_vs_naive_by_budget_rel_l2": sensitivity_vs_naive,
++        "headline_finding": (
++            f"On logit_rel_l2, the sensitivity-based (train21) policy beat every naive layout at "
++            f"{'every' if all_beat else 'most'} intermediate Q8-layer budget tested "
++            f"({', '.join(str(b) for b in budgets)}) on 360M, on prompts never used to build the ranking."
++        ),
++        "all_budgets_sensitivity_beats_all_naive": all_beat,
++    }
++
++    out_path = OUT / "holdout_policy_360m.json"
++    out_path.write_text(json.dumps(doc, indent=2) + "\n")
++    print(f"wrote {out_path}")
++    for b in budgets:
++        v = sensitivity_vs_naive[str(b)]
++        print(f"  budget={b:>2} sens={v['sensitivity_rel_l2']:.4f} best_naive={v['best_naive_rel_l2']:.4f} "
++              f"beats_all_naive={v['sensitivity_beats_all_naive']}")
++    print(f"all_budgets_sensitivity_beats_all_naive={all_beat}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/build_model_profile.py b/scripts/build_model_profile.py
+new file mode 100644
+index 0000000..0e6059b
+--- /dev/null
++++ b/scripts/build_model_profile.py
+@@ -0,0 +1,162 @@
++#!/usr/bin/env python3
++"""
++Phase 11D Section 6/7: build a versioned model-specific offline sensitivity
++profile from Phase 11C's existing raw ablation data. No new inference --
++this is pure reanalysis of results/phase11/generalization/rankings.json
++(per-prompt, per-layer rel_l2/delta_nll/top1 deltas vs the all-Q8 baseline),
++restricted to the pre-registered TRAIN prompt subset only, so the profile
++can later be scored honestly against the untouched HOLDOUT prompts.
++
++Ranking metric: rel_l2_delta_mean, most-sensitive-first (highest mean
++degradation when that single layer is flipped to Q5 first). This is the
++same metric Phase 11C's summary.json identifies as the one with a clear,
++consistent held-out win ("YES, clearly on rel_l2") -- delta_nll and top1
++are computed and stored independently alongside it (never discarded), but
++are not combined into rel_l2 via any formula. There is no combined score
++in this profile: rank order is rel_l2_delta_mean alone.
++"""
++import json
++import hashlib
++import subprocess
++import sys
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++GEN = REPO / "results" / "phase11" / "generalization"
++OUT = REPO / "results" / "phase11" / "model-specific-policy"
++
++FINGERPRINTS = {
++    "135m": {
++        "architecture": "llama",
++        "n_layer": 30,
++        "n_embd": 576,
++        "n_head": 9,
++        "n_head_kv": 3,
++        "n_embd_head": 64,
++    },
++    "360m": {
++        "architecture": "llama",
++        "n_layer": 32,
++        "n_embd": 960,
++        "n_head": 15,
++        "n_head_kv": 5,
++        "n_embd_head": 64,
++    },
++}
++
++MODEL_IDENTITY = {
++    "135m": "SmolLM2-135M-Instruct-f16",
++    "360m": "SmolLM2-360M-Instruct-f16",
++}
++
++
++def git_commit():
++    return subprocess.check_output(
++        ["git", "-C", str(REPO), "rev-parse", "HEAD"], text=True
++    ).strip()
++
++
++def sha256_file(p: Path) -> str:
++    h = hashlib.sha256()
++    h.update(p.read_bytes())
++    return h.hexdigest()
++
++
++def build_profile(model_key: str, prompts: dict, rankings: dict, calib_prompts, calib_label):
++    fp = FINGERPRINTS[model_key]
++    n_layer = fp["n_layer"]
++    ranking_key = f"{model_key}_ctx2048"
++    per_prompt = rankings[ranking_key]["per_prompt_rankings"]
++
++    covered = set(rankings[ranking_key]["prompts_covered"])
++    missing = set(calib_prompts) - covered
++    if missing:
++        raise SystemExit(f"{model_key}: calibration prompts not covered by raw data: {missing}")
++
++    sums = {i: {"rel_l2_delta": 0.0, "delta_nll_delta": 0.0, "top1_loss": 0.0} for i in range(n_layer)}
++    n = len(calib_prompts)
++    for pname in calib_prompts:
++        by_layer = per_prompt[pname]["raw_by_layer"]
++        for i in range(n_layer):
++            rec = by_layer[str(i)]
++            sums[i]["rel_l2_delta"] += rec["rel_l2_delta"]
++            sums[i]["delta_nll_delta"] += rec["delta_nll_delta"]
++            sums[i]["top1_loss"] += rec["top1_loss"]
++
++    per_layer = []
++    for i in range(n_layer):
++        per_layer.append({
++            "layer": i,
++            "rel_l2_delta_mean": sums[i]["rel_l2_delta"] / n,
++            "delta_nll_delta_mean": sums[i]["delta_nll_delta"] / n,
++            "top1_loss_mean": sums[i]["top1_loss"] / n,
++        })
++
++    ranking_most_sensitive_first = [
++        rec["layer"] for rec in sorted(per_layer, key=lambda r: r["rel_l2_delta_mean"], reverse=True)
++    ]
++
++    profile = {
++        "schema_version": 1,
++        "phase": "11D",
++        "note": (
++            "Model-specific offline sensitivity profile. RESEARCH ARTIFACT ONLY "
++            "-- not consumed by any product CLI, --kv mixed does not exist as a "
++            "public flag. Built by pure reanalysis of Phase 11C raw ablation "
++            "data (results/phase11/generalization/), zero new inference. "
++            "Ranking metric is rel_l2_delta_mean alone (most-sensitive-first); "
++            "delta_nll_delta_mean and top1_loss_mean are independent raw "
++            "metrics preserved alongside it, not combined into any formula."
++        ),
++        "model_identity": MODEL_IDENTITY[model_key],
++        "model_fingerprint": fp,
++        "calibration": {
++            "label": calib_label,
++            "n_prompts": n,
++            "prompts": calib_prompts,
++            "source": "results/phase11/generalization/prompts.json train_holdout_split"
++                      if calib_label == "train21" else
++                      "results/phase11/generalization/prompts.json (pre-registered subset selection, see calibration_size_analysis.json)",
++        },
++        "ranking_metric": "rel_l2_delta_mean",
++        "ranking_most_sensitive_first": ranking_most_sensitive_first,
++        "per_layer_raw_metrics": per_layer,
++        "provenance": {
++            "membrane_commit": git_commit(),
++            "source_rankings_file": "results/phase11/generalization/rankings.json",
++            "source_rankings_sha256": sha256_file(GEN / "rankings.json"),
++            "source_prompts_file": "results/phase11/generalization/prompts.json",
++            "generated_by": "scripts/build_model_profile.py",
++        },
++    }
++    return profile
++
++
++def main():
++    prompts = json.loads((GEN / "prompts.json").read_text())
++    rankings = json.loads((GEN / "rankings.json").read_text())
++    train = prompts["train_holdout_split"]["train"]
++
++    OUT.mkdir(parents=True, exist_ok=True)
++    for model_key in ("135m", "360m"):
++        profile = build_profile(model_key, prompts, rankings, train, "train21")
++        out_path = OUT / f"profile_{model_key}_train21.json"
++        out_path.write_text(json.dumps(profile, indent=2) + "\n")
++        print(f"wrote {out_path} ({len(profile['ranking_most_sensitive_first'])} layers)")
++
++    # cross-check against Phase 11C's existing 135M train-derived ranking
++    # (holdout_policy.json), which was computed independently at the time.
++    hp = json.loads((GEN / "holdout_policy.json").read_text())
++    existing = hp["train_ranking_used"]["ranking_most_sensitive_first"]
++    fresh = json.loads((OUT / "profile_135m_train21.json").read_text())["ranking_most_sensitive_first"]
++    if existing == fresh:
++        print("cross-check OK: 135M train21 ranking matches Phase 11C's holdout_policy.json exactly")
++    else:
++        print("cross-check MISMATCH between fresh ranking and Phase 11C holdout_policy.json:")
++        print("  existing:", existing)
++        print("  fresh:   ", fresh)
++        sys.exit(1)
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/calibration_size_analysis.py b/scripts/calibration_size_analysis.py
+new file mode 100644
+index 0000000..79128ef
+--- /dev/null
++++ b/scripts/calibration_size_analysis.py
+@@ -0,0 +1,133 @@
++#!/usr/bin/env python3
++"""
++Phase 11D Section 5: calibration-set-size analysis. Pure reanalysis of
++Phase 11C's existing raw ablation data (results/phase11/generalization/
++rankings.json) against the PRE-REGISTERED calibration subsets written by
++build_calibration_sizes.py (must be run first, unmodified since).
++
++For each model and each calibration size, builds a rel_l2_delta_mean
++ranking from exactly that subset of prompts (same method as
++build_model_profile.py) and reports, against the size-31 (data-ceiling)
++ranking and against the size-21 (operational train) ranking:
++  - Spearman rho, Kendall tau-b (full-ranking rank correlation)
++  - top-5 / top-10 overlap (set overlap of the K most-sensitive layers)
++
++This produces the STABILITY signal only. It says nothing about held-out
++quality on its own -- that requires actually applying a small-calibration
++ranking's layer selection and measuring real MEMBRANE quality on held-out
++prompts, which is Task #97 (new inference, not reanalysis).
++"""
++import json
++from pathlib import Path
++
++REPO = Path(__file__).resolve().parent.parent
++GEN = REPO / "results" / "phase11" / "generalization"
++OUT = REPO / "results" / "phase11" / "model-specific-policy"
++
++
++def spearman_rho(a, b):
++    n = len(a)
++    rank_a = {v: i for i, v in enumerate(a)}
++    rank_b = {v: i for i, v in enumerate(b)}
++    d2sum = sum((rank_a[k] - rank_b[k]) ** 2 for k in rank_a)
++    return 1.0 - (6.0 * d2sum) / (n * (n * n - 1))
++
++
++def kendall_tau(a, b):
++    n = len(a)
++    rank_a = {v: i for i, v in enumerate(a)}
++    rank_b = {v: i for i, v in enumerate(b)}
++    items = list(rank_a.keys())
++    concordant = 0
++    discordant = 0
++    for i in range(n):
++        for j in range(i + 1, n):
++            xi, xj = rank_a[items[i]], rank_a[items[j]]
++            yi, yj = rank_b[items[i]], rank_b[items[j]]
++            s = (xi - xj) * (yi - yj)
++            if s > 0:
++                concordant += 1
++            elif s < 0:
++                discordant += 1
++    total = n * (n - 1) // 2
++    return (concordant - discordant) / total
++
++
++def topk_overlap(a, b, k):
++    return len(set(a[:k]) & set(b[:k])) / k
++
++
++def build_ranking(model_key, per_prompt, n_layer, calib_prompts):
++    sums = [0.0] * n_layer
++    for pname in calib_prompts:
++        by_layer = per_prompt[pname]["raw_by_layer"]
++        for i in range(n_layer):
++            sums[i] += by_layer[str(i)]["rel_l2_delta"]
++    means = [s / len(calib_prompts) for s in sums]
++    order = sorted(range(n_layer), key=lambda i: means[i], reverse=True)
++    return order
++
++
++def main():
++    calib = json.loads((OUT / "calibration_sizes.json").read_text())
++    if not calib.get("fixed_before_any_phase11d_ranking_or_quality_result"):
++        raise SystemExit("calibration_sizes.json missing pre-registration flag")
++    rankings = json.loads((GEN / "rankings.json").read_text())
++
++    n_layers = {"135m": 30, "360m": 32}
++    sizes = ["5", "10", "15", "21", "31"]
++
++    report = {
++        "schema_version": 1,
++        "phase": "11D",
++        "note": "Calibration-set-size stability analysis, pure reanalysis of Phase 11C raw data, no new inference.",
++        "pre_registration_file": "results/phase11/model-specific-policy/calibration_sizes.json",
++        "results": {},
++    }
++
++    for model_key in ("135m", "360m"):
++        n_layer = n_layers[model_key]
++        per_prompt = rankings[f"{model_key}_ctx2048"]["per_prompt_rankings"]
++        rankings_by_size = {}
++        for size in sizes:
++            prompts = calib["sizes"][size]
++            rankings_by_size[size] = build_ranking(model_key, per_prompt, n_layer, prompts)
++
++        ref31 = rankings_by_size["31"]
++        ref21 = rankings_by_size["21"]
++
++        per_size = {}
++        for size in sizes:
++            r = rankings_by_size[size]
++            per_size[size] = {
++                "ranking_most_sensitive_first": r,
++                "vs_size31": {
++                    "spearman_rho": spearman_rho(r, ref31),
++                    "kendall_tau": kendall_tau(r, ref31),
++                    "top5_overlap": topk_overlap(r, ref31, 5),
++                    "top10_overlap": topk_overlap(r, ref31, 10),
++                },
++                "vs_size21_train": {
++                    "spearman_rho": spearman_rho(r, ref21),
++                    "kendall_tau": kendall_tau(r, ref21),
++                    "top5_overlap": topk_overlap(r, ref21, 5),
++                    "top10_overlap": topk_overlap(r, ref21, 10),
++                },
++            }
++
++        report["results"][model_key] = per_size
++
++    out_path = OUT / "calibration_size_analysis.json"
++    out_path.write_text(json.dumps(report, indent=2) + "\n")
++    print(f"wrote {out_path}")
++
++    for model_key in ("135m", "360m"):
++        print(f"\n{model_key}:")
++        for size in sizes:
++            v = report["results"][model_key][size]["vs_size31"]
++            print(f"  size={size:>2}  vs31: rho={v['spearman_rho']:.3f} tau={v['kendall_tau']:.3f} "
++                  f"top5={v['top5_overlap']:.2f} top10={v['top10_overlap']:.2f}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 6494544..6fdb1e8 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1878,6 +1878,211 @@ def _c87():
+ 	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported product claims, product CLI untouched"
+ 
+ 
++V11D_DIR = REPO_ROOT / "results" / "phase11" / "model-specific-policy"
++_V11D_CACHE = {}
++
++
++def _load_v11d(name):
++	key = name
++	if key not in _V11D_CACHE:
++		path = V11D_DIR / name
++		if name.endswith(".jsonl"):
++			rows = []
++			with path.open() as f:
++				for line in f:
++					line = line.strip()
++					if line:
++						rows.append(json.loads(line))
++			_V11D_CACHE[key] = rows
++		else:
++			_V11D_CACHE[key] = json.loads(path.read_text())
++	return _V11D_CACHE[key]
++
++
++# Ground truth, parsed directly from the real GGUF metadata of both
++# models (results/phase11/model-specific-policy/profile_*.json's
++# model_fingerprint fields must agree with this exactly -- this is the
++# independent source of truth, not just re-reading the profile's own claim).
++_V11D_REAL_FINGERPRINTS = {
++	"135m": {"architecture": "llama", "n_layer": 30, "n_embd": 576, "n_head": 9, "n_head_kv": 3, "n_embd_head": 64},
++	"360m": {"architecture": "llama", "n_layer": 32, "n_embd": 960, "n_head": 15, "n_head_kv": 5, "n_embd_head": 64},
++}
++
++
++@check("Phase 11D: profile_135m_train21.json / profile_360m_train21.json "
++	"exist, fingerprints exactly match real GGUF metadata, and each "
++	"ranking is a genuine permutation of [0, n_layer)")
++def _c88():
++	bad = []
++	for m, n_layer in (("135m", 30), ("360m", 32)):
++		p = _load_v11d(f"profile_{m}_train21.json")
++		fp = p.get("model_fingerprint", {})
++		if fp != _V11D_REAL_FINGERPRINTS[m]:
++			bad.append(f"{m}: fingerprint {fp} != real GGUF metadata {_V11D_REAL_FINGERPRINTS[m]}")
++		ranking = p.get("ranking_most_sensitive_first", [])
++		if sorted(ranking) != list(range(n_layer)):
++			bad.append(f"{m}: ranking is not a permutation of [0,{n_layer})")
++		if len(p.get("per_layer_raw_metrics", [])) != n_layer:
++			bad.append(f"{m}: per_layer_raw_metrics has {len(p.get('per_layer_raw_metrics', []))} entries, expected {n_layer}")
++	return len(bad) == 0, "; ".join(bad) if bad else "both profiles' fingerprints and rankings verified against ground truth"
++
++
++@check("Phase 11D: both profiles' rankings are independently reproducible "
++	"from Phase 11C's raw ablation data restricted to the pre-registered "
++	"21-prompt train set (recomputed here, not just trusted)")
++def _c89():
++	prompts = _load_v11c("prompts.json")
++	train = prompts["train_holdout_split"]["train"]
++	rankings = _load_v11c("rankings.json")
++	bad = []
++	for m, n_layer in (("135m", 30), ("360m", 32)):
++		per_prompt = rankings[f"{m}_ctx2048"]["per_prompt_rankings"]
++		sums = [0.0] * n_layer
++		for pname in train:
++			by_layer = per_prompt[pname]["raw_by_layer"]
++			for i in range(n_layer):
++				sums[i] += by_layer[str(i)]["rel_l2_delta"]
++		means = [s / len(train) for s in sums]
++		recomputed = sorted(range(n_layer), key=lambda i: means[i], reverse=True)
++		claimed = _load_v11d(f"profile_{m}_train21.json")["ranking_most_sensitive_first"]
++		if recomputed != claimed:
++			bad.append(f"{m}: recomputed[:5]={recomputed[:5]} vs claimed[:5]={claimed[:5]}")
++	return len(bad) == 0, "; ".join(bad) if bad else "both rankings reproduce exactly from raw train-restricted data"
++
++
++@check("Phase 11D: calibration_sizes.json is pre-registered (flag set), "
++	"sizes 5/10/15/21 are exact prefixes of the 21-element round-robin "
++	"train order, size 31 is train+holdout with no duplicates")
++def _c90():
++	cal = _load_v11d("calibration_sizes.json")
++	bad = []
++	if not cal.get("fixed_before_any_phase11d_ranking_or_quality_result"):
++		bad.append("missing pre-registration flag")
++	order = cal.get("train_round_robin_order", [])
++	if len(order) != 21 or len(set(order)) != 21:
++		bad.append(f"train_round_robin_order has {len(order)} entries ({len(set(order))} unique), expected 21 unique")
++	for size in ("5", "10", "15", "21"):
++		got = cal.get("sizes", {}).get(size, [])
++		want = order[:int(size)]
++		if got != want:
++			bad.append(f"size {size}: {got} is not the exact {size}-prefix of the round-robin order")
++	size31 = cal.get("sizes", {}).get("31", [])
++	if len(size31) != 31 or len(set(size31)) != 31:
++		bad.append(f"size 31 has {len(size31)} entries ({len(set(size31))} unique), expected 31 unique")
++	return len(bad) == 0, "; ".join(bad) if bad else "pre-registration flag set, all sizes are exact prefixes/unions as claimed"
++
++
++@check("Phase 11D: calibration_size_analysis.json's rank-correlation "
++	"fields (Spearman rho, Kendall tau, top-k overlap) are all within "
++	"their valid mathematical ranges, and size=31-vs-31 is a perfect "
++	"self-match (rho=1, tau=1, overlap=1)")
++def _c91():
++	cal = _load_v11d("calibration_size_analysis.json")
++	bad = []
++	for m, sizes in cal.get("results", {}).items():
++		for size, entry in sizes.items():
++			for ref in ("vs_size31", "vs_size21_train"):
++				v = entry.get(ref, {})
++				if not (-1.0 - 1e-9 <= v.get("spearman_rho", 0) <= 1.0 + 1e-9):
++					bad.append(f"{m}/{size}/{ref}: spearman_rho={v.get('spearman_rho')} out of [-1,1]")
++				if not (-1.0 - 1e-9 <= v.get("kendall_tau", 0) <= 1.0 + 1e-9):
++					bad.append(f"{m}/{size}/{ref}: kendall_tau={v.get('kendall_tau')} out of [-1,1]")
++				for k in ("top5_overlap", "top10_overlap"):
++					if not (0.0 - 1e-9 <= v.get(k, 0) <= 1.0 + 1e-9):
++						bad.append(f"{m}/{size}/{ref}/{k}={v.get(k)} out of [0,1]")
++		v31 = sizes.get("31", {}).get("vs_size31", {})
++		if abs(v31.get("spearman_rho", 0) - 1.0) > 1e-9 or abs(v31.get("kendall_tau", 0) - 1.0) > 1e-9:
++			bad.append(f"{m}: size31-vs-size31 self-comparison is not a perfect match ({v31})")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "every correlation/overlap field in range; size31 self-match is perfect"
++
++
++@check("Phase 11D: cross_model_safety.json -- every case's actual_reason "
++	"matches its expected_reason, and no MISMATCH/INVALID scenario was "
++	"reported as ok=true (a wrong-model application must never validate)")
++def _c92():
++	cms = _load_v11d("cross_model_safety.json")
++	bad = []
++	for c in cms.get("cases", []):
++		if c["actual_reason"] != c["expected_reason"]:
++			bad.append(f"{c['label']}: actual_reason={c['actual_reason']} != expected={c['expected_reason']}")
++		if c["expected_reason"] != "OK" and c["actual_ok"]:
++			bad.append(f"{c['label']}: expected_reason={c['expected_reason']} but actual_ok=true")
++	return len(bad) == 0, "; ".join(bad) if bad else "every case's reason matches expectation; no unsafe case validated"
++
++
++@check("Phase 11D: budget_sweep.json -- actual_bytes never exceeds "
++	"budget_bytes in any byte-budget entry, and every q8_count-sweep "
++	"total_bytes matches the exact ggml byte formula "
++	"(q8_count*bytes_q8 + (n_layer-q8_count)*bytes_q5)")
++def _c93():
++	bs = _load_v11d("budget_sweep.json")
++	bad = []
++	for m, data in bs.get("byte_budget_sweep", {}).items():
++		for r in data.get("results", []):
++			if r["ok"] and r["actual_bytes"] > r["budget_bytes"]:
++				bad.append(f"{m}: budget={r['budget_bytes']} actual={r['actual_bytes']} exceeds budget")
++	for m, data in bs.get("q8_count_sweep", {}).items():
++		n_layer = data["n_layer"]
++		bq8 = data["bytes_per_layer_q8"]
++		bq5 = data["bytes_per_layer_q5"]
++		for r in data.get("results", []):
++			expected = r["q8_count"] * bq8 + (n_layer - r["q8_count"]) * bq5
++			if r["total_bytes"] != expected:
++				bad.append(f"{m}: q8_count={r['q8_count']} total_bytes={r['total_bytes']} != expected {expected}")
++	return len(bad) == 0, "; ".join(bad[:5]) if bad else "actual_bytes<=budget everywhere; q8_count byte formula matches exactly"
++
++
++@check("Phase 11D: no absolute filesystem paths anywhere in any "
++	"model-specific-policy artifact file (JSON or JSONL)")
++def _c94():
++	hits = []
++	pattern = re.compile(r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+')
++	for path in sorted(V11D_DIR.glob("*")):
++		if path.suffix not in (".json", ".jsonl"):
++			continue
++		text = path.read_text()
++		found = pattern.findall(text)
++		if found:
++			hits.append(f"{path.name}: {found[:3]}")
++	return len(hits) == 0, "; ".join(hits[:5]) if hits else "none found across all model-specific-policy artifact files"
++
++
++@check("Phase 11D: no unsupported product claims in model-specific-policy "
++	"artifacts -- no '--kv mixed' flag documented as real/shipped, no "
++	"merge claim, product CLI (membrane-run) unmodified by this phase")
++def _c95():
++	bad = []
++	for path in sorted(V11D_DIR.glob("*.json")):
++		text = path.read_text()
++		if re.search(r"--kv\s+mixed\b", text) and not re.search(
++				r"does not exist as a public flag|not a real, shipped flag|no --kv mixed\b", text, re.IGNORECASE):
++			bad.append(f"{path.name}: documents '--kv mixed' without disclaiming it as unshipped")
++		if re.search(r"\bmerged\b", text, re.IGNORECASE) and not re.search(
++				r"not merged|never merged", text, re.IGNORECASE):
++			bad.append(f"{path.name}: mentions 'merged' without an explicit not-merged disclaimer")
++	product_cli = (REPO_ROOT / "tools" / "membrane-run" / "product_cli.cpp")
++	if product_cli.exists() and "mixed" in product_cli.read_text().lower():
++		bad.append("tools/membrane-run/product_cli.cpp references 'mixed' -- Phase 11D forbids exposing mixed mode in the product CLI")
++	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported product claims, product CLI untouched"
++
++
++@check("Phase 11D: model-specific-policy/manifest.json exists, valid "
++	"JSON, schema_version 1, lists every actual .json/.jsonl file in "
++	"the directory and no others")
++def _c96():
++	if not (V11D_DIR / "manifest.json").exists():
++		return False, f"{V11D_DIR}/manifest.json does not exist"
++	m = _load_v11d("manifest.json")
++	bad = []
++	if m.get("schema_version") != 1:
++		bad.append(f"schema_version={m.get('schema_version')!r}")
++	listed = set(m.get("files", {}).keys())
++	actual = {p.name for p in V11D_DIR.glob("*") if p.suffix in (".json", ".jsonl")}
++	if listed != actual:
++		bad.append(f"listed-vs-actual mismatch: missing={actual - listed}, extra={listed - actual}")
++	return len(bad) == 0, "; ".join(bad) if bad else f"{len(listed)} files listed, exact match with directory contents"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1904,6 +2109,7 @@ def main() -> int:
+ 			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73,
+ 			_c74, _c75, _c76, _c77, _c78, _c79, _c80, _c81, _c82, _c83,
+ 			_c84, _c85, _c86, _c87,
++			_c88, _c89, _c90, _c91, _c92, _c93, _c94, _c95, _c96,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-mixed-layer/model_profile.c b/tools/membrane-kv-mixed-layer/model_profile.c
+new file mode 100644
+index 0000000..44b0ae6
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/model_profile.c
+@@ -0,0 +1,103 @@
++#include "model_profile.h"
++#include "mixed_layer_policy.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++int	membrane_fingerprint_matches(const membrane_model_fingerprint_t *a,
++		const membrane_model_fingerprint_t *b)
++{
++	if (a == NULL || b == NULL)
++		return (0);
++	if (strncmp(a->architecture, b->architecture,
++			MEMBRANE_FINGERPRINT_ARCH_MAX) != 0)
++		return (0);
++	return (a->n_layer == b->n_layer
++		&& a->n_embd == b->n_embd
++		&& a->n_head == b->n_head
++		&& a->n_head_kv == b->n_head_kv
++		&& a->n_embd_head == b->n_embd_head);
++}
++
++int	membrane_profile_validate(
++		const membrane_model_fingerprint_t *profile_fp,
++		int32_t profile_n_layer, const int32_t *rank,
++		const membrane_model_fingerprint_t *actual_fp,
++		int *out_reason)
++{
++	int	*scratch_map;
++	int	rank_ok;
++
++	if (out_reason == NULL)
++		return (0);
++	if (profile_fp == NULL || rank == NULL)
++		return (*out_reason = MEMBRANE_PROFILE_NOT_FOUND, 0);
++	if (profile_n_layer <= 0 || profile_fp->n_layer != profile_n_layer)
++		return (*out_reason = MEMBRANE_PROFILE_INVALID, 0);
++	/* Reuse membrane_mixed_layer_policy_from_ranking()'s own
++	 * permutation check rather than re-implementing it -- calling it
++	 * with q8_count=0 exercises exactly the validation path (every
++	 * index in [0, profile_n_layer) appears exactly once) without
++	 * this module needing to know or care about the resulting map. */
++	scratch_map = (int *)malloc(sizeof(int) * (size_t)profile_n_layer);
++	if (scratch_map == NULL)
++		return (*out_reason = MEMBRANE_PROFILE_INVALID, 0);
++	rank_ok = membrane_mixed_layer_policy_from_ranking(rank, profile_n_layer,
++			0, scratch_map);
++	free(scratch_map);
++	if (!rank_ok)
++		return (*out_reason = MEMBRANE_PROFILE_INVALID, 0);
++	if (actual_fp == NULL
++			|| !membrane_fingerprint_matches(profile_fp, actual_fp))
++		return (*out_reason = MEMBRANE_PROFILE_MISMATCH, 0);
++	*out_reason = MEMBRANE_PROFILE_OK;
++	return (1);
++}
++
++int	membrane_memory_budget_policy(const int32_t *ranking_most_sensitive_first,
++		int32_t n_layer, uint64_t bytes_per_layer_q8,
++		uint64_t bytes_per_layer_q5, uint64_t budget_bytes,
++		int *out_type_map, int32_t *out_selected_q8_count,
++		uint64_t *out_actual_bytes)
++{
++	uint64_t	total;
++	int32_t		promoted;
++	int32_t		i;
++	int32_t		layer;
++
++	if (ranking_most_sensitive_first == NULL || out_type_map == NULL
++			|| out_selected_q8_count == NULL || out_actual_bytes == NULL
++			|| n_layer <= 0)
++		return (0);
++	total = (uint64_t)n_layer * bytes_per_layer_q5;
++	if (total > budget_bytes)
++	{
++		*out_selected_q8_count = 0;
++		*out_actual_bytes = 0;
++		return (0);
++	}
++	i = 0;
++	while (i < n_layer)
++	{
++		out_type_map[i] = MEMBRANE_MIXED_LAYER_Q5;
++		i++;
++	}
++	promoted = 0;
++	i = 0;
++	while (i < n_layer)
++	{
++		layer = ranking_most_sensitive_first[i];
++		if (layer < 0 || layer >= n_layer)
++			return (0);	/* malformed ranking -- fail closed, no
++						 * partial map returned */
++		if (total - bytes_per_layer_q5 + bytes_per_layer_q8 > budget_bytes)
++			break ;
++		total = total - bytes_per_layer_q5 + bytes_per_layer_q8;
++		out_type_map[layer] = MEMBRANE_MIXED_LAYER_Q8;
++		promoted++;
++		i++;
++	}
++	*out_selected_q8_count = promoted;
++	*out_actual_bytes = total;
++	return (1);
++}
+diff --git a/tools/membrane-kv-mixed-layer/model_profile.h b/tools/membrane-kv-mixed-layer/model_profile.h
+new file mode 100644
+index 0000000..e767eec
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/model_profile.h
+@@ -0,0 +1,110 @@
++#ifndef MEMBRANE_KV_MIXED_LAYER_MODEL_PROFILE_H
++# define MEMBRANE_KV_MIXED_LAYER_MODEL_PROFILE_H
++
++# include <stddef.h>
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 11D: llama-free (no ggml/llama header) pure arithmetic for
++ * model-specific sensitivity profiles -- RESEARCH ONLY, experiment
++ * branch only. A "profile" itself is a JSON research artifact built
++ * and read by Python tooling (see results/phase11/model-specific-
++ * policy/); this module owns only the SAFETY-CRITICAL pure logic that
++ * must be exactly right and is worth unit-testing directly in C:
++ * fingerprint matching (never apply the wrong model's profile),
++ * profile-rank validation (reused from mixed_layer_policy.h's already-
++ * tested permutation check), and the memory-budget-driven layer
++ * selection policy (Section 8).
++ */
++
++/* Stable model identity, Section 2 -- deliberately NOT the filename.
++ * Every field is something membrane-run/-kv-mixed-layer already reads
++ * from real GGUF/llama_model_* metadata elsewhere in this project;
++ * nothing here is invented. architecture is a fixed-size buffer (no
++ * dynamic allocation in this llama-free module) matching this
++ * project's existing fixed-field convention (see Phase 4.1's
++ * membrane_policy binary format for the same choice). */
++# define MEMBRANE_FINGERPRINT_ARCH_MAX	32
++
++typedef struct s_membrane_model_fingerprint
++{
++	char	architecture[MEMBRANE_FINGERPRINT_ARCH_MAX];
++	int32_t	n_layer;
++	int32_t	n_embd;
++	int32_t	n_head;
++	int32_t	n_head_kv;
++	int32_t	n_embd_head;
++}	membrane_model_fingerprint_t;
++
++/* Exact-match on every field (architecture compared case-sensitively,
++ * as GGUF's own "general.architecture" values are). No fuzzy/partial
++ * matching -- a profile either matches the model it is about to be
++ * applied to, or it does not; there is no "close enough". */
++int	membrane_fingerprint_matches(const membrane_model_fingerprint_t *a,
++		const membrane_model_fingerprint_t *b);
++
++/* Machine-readable fail-closed reason codes, Section 10. Never
++ * "success" and a wrong-model layer map at the same time -- every
++ * non-OK code means the caller must not use the profile. */
++# define MEMBRANE_PROFILE_OK			0
++# define MEMBRANE_PROFILE_NOT_FOUND		1
++# define MEMBRANE_PROFILE_MISMATCH		2
++# define MEMBRANE_PROFILE_INVALID		3
++
++/*
++ * Full profile validation, Section 11: fingerprint match, layer-count
++ * match, and the ranking is a genuine permutation of [0, n_layer)
++ * (reuses membrane_mixed_layer_policy_from_ranking()'s own validation
++ * as a side effect -- see model_profile.c -- so this is never a
++ * second, independently-written, potentially-inconsistent check).
++ * profile_n_layer is the ranking array's own claimed length; a
++ * mismatch against profile_fp->n_layer itself is ALSO treated as
++ * invalid (a profile's internal fields must agree with each other,
++ * not just with the runtime model).
++ *
++ * Returns 1 (out_reason = MEMBRANE_PROFILE_OK) if the profile is safe
++ * to apply to actual_fp; 0 otherwise with out_reason set to exactly
++ * one of the codes above. NULL profile_fp/rank (a profile that could
++ * not be loaded at all) yields MEMBRANE_PROFILE_NOT_FOUND.
++ */
++int	membrane_profile_validate(
++		const membrane_model_fingerprint_t *profile_fp,
++		int32_t profile_n_layer, const int32_t *rank,
++		const membrane_model_fingerprint_t *actual_fp,
++		int *out_reason);
++
++/*
++ * Memory-budget-driven layer selection, Section 8. Starts from an
++ * all-Q5 baseline (n_layer * bytes_per_layer_q5) and greedily promotes
++ * layers to Q8 in RANKING order (most sensitive first) as long as the
++ * promoted total still fits within budget_bytes -- stops at the first
++ * layer that would exceed it (never overshoots, per Section 14's
++ * "actual <= budget" requirement). Deterministic: identical inputs
++ * always promote the identical set, in the identical order (ties in
++ * the ranking are the caller's/ranking-builder's responsibility --
++ * this function only ever consumes an already-total-ordered rank
++ * array, see mixed_layer_policy.c's own stable-sort tie-break note).
++ *
++ * Returns 1 on success (out_type_map filled, out_selected_q8_count and
++ * out_actual_bytes set) if even the all-Q5 baseline fits within
++ * budget_bytes; 0 (fail closed, out_type_map untouched,
++ * out_selected_q8_count = 0, out_actual_bytes = 0) if the budget is
++ * too small for even the cheapest possible layout -- this is a real,
++ * reportable infeasibility, not silently clamped to a partial/invalid
++ * map.
++ */
++int	membrane_memory_budget_policy(const int32_t *ranking_most_sensitive_first,
++		int32_t n_layer, uint64_t bytes_per_layer_q8,
++		uint64_t bytes_per_layer_q5, uint64_t budget_bytes,
++		int *out_type_map, int32_t *out_selected_q8_count,
++		uint64_t *out_actual_bytes);
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-mixed-layer/test_model_profile.c b/tools/membrane-kv-mixed-layer/test_model_profile.c
+new file mode 100644
+index 0000000..b11a541
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/test_model_profile.c
+@@ -0,0 +1,368 @@
++#include <string.h>
++
++#include "model_profile.h"
++#include "mixed_layer_policy.h"
++#include "test_helpers.h"
++
++static membrane_model_fingerprint_t	fp_135m(void)
++{
++	membrane_model_fingerprint_t	fp;
++
++	memset(&fp, 0, sizeof(fp));
++	strncpy(fp.architecture, "llama", sizeof(fp.architecture) - 1);
++	fp.n_layer = 30;
++	fp.n_embd = 576;
++	fp.n_head = 9;
++	fp.n_head_kv = 3;
++	fp.n_embd_head = 64;
++	return (fp);
++}
++
++static membrane_model_fingerprint_t	fp_360m(void)
++{
++	membrane_model_fingerprint_t	fp;
++
++	memset(&fp, 0, sizeof(fp));
++	strncpy(fp.architecture, "llama", sizeof(fp.architecture) - 1);
++	fp.n_layer = 32;
++	fp.n_embd = 960;
++	fp.n_head = 15;
++	fp.n_head_kv = 5;
++	fp.n_embd_head = 64;
++	return (fp);
++}
++
++static void	test_fingerprint_matches_identical(void)
++{
++	membrane_model_fingerprint_t	a = fp_135m();
++	membrane_model_fingerprint_t	b = fp_135m();
++
++	TEST_ASSERT(membrane_fingerprint_matches(&a, &b) == 1,
++		"two independently-built fingerprints for the same real model "
++		"metadata match");
++}
++
++static void	test_fingerprint_mismatch_different_model(void)
++{
++	membrane_model_fingerprint_t	a = fp_135m();
++	membrane_model_fingerprint_t	b = fp_360m();
++
++	TEST_ASSERT(membrane_fingerprint_matches(&a, &b) == 0,
++		"SmolLM2-135M and SmolLM2-360M's real fingerprints do not match");
++}
++
++static void	test_fingerprint_mismatch_single_field(void)
++{
++	membrane_model_fingerprint_t	a = fp_135m();
++	membrane_model_fingerprint_t	b = fp_135m();
++
++	b.n_head_kv = 4;	/* every OTHER field identical -- must still fail */
++	TEST_ASSERT(membrane_fingerprint_matches(&a, &b) == 0,
++		"a single differing field (n_head_kv) is enough to reject a "
++		"match -- no partial/fuzzy matching");
++}
++
++static void	test_fingerprint_mismatch_architecture_string(void)
++{
++	membrane_model_fingerprint_t	a = fp_135m();
++	membrane_model_fingerprint_t	b = fp_135m();
++
++	strncpy(b.architecture, "gemma3", sizeof(b.architecture) - 1);
++	TEST_ASSERT(membrane_fingerprint_matches(&a, &b) == 0,
++		"a differing architecture string is rejected even when every "
++		"numeric field happens to match");
++}
++
++static void	test_fingerprint_null_safe(void)
++{
++	membrane_model_fingerprint_t	a = fp_135m();
++
++	TEST_ASSERT(membrane_fingerprint_matches(NULL, &a) == 0,
++		"NULL first argument fails closed, not a crash");
++	TEST_ASSERT(membrane_fingerprint_matches(&a, NULL) == 0,
++		"NULL second argument fails closed, not a crash");
++}
++
++/* A small, self-consistent 4-layer fingerprint for the tests that
++ * need profile_fp->n_layer to actually agree with a 4-element rank
++ * array -- fp_135m()/fp_360m() (30/32 real layers) are reserved for
++ * the cross-model MISMATCH scenarios below, where the point is
++ * specifically that the two fingerprints' layer counts (among other
++ * fields) legitimately differ. */
++static membrane_model_fingerprint_t	fp_small4(void)
++{
++	membrane_model_fingerprint_t	fp;
++
++	memset(&fp, 0, sizeof(fp));
++	strncpy(fp.architecture, "llama", sizeof(fp.architecture) - 1);
++	fp.n_layer = 4;
++	fp.n_embd = 64;
++	fp.n_head = 1;
++	fp.n_head_kv = 1;
++	fp.n_embd_head = 64;
++	return (fp);
++}
++
++static void	test_profile_validate_ok(void)
++{
++	membrane_model_fingerprint_t	profile_fp = fp_small4();
++	membrane_model_fingerprint_t	actual_fp = fp_small4();
++	int32_t							rank[4] = {3, 1, 0, 2};
++	int								reason = -1;
++
++	TEST_ASSERT(membrane_profile_validate(&profile_fp, 4, rank, &actual_fp,
++			&reason) == 1, "a well-formed, matching profile validates");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_OK,
++		"reason is MEMBRANE_PROFILE_OK on success");
++}
++
++static void	test_profile_validate_not_found(void)
++{
++	membrane_model_fingerprint_t	actual_fp = fp_small4();
++	int32_t							rank[4] = {0, 1, 2, 3};
++	int								reason = -1;
++
++	TEST_ASSERT(membrane_profile_validate(NULL, 4, rank, &actual_fp,
++			&reason) == 0, "a NULL profile fingerprint (no profile "
++		"loaded at all) is rejected");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_NOT_FOUND,
++		"reason is MEMBRANE_PROFILE_NOT_FOUND");
++
++	reason = -1;
++	TEST_ASSERT(membrane_profile_validate(&actual_fp, 4, NULL, &actual_fp,
++			&reason) == 0, "a NULL rank array is rejected");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_NOT_FOUND,
++		"reason is MEMBRANE_PROFILE_NOT_FOUND for a missing ranking too");
++}
++
++static void	test_profile_validate_mismatch(void)
++{
++	membrane_model_fingerprint_t	profile_fp = fp_135m();
++	membrane_model_fingerprint_t	actual_fp = fp_360m();
++	int32_t							rank[30] = {
++		0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
++		15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29};
++	int								reason = -1;
++
++	/* Applying a 135M-shaped profile (real 30-layer ranking) to a
++	 * 360M-shaped actual model -- exactly Section 16's "135M profile
++	 * applied to 360M" scenario. The ranking itself is a valid
++	 * permutation of the PROFILE's own 30 layers -- the rejection
++	 * must come from the fingerprint mismatch, not a layer-count
++	 * validation shortcut. */
++	TEST_ASSERT(membrane_profile_validate(&profile_fp, 30, rank, &actual_fp,
++			&reason) == 0, "a profile for the wrong model is rejected");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_MISMATCH,
++		"reason is MEMBRANE_PROFILE_MISMATCH");
++}
++
++static void	test_profile_validate_invalid_duplicate_layer(void)
++{
++	membrane_model_fingerprint_t	profile_fp = fp_small4();
++	membrane_model_fingerprint_t	actual_fp = fp_small4();
++	int32_t							rank[4] = {0, 0, 1, 2};	/* 0 twice, 3 missing */
++	int								reason = -1;
++
++	TEST_ASSERT(membrane_profile_validate(&profile_fp, 4, rank, &actual_fp,
++			&reason) == 0, "a duplicated layer in the ranking is rejected");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_INVALID,
++		"reason is MEMBRANE_PROFILE_INVALID");
++}
++
++static void	test_profile_validate_invalid_missing_layer(void)
++{
++	membrane_model_fingerprint_t	profile_fp = fp_small4();
++	membrane_model_fingerprint_t	actual_fp = fp_small4();
++	int32_t							rank[4] = {0, 1, 2, 5};	/* 5 out of range */
++	int								reason = -1;
++
++	TEST_ASSERT(membrane_profile_validate(&profile_fp, 4, rank, &actual_fp,
++			&reason) == 0, "an out-of-range layer index is rejected");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_INVALID,
++		"reason is MEMBRANE_PROFILE_INVALID");
++}
++
++static void	test_profile_validate_invalid_layer_count_disagreement(void)
++{
++	membrane_model_fingerprint_t	profile_fp = fp_135m();	/* n_layer=30 */
++	membrane_model_fingerprint_t	actual_fp = fp_135m();
++	int32_t							rank[4] = {0, 1, 2, 3};
++	int								reason = -1;
++
++	/* profile_n_layer (4) disagrees with profile_fp->n_layer (30) --
++	 * the profile's own internal fields are inconsistent. */
++	TEST_ASSERT(membrane_profile_validate(&profile_fp, 4, rank, &actual_fp,
++			&reason) == 0, "a profile whose own fields disagree with "
++		"each other is rejected before even checking the actual model");
++	TEST_ASSERT(reason == MEMBRANE_PROFILE_INVALID,
++		"reason is MEMBRANE_PROFILE_INVALID");
++}
++
++static void	test_profile_validate_null_out_reason_safe(void)
++{
++	membrane_model_fingerprint_t	fp = fp_135m();
++	int32_t							rank[4] = {0, 1, 2, 3};
++
++	TEST_ASSERT(membrane_profile_validate(&fp, 4, rank, &fp, NULL) == 0,
++		"a NULL out_reason pointer fails cleanly, not a crash");
++}
++
++#define BYTES_Q8	68000ull
++#define BYTES_Q5	48000ull
++
++static void	test_budget_policy_promotes_by_rank_order(void)
++{
++	int32_t		ranking[5] = {3, 0, 4, 1, 2};	/* layer 3 most sensitive */
++	int			map[5];
++	int32_t		selected;
++	uint64_t	actual;
++	uint64_t	budget;
++
++	/* Enough for exactly 2 promotions: 5*BYTES_Q5 + 2*(BYTES_Q8-BYTES_Q5) */
++	budget = 5 * BYTES_Q5 + 2 * (BYTES_Q8 - BYTES_Q5);
++	TEST_ASSERT(membrane_memory_budget_policy(ranking, 5, BYTES_Q8, BYTES_Q5,
++			budget, map, &selected, &actual) == 1, "resolves");
++	TEST_ASSERT(selected == 2, "exactly 2 layers promoted at this budget");
++	TEST_ASSERT(map[3] == MEMBRANE_MIXED_LAYER_Q8,
++		"rank[0] (layer 3) is promoted first");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q8,
++		"rank[1] (layer 0) is promoted second");
++	TEST_ASSERT(map[4] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[1] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q5,
++		"the remaining layers stay Q5");
++	TEST_ASSERT(actual <= budget, "actual bytes never exceed the budget");
++	TEST_ASSERT(actual == budget,
++		"actual bytes exactly match the budget at this exact boundary");
++}
++
++static void	test_budget_policy_never_exceeds_budget_at_boundary(void)
++{
++	int32_t		ranking[5] = {0, 1, 2, 3, 4};
++	int			map[5];
++	int32_t		selected;
++	uint64_t	actual;
++	uint64_t	budget;
++
++	/* One byte short of fitting a 3rd promotion. */
++	budget = 5 * BYTES_Q5 + 2 * (BYTES_Q8 - BYTES_Q5)
++		+ (BYTES_Q8 - BYTES_Q5) - 1;
++	TEST_ASSERT(membrane_memory_budget_policy(ranking, 5, BYTES_Q8, BYTES_Q5,
++			budget, map, &selected, &actual) == 1, "resolves");
++	TEST_ASSERT(selected == 2,
++		"stops at 2 promotions -- one byte short of a 3rd, never rounds "
++		"up or overshoots");
++	TEST_ASSERT(actual <= budget, "actual never exceeds budget");
++}
++
++static void	test_budget_policy_zero_budget_infeasible(void)
++{
++	int32_t		ranking[5] = {0, 1, 2, 3, 4};
++	int			map[5];
++	int32_t		selected;
++	uint64_t	actual;
++
++	TEST_ASSERT(membrane_memory_budget_policy(ranking, 5, BYTES_Q8, BYTES_Q5,
++			0, map, &selected, &actual) == 0,
++		"a budget too small for even all-Q5 fails closed, not clamped");
++	TEST_ASSERT(selected == 0 && actual == 0,
++		"outputs are reset to 0 on infeasibility, not left stale");
++}
++
++static void	test_budget_policy_huge_budget_all_q8(void)
++{
++	int32_t		ranking[5] = {0, 1, 2, 3, 4};
++	int			map[5];
++	int32_t		selected;
++	uint64_t	actual;
++	int			i;
++
++	TEST_ASSERT(membrane_memory_budget_policy(ranking, 5, BYTES_Q8, BYTES_Q5,
++			(uint64_t)5 * BYTES_Q8 * 2, map, &selected, &actual) == 1,
++		"resolves with a budget far exceeding all-Q8");
++	TEST_ASSERT(selected == 5, "every layer promoted -- budget never "
++		"artificially limits promotion below the true all-Q8 cost");
++	for (i = 0; i < 5; i++)
++		TEST_ASSERT(map[i] == MEMBRANE_MIXED_LAYER_Q8, "every layer is Q8");
++	TEST_ASSERT(actual == 5 * BYTES_Q8, "actual bytes equal the real "
++		"all-Q8 total, not an approximation");
++}
++
++static void	test_budget_policy_exact_all_q5_budget(void)
++{
++	int32_t		ranking[5] = {0, 1, 2, 3, 4};
++	int			map[5];
++	int32_t		selected;
++	uint64_t	actual;
++	int			i;
++
++	TEST_ASSERT(membrane_memory_budget_policy(ranking, 5, BYTES_Q8, BYTES_Q5,
++			5 * BYTES_Q5, map, &selected, &actual) == 1,
++		"resolves exactly at the all-Q5 boundary");
++	TEST_ASSERT(selected == 0, "no promotions possible at exactly the "
++		"all-Q5 budget");
++	for (i = 0; i < 5; i++)
++		TEST_ASSERT(map[i] == MEMBRANE_MIXED_LAYER_Q5, "every layer is Q5");
++}
++
++static void	test_budget_policy_null_and_degenerate(void)
++{
++	int32_t		ranking[3] = {0, 1, 2};
++	int			map[3];
++	int32_t		selected;
++	uint64_t	actual;
++
++	TEST_ASSERT(membrane_memory_budget_policy(NULL, 3, BYTES_Q8, BYTES_Q5,
++			1000000, map, &selected, &actual) == 0,
++		"NULL ranking fails closed");
++	TEST_ASSERT(membrane_memory_budget_policy(ranking, 0, BYTES_Q8, BYTES_Q5,
++			1000000, map, &selected, &actual) == 0,
++		"n_layer <= 0 fails closed");
++}
++
++static void	test_budget_policy_deterministic_repeated_calls(void)
++{
++	int32_t		ranking[6] = {4, 1, 5, 0, 2, 3};
++	int			map1[6];
++	int			map2[6];
++	int32_t		selected1;
++	int32_t		selected2;
++	uint64_t	actual1;
++	uint64_t	actual2;
++	uint64_t	budget;
++
++	budget = 6 * BYTES_Q5 + 3 * (BYTES_Q8 - BYTES_Q5);
++	membrane_memory_budget_policy(ranking, 6, BYTES_Q8, BYTES_Q5, budget,
++		map1, &selected1, &actual1);
++	membrane_memory_budget_policy(ranking, 6, BYTES_Q8, BYTES_Q5, budget,
++		map2, &selected2, &actual2);
++	TEST_ASSERT(selected1 == selected2 && actual1 == actual2
++			&& memcmp(map1, map2, sizeof(map1)) == 0,
++		"identical inputs produce a byte-identical result across calls "
++		"-- deterministic");
++}
++
++int	main(void)
++{
++	test_fingerprint_matches_identical();
++	test_fingerprint_mismatch_different_model();
++	test_fingerprint_mismatch_single_field();
++	test_fingerprint_mismatch_architecture_string();
++	test_fingerprint_null_safe();
++	test_profile_validate_ok();
++	test_profile_validate_not_found();
++	test_profile_validate_mismatch();
++	test_profile_validate_invalid_duplicate_layer();
++	test_profile_validate_invalid_missing_layer();
++	test_profile_validate_invalid_layer_count_disagreement();
++	test_profile_validate_null_out_reason_safe();
++	test_budget_policy_promotes_by_rank_order();
++	test_budget_policy_never_exceeds_budget_at_boundary();
++	test_budget_policy_zero_budget_infeasible();
++	test_budget_policy_huge_budget_all_q8();
++	test_budget_policy_exact_all_q5_budget();
++	test_budget_policy_null_and_degenerate();
++	test_budget_policy_deterministic_repeated_calls();
++	printf("test_model_profile: all tests passed\n");
++	return (0);
++}

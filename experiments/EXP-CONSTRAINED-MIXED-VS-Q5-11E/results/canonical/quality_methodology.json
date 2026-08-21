@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Sections 8/9: pre-registered quality-evaluation methodology, written BEFORE any quality comparison run at PRIMARY POINT B (ctx=180000) was executed. This file exists specifically so the 5-prompt subset selection cannot be accused of being chosen after seeing results.",
+  "why_5_not_10": "Section 8 permits a pre-registered deterministic 5-prompt subset when the full 10-prompt holdout set is prohibitively expensive at the target context. At ctx=180000 on this shared, memory-constrained host (5.6GiB total RAM, real GTX 1650 4GiB VRAM, ~68MB of the product's own conservative Q5 headroom -- see boundary_scan.json point_b_primary_constrained), each sequential_compare dump/compare invocation performs a real full model load plus a real ~2.7-2.9GB VRAM context allocation. Running all 10 holdout prompts across 1 reference dump + 6 candidate configs (whole-Q5 self-check, profile-mixed top-8, 4 naive top-8 layouts) would mean 10 dumps + 60 compares = 70 heavy sequential GPU allocations; 5 prompts reduces this to 5 dumps + 30 compares = 35, a scope judged necessary given real host RAM headroom observed at the time of this run (free -h showed under 700MiB available, see hardware_state.json / this session's live checks) alongside other concurrent processes on the same shared machine.",
+  "subset_selection_rule": "The first 5 of the existing, already-committed 10-item Phase 11C/11D holdout list (results/phase11/generalization/prompts.json, train_holdout_split.holdout), taken in the fixed order that list is already written in. No result of any kind (from this phase or any config) was consulted to make this selection -- it is a pure prefix of a pre-existing, already-committed ordered list.",
+  "selected_prompts": [
+    "factual_recall_3",
+    "instruction_following_3",
+    "multistep_reasoning_3",
+    "arithmetic_reasoning_3",
+    "logical_reasoning_3"
+  ],
+  "excluded_from_this_subset": [
+    "code_completion_3",
+    "code_explanation_3",
+    "structured_output_3",
+    "summarization_3",
+    "prose_continuation_3"
+  ],
+  "gen_tokens": 32,
+  "gen_tokens_rationale": "Matches the gen_tokens=32 convention used consistently across all prior Phase 11B/11C/11D quality measurements (see e.g. results/phase11/model-specific-policy/raw_holdout_policy_360m.jsonl, performance.json) -- not a new value chosen for this phase.",
+  "reference_definition": {
+    "reference_is_not_f16_or_q8": true,
+    "why": "At ctx=180000 (PRIMARY POINT B) even a single whole-cache Q8 context cannot safely allocate (see boundary_scan.json point_b_primary_constrained.explicit_q8, exit_code=5, real product rejection) -- an F16 reference would need roughly 2x Q8's KV bytes and fails even more clearly. Fabricating a high-context F16/Q8 reference would be dishonest; none is used.",
+    "reference_used": "whole-cache Q5_1 (GGML_TYPE_Q5_1), gpu-layers all, ctx=180000 -- this is the real product fallback this phase measures against (whole-cache Q5 IS what --kv adaptive actually selects at this ctx; see boundary_scan.json adaptive.selected_kv=q5).",
+    "methodology": "membrane-kv-sequential-compare --mode dump captures the whole-cache-Q5 run's own free-running generation (tokens + per-step logits) to a file, then exits, freeing its context before any other process opens a new one (never two live GPU contexts at once, avoiding real OOM risk at this tight a headroom). --mode compare then loads each candidate config (whole-Q5 self-check as a sanity control, profile-mixed top-8, and naive top-8 layouts) in its own separate process, teacher-forces over the dumped Q5 run's own token sequence, and reports top1_preservation / logit_rel_l2 / delta_nll against the dumped Q5 logits, plus a free-running pass for token_identity/first_divergence -- the same trio of metrics every other MEMBRANE Q8/Q5 quality tool in this repo reports, just computed via two sequential single-context processes instead of one dual-context process.",
+    "labeling_requirement": "All quality artifacts from this phase must describe this explicitly as 'candidate vs whole-cache-Q5' or 'mixed vs Q5', never as 'vs Q8' or 'vs F16' or 'vs ground truth' -- Q5 is the real, measured reference used, not a proxy for a higher-precision ground truth that was never obtained at this context."
+  },
+  "layouts_compared_at_q8_count_8": {
+    "A_profile_sensitivity": "top-8 most sensitive layers per profile_360m_train21.json: [1, 13, 18, 19, 23, 24, 25, 30] (identical to boundary_scan.json / q8_count_sweep.json's own q8_count=8 layer list)",
+    "B_early_contiguous": "layers [0,1,2,3,4,5,6,7]",
+    "C_late_contiguous": "layers [24,25,26,27,28,29,30,31]",
+    "D_alternating": "every 4th layer starting at 0, 8 of them: [0,4,8,12,16,20,24,28]",
+    "E_random_seeded": "deterministic seeded random, seed=42, matching the seed convention already used in results/phase11/model-specific-policy/holdout_policy_360m.json's E_random layout -- exact index list recorded at run time in quality_raw.jsonl since it depends on the RNG implementation used to generate it",
+    "F_all_q5": "the whole-cache-Q5 self-check control (q8_count=0) -- expected near-perfect self-agreement, included as a sanity check on the sequential dump/compare methodology itself, not as a novel data point"
+  },
+  "status": "pre-registered, no quality runs executed yet as of this write"
+}

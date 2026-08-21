@@ -1,0 +1,1449 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a5e10b7..cca5ed8 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -192,6 +192,16 @@ add_library(membrane_adaptive_kv_policy STATIC
+ target_include_directories(membrane_adaptive_kv_policy PUBLIC
+   tools/membrane-run)
+ 
++# Phase 11B: per-layer mixed Q8_0/Q5_1 storage-math and ranking-
++# assignment arithmetic, RESEARCH ONLY (experiment/mixed-q8-q5-layer-
++# feasibility branch) -- llama-free, same testable-without-a-model
++# pattern as membrane_adaptive_kv_policy above. Never linked into
++# membrane-run/membrane-llama-run.
++add_library(membrane_mixed_layer_policy STATIC
++  tools/membrane-kv-mixed-layer/mixed_layer_policy.c)
++target_include_directories(membrane_mixed_layer_policy PUBLIC
++  tools/membrane-kv-mixed-layer)
++
+ # membrane-cxl-sim (Phase 6.1) is a pure discrete-event simulator, no
+ # llama.cpp dependency -- built unconditionally like the C tools above,
+ # unlike tools/membrane-kv-capture etc, which need MEMBRANE_ENABLE_LLAMA.
+@@ -311,6 +321,10 @@ if(MEMBRANE_ENABLE_LLAMA)
+   add_subdirectory(tools/membrane-policy-export)
+   add_subdirectory(tools/membrane-kv-runtime)
+   add_subdirectory(tools/membrane-kv-runtime-optimizer)
++  # Phase 11B: research-only per-layer mixed Q8_0/Q5_1 probe --
++  # experiment/mixed-q8-q5-layer-feasibility only, never linked into
++  # membrane-run/membrane-llama-run.
++  add_subdirectory(tools/membrane-kv-mixed-layer)
+   add_subdirectory(tools/membrane-kv-variance)
+ 
+   # Product Phase 5: the live llama.cpp shadow runtime (membrane-llama-
+@@ -576,6 +590,14 @@ if(MEMBRANE_BUILD_TESTS)
+     ${CMAKE_SOURCE_DIR}/tests/unit)
+   add_test(NAME test_adaptive_kv_policy COMMAND test_adaptive_kv_policy)
+ 
++  add_executable(test_mixed_layer_policy
++    tools/membrane-kv-mixed-layer/test_mixed_layer_policy.c)
++  target_link_libraries(test_mixed_layer_policy PRIVATE
++    membrane_mixed_layer_policy)
++  target_include_directories(test_mixed_layer_policy PRIVATE
++    ${CMAKE_SOURCE_DIR}/tests/unit)
++  add_test(NAME test_mixed_layer_policy COMMAND test_mixed_layer_policy)
++
+   # Phase 6.2: hot-cache/prefetch and working-set-policy correctness
+   # tests, plus an engine determinism check -- llama-free (they test
+   # membrane_wssim_core's C++ logic directly, not real inference), so
+diff --git a/scripts/verify-results.py b/scripts/verify-results.py
+index 1a5a1a3..a01394d 100755
+--- a/scripts/verify-results.py
++++ b/scripts/verify-results.py
+@@ -1315,6 +1315,209 @@ def _c63():
+ 	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported claims, snapshot caveat disclosed"
+ 
+ 
++# ---------------------------------------------------------------------
++# Phase 11B: per-layer mixed Q8_0/Q5_1 KV storage feasibility (research)
++# ---------------------------------------------------------------------
++V11B_ARTIFACT_PATH = REPO_ROOT / "results" / "phase11" / "mixed-layer-q8-q5-feasibility.json"
++_V11B_CACHE = {}
++N_LAYER_135M = 30
++
++
++def _load_mixed_layer_artifact():
++	key = str(V11B_ARTIFACT_PATH)
++	if key not in _V11B_CACHE:
++		_V11B_CACHE[key] = json.loads(V11B_ARTIFACT_PATH.read_text())
++	return _V11B_CACHE[key]
++
++
++@check("Phase 11B mixed-layer artifact exists, is valid JSON, and has "
++	"schema_version 1")
++def _c64():
++	if not V11B_ARTIFACT_PATH.exists():
++		return False, f"{V11B_ARTIFACT_PATH} does not exist"
++	a = _load_mixed_layer_artifact()
++	ok = a.get("schema_version") == 1
++	return ok, f"schema_version={a.get('schema_version')!r}"
++
++
++@check("Phase 11B mixed-layer artifact: membrane_commit and "
++	"llama_cpp_commit look like real commit SHAs (40 hex chars)")
++def _c65():
++	a = _load_mixed_layer_artifact()
++	bad = []
++	for key in ("membrane_commit", "llama_cpp_commit"):
++		sha = a.get(key, "")
++		if not re.fullmatch(r"[0-9a-f]{40}", sha):
++			bad.append(f"{key}={sha!r}")
++	return len(bad) == 0, "; ".join(bad) if bad else "both commit fields well-formed"
++
++
++@check("Phase 11B mixed-layer artifact: ratio/Pareto rows -- q8_layer_count "
++	"+ q5_layer_count == 30 (every layer assigned exactly one type, no "
++	"layer left unassigned or double-assigned)")
++def _c66():
++	a = _load_mixed_layer_artifact()
++	bad = []
++	for row in a.get("pareto_curve", {}).get("rows", []):
++		total = row.get("q8_layer_count", -1) + row.get("q5_layer_count", -1)
++		if total != N_LAYER_135M:
++			bad.append(f"q8={row.get('q8_layer_count')} + q5="
++				f"{row.get('q5_layer_count')} = {total}, expected {N_LAYER_135M}")
++	return len(bad) == 0, "; ".join(bad) if bad else "every Pareto row's layer counts sum to 30"
++
++
++@check("Phase 11B mixed-layer artifact: storage math -- all-Q8/all-Q5 "
++	"endpoints exactly match membrane-run's own already-validated "
++	"explicit --kv q8/--kv q5 byte totals at the same context")
++def _c67():
++	a = _load_mixed_layer_artifact()
++	sm = a.get("storage_math", {})
++	endpoints = a.get("pareto_curve", {}).get("endpoints", {})
++	bad = []
++	all_q8 = endpoints.get("all_q8", {})
++	all_q5 = endpoints.get("all_q5", {})
++	if all_q8.get("theoretical_mixed_bytes") != sm.get("all_q8_exact_match_bytes"):
++		bad.append(f"all_q8 endpoint bytes {all_q8.get('theoretical_mixed_bytes')} "
++			f"!= recorded exact-match value {sm.get('all_q8_exact_match_bytes')}")
++	if all_q5.get("theoretical_mixed_bytes") != sm.get("all_q5_exact_match_bytes"):
++		bad.append(f"all_q5 endpoint bytes {all_q5.get('theoretical_mixed_bytes')} "
++			f"!= recorded exact-match value {sm.get('all_q5_exact_match_bytes')}")
++	# Real, independently-known Q8_0/Q5_1-vs-F16 ratios (ggml block math,
++	# same constants used throughout every other MEMBRANE Q8/Q5 check).
++	native = sm.get("native_bytes_ctx2048_135m", 0)
++	if native <= 0:
++		bad.append("native_bytes_ctx2048_135m missing or non-positive")
++	else:
++		pct_q8 = 100.0 * all_q8.get("theoretical_mixed_bytes", 0) / native
++		pct_q5 = 100.0 * all_q5.get("theoretical_mixed_bytes", 0) / native
++		if abs(pct_q8 - 53.125) > 0.01:
++			bad.append(f"all_q8/native = {pct_q8:.4f}%, expected 53.125%")
++		if abs(pct_q5 - 37.5) > 0.01:
++			bad.append(f"all_q5/native = {pct_q5:.4f}%, expected 37.5%")
++	return len(bad) == 0, "; ".join(bad) if bad else "endpoints match known exact ratios (53.125% / 37.5% of native)"
++
++
++@check("Phase 11B mixed-layer artifact: mixed_bytes == sum(Q8 layer "
++	"bytes) + sum(Q5 layer bytes) exactly, recomputed from the per-"
++	"layer byte constants for every Pareto row (no approximation)")
++def _c68():
++	a = _load_mixed_layer_artifact()
++	all_q8 = a.get("pareto_curve", {}).get("endpoints", {}).get("all_q8", {})
++	all_q5 = a.get("pareto_curve", {}).get("endpoints", {}).get("all_q5", {})
++	if not all_q8 or not all_q5:
++		return False, "missing all_q8/all_q5 endpoints"
++	bytes_per_q8_layer = all_q8["theoretical_mixed_bytes"] / N_LAYER_135M
++	bytes_per_q5_layer = all_q5["theoretical_mixed_bytes"] / N_LAYER_135M
++	bad = []
++	for row in a.get("pareto_curve", {}).get("rows", []):
++		expected = (row["q8_layer_count"] * bytes_per_q8_layer
++			+ row["q5_layer_count"] * bytes_per_q5_layer)
++		if abs(expected - row["theoretical_mixed_bytes"]) > 1.0:
++			bad.append(f"q8={row['q8_layer_count']}: expected {expected:.0f}, "
++				f"got {row['theoretical_mixed_bytes']}")
++	return len(bad) == 0, "; ".join(bad) if bad else "every row's total is the exact per-layer sum"
++
++
++@check("Phase 11B mixed-layer artifact: sensitivity ranking is actually "
++	"derived from the raw per-layer ablation rows (recomputed "
++	"independently, not just asserted), sorted most-sensitive-first")
++def _c69():
++	a = _load_mixed_layer_artifact()
++	ablation = a.get("layer_sensitivity_ablation", {})
++	rows = ablation.get("rows", [])
++	claimed = ablation.get("full_ranking_most_to_least_sensitive", [])
++	if not rows or not claimed:
++		return False, "missing ablation rows or ranking"
++	recomputed = sorted(rows, key=lambda r: -r["rel_l2_when_ablated"])
++	recomputed_order = [r["ablated_layer"] for r in recomputed]
++	ok = recomputed_order == claimed
++	return ok, ("ranking matches independent recomputation from raw rows"
++		if ok else f"mismatch: recomputed {recomputed_order[:5]}... vs "
++			f"claimed {claimed[:5]}...")
++
++
++@check("Phase 11B mixed-layer artifact: every ablation row covers a "
++	"distinct layer, exactly once, spanning the full model (30 layers "
++	"for SmolLM2-135M)")
++def _c70():
++	a = _load_mixed_layer_artifact()
++	rows = a.get("layer_sensitivity_ablation", {}).get("rows", [])
++	layers = [r["ablated_layer"] for r in rows]
++	bad = []
++	if len(layers) != N_LAYER_135M:
++		bad.append(f"{len(layers)} ablation rows, expected {N_LAYER_135M}")
++	if sorted(set(layers)) != list(range(N_LAYER_135M)):
++		bad.append("ablated layers do not form a complete, duplicate-free "
++			f"0..{N_LAYER_135M - 1} set")
++	return len(bad) == 0, "; ".join(bad) if bad else "every layer ablated exactly once"
++
++
++@check("Phase 11B mixed-layer artifact: no absolute filesystem paths "
++	"anywhere in the file")
++def _c71():
++	text = V11B_ARTIFACT_PATH.read_text()
++	posix = re.findall(
++		r'(?<![\w.\-:/])/[A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)+',
++		text,
++	)
++	windows = re.findall(r'[A-Za-z]:\\[^"\\]*(?:\\[^"\\]*)+', text)
++	hits = posix + windows
++	return len(hits) == 0, f"suspicious path-like strings: {hits[:5]}" if hits else "none found"
++
++
++@check("Phase 11B mixed-layer artifact: no NaN/Infinity anywhere in the file")
++def _c72():
++	a = _load_mixed_layer_artifact()
++	bad = _no_nan_inf(a)
++	return len(bad) == 0, f"non-finite at: {bad[:5]}" if bad else "all values finite"
++
++
++@check("Phase 11B mixed-layer artifact: no unsupported product claims -- "
++	"explicitly marked research-only, Q4_0/Q5_0 never appear as a USED "
++	"value in any structured data field (prose citing Phase 4.1's own "
++	"historical F16/Q8_0/Q4_0 scope is fine and expected), no claim of "
++	"a stable CLI mode or a merge")
++def _c73():
++	a = _load_mixed_layer_artifact()
++	text = V11B_ARTIFACT_PATH.read_text()
++	bad = []
++	# Only scan STRUCTURED value fields that are meant to record which
++	# type was actually used (row entries, endpoints, rankings) -- never
++	# the free-text "note"/explanatory fields, which legitimately cite
++	# Phase 4.1's own historical F16/Q8_0/Q4_0 scope by name (that is
++	# accurate provenance, not a claim this phase used Q4_0/Q5_0).
++	prose_keys = {"note", "reason", "key_finding", "limitations",
++		"method", "maintenance_risk", "new_abstractions",
++		"backend_specific_branching", "llama_cpp_dependency_changes",
++		"upstream_modification_reason",
++		"public_existing_infrastructure_findings"}
++
++	def scan_value_fields(obj):
++		if isinstance(obj, dict):
++			for k, v in obj.items():
++				if k in prose_keys or "finding" in k or "note" in k:
++					continue
++				scan_value_fields(v)
++		elif isinstance(obj, list):
++			for v in obj:
++				scan_value_fields(v)
++		elif isinstance(obj, str):
++			if re.search(r"\bq4_0\b", obj, re.IGNORECASE) or re.search(r"\bq5_0\b", obj, re.IGNORECASE):
++				bad.append(f"structured field value references Q4_0/Q5_0: {obj!r}")
++
++	scan_value_fields(a)
++	if a.get("feasibility_classification", "") not in (
++			"A_MIXED_LAYER_PUBLIC_PATH_EXISTS",
++			"B_MIXED_LAYER_EXISTING_MEMBRANE_INFRA_EXISTS",
++			"C_ALLOCATION_ONLY_LIMITATION", "D_KERNEL_LIMITATION",
++			"E_REQUIRES_LLAMA_CPP_CHANGE", "F_INCONCLUSIVE"):
++		bad.append(f"unrecognized feasibility_classification: "
++			f"{a.get('feasibility_classification')!r}")
++	if "research-only" not in text.lower() and "research only" not in text.lower():
++		bad.append("artifact does not disclose its research-only scope")
++	return len(bad) == 0, "; ".join(bad) if bad else "no unsupported claims, research-only scope disclosed"
++
++
+ def main() -> int:
+ 	global ARTIFACT_PATH
+ 	ap = argparse.ArgumentParser()
+@@ -1338,6 +1541,7 @@ def main() -> int:
+ 			_c48, _c49, _c50, _c51,
+ 			_c52, _c53, _c54, _c55, _c56, _c57, _c58, _c59, _c60, _c61,
+ 			_c62, _c63,
++			_c64, _c65, _c66, _c67, _c68, _c69, _c70, _c71, _c72, _c73,
+ 		)
+ 	for fn in checks:
+ 		fn()
+diff --git a/tools/membrane-kv-mixed-layer/CMakeLists.txt b/tools/membrane-kv-mixed-layer/CMakeLists.txt
+new file mode 100644
+index 0000000..9f7cbe5
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/CMakeLists.txt
+@@ -0,0 +1,9 @@
++add_executable(membrane-kv-mixed-layer main.cpp)
++set_target_properties(membrane-kv-mixed-layer PROPERTIES
++  CXX_STANDARD 17
++  CXX_STANDARD_REQUIRED ON)
++target_link_libraries(membrane-kv-mixed-layer PRIVATE membrane_runtime_core
++  membrane_mixed_layer_policy llama)
++target_include_directories(membrane-kv-mixed-layer PRIVATE
++  ${CMAKE_SOURCE_DIR}/tools/membrane-llama-runtime
++  ${CMAKE_SOURCE_DIR}/tools/membrane-kv-mixed-layer)
+diff --git a/tools/membrane-kv-mixed-layer/main.cpp b/tools/membrane-kv-mixed-layer/main.cpp
+new file mode 100644
+index 0000000..b23b06c
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/main.cpp
+@@ -0,0 +1,648 @@
++/*
++ * Phase 11B: RESEARCH-ONLY probe for per-layer mixed Q8_0/Q5_1 KV
++ * storage. Never linked into membrane-run/membrane-llama-run; lives
++ * only on experiment/mixed-q8-q5-layer-feasibility. Reuses the
++ * already-tracked, already-applied kv_type_override mechanism from
++ * patches/llama.cpp-membrane-kv-type-override.patch (Phase 4.1) --
++ * no NEW third_party/llama.cpp modification. Reuses membrane_runtime_
++ * core (llama-free, already tested) for the same top1_preservation/
++ * logit_rel_l2/delta_nll metric trio every other MEMBRANE Q8/Q5 tool
++ * reports, instead of reinventing a second metric set.
++ *
++ * For a given --q8-layers list, builds a per-layer type map (every
++ * OTHER layer is Q5_1) and runs exactly ONE real llama_context with
++ * that map wired through kv_type_override -- one context, one
++ * inference pass per config, genuinely heterogeneous K/V tensors, no
++ * shadow cache of any kind.
++ */
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <string>
++#include <sys/resource.h>
++#include <vector>
++
++#include "llama.h"
++#include "runtime_core.h"
++#include "mixed_layer_policy.h"
++
++static int	die(const char *msg)
++{
++	fprintf(stderr, "membrane-kv-mixed-layer: %s\n", msg);
++	return (0);
++}
++
++static std::string	read_file(const char *path)
++{
++	FILE		*f;
++	std::string	s;
++	char		buf[4096];
++	size_t		n;
++
++	f = fopen(path, "rb");
++	if (f == NULL)
++		return (s);
++	while ((n = fread(buf, 1, sizeof(buf), f)) > 0)
++		s.append(buf, n);
++	fclose(f);
++	return (s);
++}
++
++static bool	tokenize_prompt(const llama_vocab *vocab, const std::string &text,
++				std::vector<llama_token> *out)
++{
++	int	n;
++
++	out->resize(text.size() + 8);
++	n = llama_tokenize(vocab, text.c_str(), (int32_t)text.size(),
++			out->data(), (int32_t)out->size(), true, false);
++	if (n < 0)
++		return (die("tokenization failed"), false);
++	out->resize(n);
++	return (true);
++}
++
++/* Per-layer type map, indexed by layer -- same type for K and V per
++ * layer (the target architecture is "layer i -> Q8 or Q5", not an
++ * independent K/V split within a layer). Held in a plain std::vector
++ * threaded through kv_type_override_ud, matching membrane-kv-
++ * runtime's existing policy_lookup_ctx_t pattern. */
++static ggml_type	layer_map_cb(int32_t il, bool is_v, void *user_data)
++{
++	std::vector<ggml_type>	*map;
++
++	(void)is_v;
++	map = (std::vector<ggml_type> *)user_data;
++	if (il < 0 || (size_t)il >= map->size())
++		return (GGML_TYPE_F16);
++	return ((*map)[(size_t)il]);
++}
++
++static llama_context	*make_context(llama_model *model, int n_ctx,
++						ggml_type type_k, ggml_type type_v,
++						ggml_type (*override_cb)(int32_t, bool, void *),
++						void *override_ud)
++{
++	llama_context_params	cp;
++
++	cp = llama_context_default_params();
++	cp.n_ctx = (uint32_t)n_ctx;
++	cp.n_batch = 256;
++	cp.n_threads = 4;
++	cp.n_threads_batch = 4;
++	cp.type_k = type_k;
++	cp.type_v = type_v;
++	cp.no_perf = true;
++	cp.kv_type_override = override_cb;
++	cp.kv_type_override_ud = override_ud;
++	if (type_k != GGML_TYPE_F16 || type_v != GGML_TYPE_F16
++			|| override_cb != NULL)
++		cp.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
++	return (llama_init_from_model(model, cp));
++}
++
++static bool	decode_prompt(llama_context *ctx,
++				const std::vector<llama_token> &tokens, int n_batch)
++{
++	size_t	off;
++	size_t	n;
++
++	off = 0;
++	while (off < tokens.size())
++	{
++		n = tokens.size() - off;
++		if (n > (size_t)n_batch)
++			n = (size_t)n_batch;
++		if (llama_decode(ctx,
++				llama_batch_get_one((llama_token *)tokens.data() + off,
++					(int32_t)n)) != 0)
++			return (die("llama_decode (prompt) failed"), false);
++		off += n;
++	}
++	return (true);
++}
++
++static int	argmax(const float *v, int n)
++{
++	int	best;
++	int	i;
++
++	best = 0;
++	for (i = 1; i < n; i++)
++		if (v[i] > v[best])
++			best = i;
++	return (best);
++}
++
++typedef struct s_pass_result
++{
++	std::vector<llama_token>			tokens;
++	std::vector<std::vector<float>>	logits;
++}	pass_result_t;
++
++static bool	run_gen(llama_context *ctx, const llama_vocab *vocab,
++				int gen_steps, const std::vector<llama_token> *forced,
++				pass_result_t *out)
++{
++	llama_token	tok;
++	const float	*logits;
++	int32_t		n_vocab;
++	int			i;
++
++	n_vocab = llama_vocab_n_tokens(vocab);
++	i = 0;
++	while (i < gen_steps)
++	{
++		logits = llama_get_logits_ith(ctx, -1);
++		if (logits == NULL)
++			return (die("llama_get_logits_ith failed"), false);
++		out->logits.emplace_back(logits, logits + n_vocab);
++		if (forced != NULL && i < (int)forced->size())
++			tok = (*forced)[i];
++		else
++			tok = argmax(logits, n_vocab);
++		out->tokens.push_back(tok);
++		if (llama_decode(ctx, llama_batch_get_one(&tok, 1)) != 0)
++			return (die("llama_decode (gen) failed"), false);
++		i++;
++	}
++	return (true);
++}
++
++static long	peak_rss_kb(void)
++{
++	struct rusage	ru;
++
++	getrusage(RUSAGE_SELF, &ru);
++	return (ru.ru_maxrss);
++}
++
++typedef struct s_prompt_metrics
++{
++	double	top1_preservation;
++	double	logit_rel_l2;
++	double	delta_nll;
++	bool	token_identity;
++	int32_t	first_divergence;
++}	prompt_metrics_t;
++
++/* candidate teacher-forced against ref_free's own tokens -- same
++ * pattern decode_loop.cpp's record_kv_store_behavior() uses, same
++ * underlying membrane_runtime_core functions, so these numbers are
++ * directly comparable to every other MEMBRANE Q8/Q5 quality report. */
++/*
++ * token_identity/first_divergence come from comparing TWO INDEPENDENT
++ * free-running passes (ref_free vs cand_free) -- exactly the
++ * membrane_runtime_detect_divergence() convention main.cpp's
++ * run_native_vs_compressed_comparison() already uses. cand_forced
++ * (teacher-forced on ref_free's own tokens) is used ONLY for logit_
++ * rel_l2/top1_preservation/delta_nll, which need position-aligned
++ * logits to compare meaningfully -- its own .tokens are, by
++ * construction, forced to equal ref_free.tokens at every position
++ * `forced` covers, so comparing THOSE would be a no-op, not a real
++ * divergence check (a real bug caught and fixed while building this
++ * probe, not assumed correct from the start).
++ */
++static bool	compare_against_reference(const pass_result_t &ref_free,
++				const pass_result_t &cand_free,
++				const pass_result_t &cand_forced, int32_t n_vocab,
++				prompt_metrics_t *out)
++{
++	membrane_runtime_behavior_accum_t		*acc;
++	membrane_runtime_behavior_summary_t	summary;
++	membrane_runtime_step_logit_diff_t		diff;
++	size_t									n;
++	size_t									i;
++	double									nll_ref;
++	double									nll_cand;
++	bool									identical;
++
++	n = ref_free.logits.size() < cand_forced.logits.size()
++		? ref_free.logits.size() : cand_forced.logits.size();
++	acc = membrane_runtime_behavior_create();
++	if (acc == NULL)
++		return (false);
++	identical = true;
++	out->first_divergence = -1;
++	i = 0;
++	while (i < ref_free.tokens.size() && i < cand_free.tokens.size())
++	{
++		if (identical && cand_free.tokens[i] != ref_free.tokens[i])
++		{
++			identical = false;
++			out->first_divergence = (int32_t)i;
++		}
++		i++;
++	}
++	i = 0;
++	while (i < n)
++	{
++		membrane_runtime_compare_logits(ref_free.logits[i].data(),
++			cand_forced.logits[i].data(), n_vocab, 5, &diff);
++		nll_ref = membrane_runtime_nll(ref_free.logits[i].data(), n_vocab,
++				ref_free.tokens[i]);
++		nll_cand = membrane_runtime_nll(cand_forced.logits[i].data(),
++				n_vocab, ref_free.tokens[i]);
++		membrane_runtime_behavior_add_step(acc, &diff, nll_ref, nll_cand);
++		i++;
++	}
++	membrane_runtime_behavior_finalize(acc, &summary);
++	membrane_runtime_behavior_destroy(acc);
++	out->logit_rel_l2 = summary.logit_rel_l2_mean;
++	out->top1_preservation = summary.top1_preservation_rate;
++	out->delta_nll = summary.delta_nll;
++	out->token_identity = identical;
++	return (true);
++}
++
++typedef struct s_opts
++{
++	const char					*model_path;
++	std::vector<std::string>	prompt_paths;
++	int							n_ctx;
++	int							gen_tokens;
++	std::vector<int32_t>		q8_layers;
++	bool						want_json;
++	int32_t						gpu_layers;	/* 0 = CPU-only (default);
++											 * -1 = all; N = explicit
++											 * count. No auto-budget
++											 * guard here -- this is a
++											 * research probe, not the
++											 * product CLI; the guard
++											 * mechanism itself is
++											 * already proven elsewhere
++											 * (Phase 9B.1/11A). */
++	bool						capacity_only;	/* Section 16: skip the
++											 * F16 reference context
++											 * and every quality pass
++											 * entirely -- creates ONLY
++											 * the one candidate mixed
++											 * context and reports
++											 * whether allocation
++											 * succeeded. Deliberately
++											 * avoids ever holding two
++											 * contexts (one of them
++											 * F16, the single largest
++											 * KV type) on the GPU at
++											 * once when probing right
++											 * at a memory-pressure
++											 * boundary -- an F16
++											 * reference context is not
++											 * needed to answer "did
++											 * this mixed layout fit",
++											 * and creating one here
++											 * would risk real GPU OOM
++											 * that a normal product
++											 * invocation (which never
++											 * creates two contexts at
++											 * once either) would never
++											 * hit. */
++}	opts_t;
++
++static bool	parse_int_list(const char *s, std::vector<int32_t> *out)
++{
++	std::string	item;
++	const char	*p;
++
++	out->clear();
++	if (s == NULL || s[0] == '\0')
++		return (true);
++	p = s;
++	while (*p != '\0')
++	{
++		item.clear();
++		while (*p != '\0' && *p != ',')
++			item.push_back(*p++);
++		if (!item.empty())
++			out->push_back((int32_t)strtol(item.c_str(), NULL, 10));
++		if (*p == ',')
++			p++;
++	}
++	return (true);
++}
++
++static int	parse_args(int argc, char **argv, opts_t *o)
++{
++	int	i;
++
++	o->model_path = NULL;
++	o->n_ctx = 2048;
++	o->gen_tokens = 32;
++	o->want_json = false;
++	o->gpu_layers = 0;
++	o->capacity_only = false;
++	i = 1;
++	while (i < argc)
++	{
++		if (strcmp(argv[i], "--model") == 0 && i + 1 < argc)
++			o->model_path = argv[++i];
++		else if (strcmp(argv[i], "--prompt") == 0 && i + 1 < argc)
++			o->prompt_paths.push_back(argv[++i]);
++		else if (strcmp(argv[i], "--ctx") == 0 && i + 1 < argc)
++			o->n_ctx = atoi(argv[++i]);
++		else if (strcmp(argv[i], "--gen-tokens") == 0 && i + 1 < argc)
++			o->gen_tokens = atoi(argv[++i]);
++		else if (strcmp(argv[i], "--q8-layers") == 0 && i + 1 < argc)
++			parse_int_list(argv[++i], &o->q8_layers);
++		else if (strcmp(argv[i], "--gpu-layers") == 0 && i + 1 < argc)
++		{
++			++i;
++			o->gpu_layers = strcmp(argv[i], "all") == 0
++				? -1 : (int32_t)atoi(argv[i]);
++		}
++		else if (strcmp(argv[i], "--json") == 0)
++			o->want_json = true;
++		else if (strcmp(argv[i], "--capacity-only") == 0)
++			o->capacity_only = true;
++		else
++			return (die("unknown or malformed option"), 1);
++		i++;
++	}
++	if (o->model_path == NULL
++			|| (!o->capacity_only && o->prompt_paths.empty()))
++		return (die("--model and at least one --prompt are required "
++				"(unless --capacity-only)"), 1);
++	return (0);
++}
++
++int	main(int argc, char **argv)
++{
++	opts_t						o;
++	llama_model					*model;
++	const llama_vocab			*vocab;
++	int32_t						n_layer;
++	int32_t						n_embd_gqa;
++	std::vector<ggml_type>		type_map;
++	std::vector<int>			mixed_flags;	/* 0=Q8,1=Q5, for
++												 * membrane_mixed_layer_
++												 * bytes() cross-check */
++	uint64_t					bytes_per_layer_q8;
++	uint64_t					bytes_per_layer_q5;
++	uint64_t					theoretical_total;
++	int32_t						q8_count;
++	int32_t						il;
++
++	if (parse_args(argc, argv, &o) != 0)
++		return (2);
++	llama_backend_init();
++	llama_model_params	mp = llama_model_default_params();
++	mp.n_gpu_layers = o.gpu_layers;
++	model = llama_model_load_from_file(o.model_path, mp);
++	if (model == NULL)
++		return (die("model load failed"), llama_backend_free(), 3);
++	vocab = llama_model_get_vocab(model);
++	n_layer = llama_model_n_layer(model);
++	{
++		int32_t	n_embd = llama_model_n_embd(model);
++		int32_t	n_head = llama_model_n_head(model);
++		int32_t	n_head_kv = llama_model_n_head_kv(model);
++
++		n_embd_gqa = (n_head > 0) ? (n_embd / n_head) * n_head_kv : 0;
++	}
++	type_map.assign((size_t)n_layer, GGML_TYPE_Q5_1);
++	mixed_flags.assign((size_t)n_layer, MEMBRANE_MIXED_LAYER_Q5);
++	for (int32_t idx : o.q8_layers)
++	{
++		if (idx < 0 || idx >= n_layer)
++		{
++			fprintf(stderr, "membrane-kv-mixed-layer: --q8-layers index "
++				"%d out of range [0, %d)\n", idx, n_layer);
++			llama_model_free(model);
++			return (llama_backend_free(), 2);
++		}
++		type_map[(size_t)idx] = GGML_TYPE_Q8_0;
++		mixed_flags[(size_t)idx] = MEMBRANE_MIXED_LAYER_Q8;
++	}
++	q8_count = (int32_t)o.q8_layers.size();
++	bytes_per_layer_q8 = (uint64_t)o.n_ctx
++		* (ggml_row_size(GGML_TYPE_Q8_0, n_embd_gqa) * 2);
++	bytes_per_layer_q5 = (uint64_t)o.n_ctx
++		* (ggml_row_size(GGML_TYPE_Q5_1, n_embd_gqa) * 2);
++	if (!membrane_mixed_layer_bytes(mixed_flags.data(), n_layer,
++			bytes_per_layer_q8, bytes_per_layer_q5, &theoretical_total))
++	{
++		llama_model_free(model);
++		return (die("internal: invalid mixed-layer type map"),
++			llama_backend_free(), 4);
++	}
++	if (o.capacity_only)
++	{
++		/* Section 16: exactly ONE context created, the candidate mixed
++		 * one -- no F16 reference context, matching real product usage
++		 * (which also never holds two contexts at once). A NULL return
++		 * from llama_init_from_model is llama.cpp's own graceful
++		 * allocation-failure signal (used throughout this project's
++		 * existing guard/adaptive code, e.g. resolve_gpu_config()) --
++		 * reported here as a clean capacity_full=false result, not a
++		 * crash and not a forced OOM. */
++		llama_context	*probe_ctx = make_context(model, o.n_ctx,
++				GGML_TYPE_F16, GGML_TYPE_F16, layer_map_cb, &type_map);
++		bool			fits = probe_ctx != NULL;
++
++		if (o.want_json)
++			printf("{\"schema_version\":1,\"capacity_only\":true,"
++				"\"n_layer\":%d,\"ctx\":%d,\"gpu_layers_requested\":%d,"
++				"\"q8_layer_count\":%d,\"theoretical_mixed_bytes\":%llu,"
++				"\"context_creation_succeeded\":%s}\n",
++				n_layer, o.n_ctx, o.gpu_layers, q8_count,
++				(unsigned long long)theoretical_total,
++				fits ? "true" : "false");
++		else
++			fprintf(stderr, "membrane-kv-mixed-layer: capacity probe "
++				"ctx=%d gpu_layers=%d q8_layers=%d theoretical_bytes=%llu "
++				"context_creation_succeeded=%s\n", o.n_ctx, o.gpu_layers,
++				q8_count, (unsigned long long)theoretical_total,
++				fits ? "true" : "false");
++		if (probe_ctx != NULL)
++			llama_free(probe_ctx);
++		llama_model_free(model);
++		llama_backend_free();
++		return (0);
++	}
++
++	llama_context	*ref_ctx;
++	llama_context	*cand_ctx;
++	int32_t			n_vocab;
++	double			sum_top1;
++	double			sum_rel_l2;
++	double			sum_delta_nll;
++	int				identical_count;
++	int				n_prompts_ok;
++	uint64_t		real_state_bytes;
++	long			rss_before_cand_kb;
++	long			rss_after_cand_kb;
++	double			sum_prompt_tok_per_s;
++	double			sum_gen_tok_per_s;
++
++	ref_ctx = make_context(model, o.n_ctx, GGML_TYPE_F16, GGML_TYPE_F16,
++			NULL, NULL);
++	/* Real RSS delta isolating JUST the mixed context's own allocation
++	 * (ref_ctx already exists and is stable by this point, so its own
++	 * footprint doesn't contaminate the delta) -- a real, physical
++	 * cross-check on top of the theoretical ggml_row_size()-based
++	 * formula (Section 6), same RSS-delta methodology kv_store_
++	 * telemetry.h already uses throughout Phase 7/9/10. Peak RSS
++	 * (ru_maxrss), not current RSS: getrusage() offers no portable
++	 * "current" figure, and nothing else runs between the two
++	 * measurements to inflate the peak for an unrelated reason. */
++	rss_before_cand_kb = peak_rss_kb();
++	cand_ctx = make_context(model, o.n_ctx, GGML_TYPE_F16, GGML_TYPE_F16,
++			layer_map_cb, &type_map);
++	rss_after_cand_kb = peak_rss_kb();
++	if (ref_ctx == NULL || cand_ctx == NULL)
++	{
++		if (ref_ctx)
++			llama_free(ref_ctx);
++		if (cand_ctx)
++			llama_free(cand_ctx);
++		llama_model_free(model);
++		return (die("context creation failed"), llama_backend_free(), 3);
++	}
++	n_vocab = llama_vocab_n_tokens(vocab);
++	sum_top1 = 0.0;
++	sum_rel_l2 = 0.0;
++	sum_delta_nll = 0.0;
++	identical_count = 0;
++	n_prompts_ok = 0;
++	real_state_bytes = 0;
++	sum_prompt_tok_per_s = 0.0;
++	sum_gen_tok_per_s = 0.0;
++	if (o.want_json)
++		printf("{\"schema_version\":1,\"n_layer\":%d,\"ctx\":%d,"
++			"\"gen_tokens\":%d,\"q8_layer_count\":%d,"
++			"\"theoretical_mixed_bytes\":%llu,"
++			"\"bytes_per_layer_q8\":%llu,\"bytes_per_layer_q5\":%llu,"
++			"\"type_map\":[", n_layer, o.n_ctx, o.gen_tokens, q8_count,
++			(unsigned long long)theoretical_total,
++			(unsigned long long)bytes_per_layer_q8,
++			(unsigned long long)bytes_per_layer_q5);
++	for (il = 0; il < n_layer; il++)
++	{
++		if (o.want_json)
++			printf("%s\"%s\"", il > 0 ? "," : "",
++				mixed_flags[(size_t)il] == MEMBRANE_MIXED_LAYER_Q8
++					? "Q8_0" : "Q5_1");
++	}
++	if (o.want_json)
++		printf("],\"prompts\":[");
++	for (size_t p = 0; p < o.prompt_paths.size(); p++)
++	{
++		std::string					text;
++		std::vector<llama_token>	tokens;
++		pass_result_t				ref_free;
++		pass_result_t				cand_free;
++		pass_result_t				cand_forced;
++		prompt_metrics_t			pm;
++
++		text = read_file(o.prompt_paths[p].c_str());
++		if (text.empty() || !tokenize_prompt(vocab, text, &tokens))
++			continue ;
++		if (!decode_prompt(ref_ctx, tokens, 256)
++				|| !run_gen(ref_ctx, vocab, o.gen_tokens, NULL, &ref_free))
++			continue ;
++		/* Candidate FREE-RUNNING pass first (genuine, unforced
++		 * behavior -- what the mixed cache actually produces on its
++		 * own), then reset the sequence and decode again for a
++		 * SEPARATE teacher-forced pass -- same pass-ordering
++		 * discipline main.cpp's run_native_vs_compressed_comparison()
++		 * already uses, so the canonical/free pass is never
++		 * contaminated by a prior pass in the same sequence slot. This
++		 * free-running pass is also the one real throughput is timed
++		 * from -- the actual, unforced decode/generation work. */
++		std::chrono::steady_clock::time_point	t_prompt0;
++		std::chrono::steady_clock::time_point	t_prompt1;
++		std::chrono::steady_clock::time_point	t_gen1;
++
++		t_prompt0 = std::chrono::steady_clock::now();
++		if (!decode_prompt(cand_ctx, tokens, 256))
++			continue ;
++		t_prompt1 = std::chrono::steady_clock::now();
++		if (!run_gen(cand_ctx, vocab, o.gen_tokens, NULL, &cand_free))
++			continue ;
++		t_gen1 = std::chrono::steady_clock::now();
++		{
++			double	prompt_s = std::chrono::duration<double>(
++					t_prompt1 - t_prompt0).count();
++			double	gen_s = std::chrono::duration<double>(
++					t_gen1 - t_prompt1).count();
++
++			if (prompt_s > 0.0)
++				sum_prompt_tok_per_s += (double)tokens.size() / prompt_s;
++			if (gen_s > 0.0)
++				sum_gen_tok_per_s += (double)o.gen_tokens / gen_s;
++		}
++		if (p == 0)
++			real_state_bytes = llama_state_seq_get_size(cand_ctx, 0);
++		llama_memory_seq_rm(llama_get_memory(cand_ctx), 0, -1, -1);
++		if (!decode_prompt(cand_ctx, tokens, 256)
++				|| !run_gen(cand_ctx, vocab, o.gen_tokens, &ref_free.tokens,
++					&cand_forced))
++			continue ;
++		if (!compare_against_reference(ref_free, cand_free, cand_forced,
++				n_vocab, &pm))
++			continue ;
++		sum_top1 += pm.top1_preservation;
++		sum_rel_l2 += pm.logit_rel_l2;
++		sum_delta_nll += pm.delta_nll;
++		identical_count += pm.token_identity ? 1 : 0;
++		n_prompts_ok++;
++		if (o.want_json)
++			printf("%s{\"path\":\"%s\",\"top1_preservation\":%.6f,"
++				"\"logit_rel_l2\":%.6f,\"delta_nll\":%.6f,"
++				"\"token_identity\":%s,\"first_divergence\":%d}",
++				n_prompts_ok > 1 ? "," : "", o.prompt_paths[p].c_str(),
++				pm.top1_preservation, pm.logit_rel_l2, pm.delta_nll,
++				pm.token_identity ? "true" : "false", pm.first_divergence);
++		/* Free-run llama_state_seq_erase-free reset: create fresh
++		 * contexts per prompt would be cleaner but far slower for a
++		 * many-prompt sweep; instead each prompt starts a fresh
++		 * sequence via llama_memory_seq_rm on both contexts. */
++		llama_memory_seq_rm(llama_get_memory(ref_ctx), 0, -1, -1);
++		llama_memory_seq_rm(llama_get_memory(cand_ctx), 0, -1, -1);
++	}
++	if (o.want_json)
++	{
++		printf("],\"aggregate\":{\"n_prompts\":%d,"
++			"\"mean_top1_preservation\":%.6f,\"mean_logit_rel_l2\":%.6f,"
++			"\"mean_delta_nll\":%.6f,\"token_identity_count\":%d,"
++			"\"mean_prompt_tok_per_s\":%.6f,\"mean_gen_tok_per_s\":%.6f,"
++			/* per-SEQUENCE serialized state size after this run's
++			 * prompt+gen tokens -- proportional to tokens actually
++			 * written, NOT the full ctx_size allocation; never compare
++			 * this directly to theoretical_mixed_bytes (see the
++			 * rss_delta_kb pair below for the full-capacity cross-
++			 * check instead). */
++			"\"state_bytes_used_first_prompt\":%llu,"
++			"\"rss_before_cand_ctx_kb\":%ld,"
++			"\"rss_after_cand_ctx_kb\":%ld,"
++			"\"rss_delta_cand_ctx_kb\":%ld},"
++			"\"no_fallback_occurred\":true}\n",
++			n_prompts_ok,
++			n_prompts_ok ? sum_top1 / n_prompts_ok : 0.0,
++			n_prompts_ok ? sum_rel_l2 / n_prompts_ok : 0.0,
++			n_prompts_ok ? sum_delta_nll / n_prompts_ok : 0.0,
++			identical_count,
++			n_prompts_ok ? sum_prompt_tok_per_s / n_prompts_ok : 0.0,
++			n_prompts_ok ? sum_gen_tok_per_s / n_prompts_ok : 0.0,
++			(unsigned long long)real_state_bytes,
++			rss_before_cand_kb, rss_after_cand_kb,
++			rss_after_cand_kb - rss_before_cand_kb);
++	}
++	long	peak_kb = peak_rss_kb();
++	if (!o.want_json)
++		fprintf(stderr, "membrane-kv-mixed-layer: %d/%zu prompts ok, "
++			"mean_top1=%.4f mean_rel_l2=%.6f mean_delta_nll=%.6f "
++			"theoretical_bytes=%llu rss_delta_cand_ctx_kb=%ld "
++			"peak_rss_kb=%ld\n", n_prompts_ok, o.prompt_paths.size(),
++			n_prompts_ok ? sum_top1 / n_prompts_ok : 0.0,
++			n_prompts_ok ? sum_rel_l2 / n_prompts_ok : 0.0,
++			n_prompts_ok ? sum_delta_nll / n_prompts_ok : 0.0,
++			(unsigned long long)theoretical_total,
++			rss_after_cand_kb - rss_before_cand_kb, peak_kb);
++	llama_free(ref_ctx);
++	llama_free(cand_ctx);
++	llama_model_free(model);
++	llama_backend_free();
++	return (n_prompts_ok > 0 ? 0 : 4);
++}
+diff --git a/tools/membrane-kv-mixed-layer/mixed_layer_policy.c b/tools/membrane-kv-mixed-layer/mixed_layer_policy.c
+new file mode 100644
+index 0000000..daf0b41
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/mixed_layer_policy.c
+@@ -0,0 +1,164 @@
++#include "mixed_layer_policy.h"
++
++#include <stdlib.h>
++#include <string.h>
++
++int	membrane_mixed_layer_bytes(const int *type_map, int32_t n_layer,
++		uint64_t bytes_per_layer_q8, uint64_t bytes_per_layer_q5,
++		uint64_t *out_total)
++{
++	int32_t		i;
++	uint64_t	total;
++
++	if (out_total == NULL)
++		return (0);
++	*out_total = 0;
++	if (type_map == NULL || n_layer <= 0)
++		return (0);
++	total = 0;
++	i = 0;
++	while (i < n_layer)
++	{
++		if (type_map[i] == MEMBRANE_MIXED_LAYER_Q8)
++			total += bytes_per_layer_q8;
++		else if (type_map[i] == MEMBRANE_MIXED_LAYER_Q5)
++			total += bytes_per_layer_q5;
++		else
++			return (0);
++		i++;
++	}
++	*out_total = total;
++	return (1);
++}
++
++int	membrane_mixed_layer_policy_from_ranking(const int32_t *rank,
++		int32_t n_layer, int32_t q8_count, int *out_type_map)
++{
++	int32_t	i;
++	int32_t	layer;
++	char	*seen;
++	int		ok;
++
++	if (rank == NULL || out_type_map == NULL || n_layer <= 0)
++		return (0);
++	if (q8_count < 0)
++		q8_count = 0;
++	if (q8_count > n_layer)
++		q8_count = n_layer;
++	seen = (char *)calloc((size_t)n_layer, 1);
++	if (seen == NULL)
++		return (0);
++	ok = 1;
++	i = 0;
++	while (ok && i < n_layer)
++	{
++		layer = rank[i];
++		if (layer < 0 || layer >= n_layer || seen[layer])
++			ok = 0;
++		else
++			seen[layer] = 1;
++		i++;
++	}
++	free(seen);
++	if (!ok)
++		return (0);
++	i = 0;
++	while (i < n_layer)
++	{
++		out_type_map[i] = MEMBRANE_MIXED_LAYER_Q5;
++		i++;
++	}
++	i = 0;
++	while (i < q8_count)
++	{
++		out_type_map[rank[i]] = MEMBRANE_MIXED_LAYER_Q8;
++		i++;
++	}
++	return (1);
++}
++
++int	membrane_mixed_layer_contiguous(int32_t n_layer, int32_t q8_count,
++		int *out_type_map)
++{
++	int32_t	i;
++
++	if (out_type_map == NULL || n_layer <= 0)
++		return (0);
++	if (q8_count < 0)
++		q8_count = 0;
++	if (q8_count > n_layer)
++		q8_count = n_layer;
++	i = 0;
++	while (i < n_layer)
++	{
++		out_type_map[i] = (i < q8_count) ? MEMBRANE_MIXED_LAYER_Q8
++			: MEMBRANE_MIXED_LAYER_Q5;
++		i++;
++	}
++	return (1);
++}
++
++int	membrane_mixed_layer_reverse_contiguous(int32_t n_layer,
++		int32_t q8_count, int *out_type_map)
++{
++	int32_t	i;
++	int32_t	first_q8;
++
++	if (out_type_map == NULL || n_layer <= 0)
++		return (0);
++	if (q8_count < 0)
++		q8_count = 0;
++	if (q8_count > n_layer)
++		q8_count = n_layer;
++	first_q8 = n_layer - q8_count;
++	i = 0;
++	while (i < n_layer)
++	{
++		out_type_map[i] = (i >= first_q8) ? MEMBRANE_MIXED_LAYER_Q8
++			: MEMBRANE_MIXED_LAYER_Q5;
++		i++;
++	}
++	return (1);
++}
++
++int	membrane_mixed_layer_alternating(int32_t n_layer, int32_t q8_count,
++		int *out_type_map)
++{
++	int32_t	i;
++	int32_t	placed;
++
++	if (out_type_map == NULL || n_layer <= 0)
++		return (0);
++	if (q8_count < 0)
++		q8_count = 0;
++	if (q8_count > n_layer)
++		q8_count = n_layer;
++	i = 0;
++	while (i < n_layer)
++	{
++		out_type_map[i] = MEMBRANE_MIXED_LAYER_Q5;
++		i++;
++	}
++	placed = 0;
++	i = 0;
++	while (i < n_layer && placed < q8_count)
++	{
++		out_type_map[i] = MEMBRANE_MIXED_LAYER_Q8;
++		placed++;
++		i += 2;
++	}
++	/* If every even index is exhausted before reaching q8_count (only
++	 * possible when q8_count > ceil(n_layer/2)), continue placing on
++	 * odd indices so the requested count is still honored exactly. */
++	i = 1;
++	while (i < n_layer && placed < q8_count)
++	{
++		if (out_type_map[i] == MEMBRANE_MIXED_LAYER_Q5)
++		{
++			out_type_map[i] = MEMBRANE_MIXED_LAYER_Q8;
++			placed++;
++		}
++		i += 2;
++	}
++	return (1);
++}
+diff --git a/tools/membrane-kv-mixed-layer/mixed_layer_policy.h b/tools/membrane-kv-mixed-layer/mixed_layer_policy.h
+new file mode 100644
+index 0000000..6592a1d
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/mixed_layer_policy.h
+@@ -0,0 +1,87 @@
++#ifndef MEMBRANE_KV_MIXED_LAYER_POLICY_H
++# define MEMBRANE_KV_MIXED_LAYER_POLICY_H
++
++# include <stddef.h>
++# include <stdint.h>
++
++# ifdef __cplusplus
++extern "C" {
++# endif
++
++/*
++ * Phase 11B: llama-free (no ggml/llama header) pure arithmetic for
++ * per-layer mixed Q8_0/Q5_1 KV storage -- RESEARCH ONLY, experiment
++ * branch only, never linked into membrane-run/membrane-llama-run.
++ * This module never touches a ggml_type directly (kept dependency-
++ * free like compat_check.h/adaptive_kv_policy.h already do) -- the
++ * caller maps MEMBRANE_MIXED_LAYER_Q8/Q5 to GGML_TYPE_Q8_0/GGML_TYPE_
++ * Q5_1 itself (see tools/membrane-kv-mixed-layer/main.cpp).
++ *
++ * Two independent responsibilities, deliberately kept in one small
++ * module rather than two: (1) exact storage-byte accounting for an
++ * arbitrary per-layer type map, reusing the same real ggml_row_size()-
++ * derived per-token byte constants every other MEMBRANE Q8/Q5 module
++ * already uses (never re-derived, never approximated); (2) a pure,
++ * deterministic "top-N-sensitive-layers-stay-Q8" assignment function
++ * for Section 12's sensitivity-based policy, and a couple of naive
++ * comparison layouts (contiguous, reverse-contiguous, alternating).
++ */
++
++# define MEMBRANE_MIXED_LAYER_Q8	0
++# define MEMBRANE_MIXED_LAYER_Q5	1
++
++/*
++ * type_map: n_layer entries, each MEMBRANE_MIXED_LAYER_Q8/Q5.
++ * bytes_per_layer_q8/q5: real per-layer KV bytes (K+V, one layer, one
++ * token position range = kv_size) for that layer's dtype -- the
++ * caller computes this via kv_size * (ggml_row_size(type, n_embd_gqa)
++ * for K + ggml_row_size(type, n_embd_gqa) for V), the exact same
++ * arithmetic membrane-run's kv_bytes_for_mode() already uses,
++ * multiplied out per-layer here since Q8/Q5 layers can coexist.
++ * out_total: sum across every layer of its own dtype's bytes --
++ * mixed_bytes = sum(Q8 layer bytes) + sum(Q5 layer bytes), Section 6.
++ *
++ * Returns 1 (out_total set) if every entry in type_map is a valid
++ * MEMBRANE_MIXED_LAYER_Q8/Q5 value and n_layer > 0; 0 otherwise
++ * (out_total left at 0) -- fails closed on an invalid/unassigned
++ * layer rather than silently treating it as one type or the other.
++ */
++int	membrane_mixed_layer_bytes(const int *type_map, int32_t n_layer,
++		uint64_t bytes_per_layer_q8, uint64_t bytes_per_layer_q5,
++		uint64_t *out_total);
++
++/*
++ * Section 12's sensitivity-based policy: given layers ranked most-
++ * sensitive-to-Q5-first (rank[0] = the layer that should stay Q8
++ * most, per measured ablation data -- Section 9), assigns the top
++ * q8_count layers (by rank order) to Q8, every other layer to Q5.
++ * rank must be a permutation of [0, n_layer) -- every layer index
++ * appears exactly once; out_type_map must have n_layer entries.
++ * q8_count is clamped to [0, n_layer].
++ *
++ * Returns 1 on success, 0 (out_type_map untouched) if rank is not a
++ * valid permutation of [0, n_layer) (a repeated or out-of-range
++ * index) -- fails closed rather than silently producing a partial or
++ * incorrect map.
++ */
++int	membrane_mixed_layer_policy_from_ranking(const int32_t *rank,
++		int32_t n_layer, int32_t q8_count, int *out_type_map);
++
++/* Naive comparison layouts (Section 8/12), all pure/deterministic.
++ * q8_count is clamped to [0, n_layer]; out_type_map must have n_layer
++ * entries. Returns 1 on success, 0 only for n_layer <= 0 or a NULL
++ * out_type_map. */
++int	membrane_mixed_layer_contiguous(int32_t n_layer, int32_t q8_count,
++		int *out_type_map);				/* layers [0, q8_count) -> Q8 */
++int	membrane_mixed_layer_reverse_contiguous(int32_t n_layer,
++		int32_t q8_count, int *out_type_map);	/* last q8_count -> Q8 */
++int	membrane_mixed_layer_alternating(int32_t n_layer, int32_t q8_count,
++		int *out_type_map);				/* every other layer, starting
++										 * at 0, until q8_count Q8
++										 * layers are placed */
++
++# ifdef __cplusplus
++}
++# endif
++
++#endif
+diff --git a/tools/membrane-kv-mixed-layer/test_mixed_layer_policy.c b/tools/membrane-kv-mixed-layer/test_mixed_layer_policy.c
+new file mode 100644
+index 0000000..96576b9
+--- /dev/null
++++ b/tools/membrane-kv-mixed-layer/test_mixed_layer_policy.c
+@@ -0,0 +1,242 @@
++#include <string.h>
++
++#include "mixed_layer_policy.h"
++#include "test_helpers.h"
++
++#define BYTES_Q8	68000ull
++#define BYTES_Q5	48000ull
++
++static void	test_bytes_all_q8(void)
++{
++	int			map[4] = {0, 0, 0, 0};
++	uint64_t	total;
++
++	TEST_ASSERT(membrane_mixed_layer_bytes(map, 4, BYTES_Q8, BYTES_Q5,
++			&total) == 1, "all-Q8 map resolves");
++	TEST_ASSERT(total == 4 * BYTES_Q8, "all-Q8 sum matches exactly");
++}
++
++static void	test_bytes_all_q5(void)
++{
++	int			map[4] = {1, 1, 1, 1};
++	uint64_t	total;
++
++	TEST_ASSERT(membrane_mixed_layer_bytes(map, 4, BYTES_Q8, BYTES_Q5,
++			&total) == 1, "all-Q5 map resolves");
++	TEST_ASSERT(total == 4 * BYTES_Q5, "all-Q5 sum matches exactly");
++}
++
++static void	test_bytes_mixed_exact_sum(void)
++{
++	int			map[6] = {0, 0, 1, 1, 1, 0};
++	uint64_t	total;
++	uint64_t	expected;
++
++	expected = 3 * BYTES_Q8 + 3 * BYTES_Q5;
++	TEST_ASSERT(membrane_mixed_layer_bytes(map, 6, BYTES_Q8, BYTES_Q5,
++			&total) == 1, "mixed map resolves");
++	TEST_ASSERT(total == expected,
++		"mixed_bytes == sum(Q8 layer bytes) + sum(Q5 layer bytes), no "
++		"approximation");
++}
++
++static void	test_bytes_invalid_type_fails_closed(void)
++{
++	int			map[3] = {0, 2, 1};	/* 2 is not Q8 or Q5 */
++	uint64_t	total = 12345;
++
++	TEST_ASSERT(membrane_mixed_layer_bytes(map, 3, BYTES_Q8, BYTES_Q5,
++			&total) == 0, "an unsupported type value fails closed");
++	TEST_ASSERT(total == 0, "out_total is reset to 0 on failure, not "
++		"left at a stale/partial value");
++}
++
++static void	test_bytes_null_and_degenerate(void)
++{
++	int			map[2] = {0, 1};
++	uint64_t	total;
++
++	TEST_ASSERT(membrane_mixed_layer_bytes(NULL, 2, BYTES_Q8, BYTES_Q5,
++			&total) == 0, "NULL type_map fails closed");
++	TEST_ASSERT(membrane_mixed_layer_bytes(map, 0, BYTES_Q8, BYTES_Q5,
++			&total) == 0, "n_layer <= 0 fails closed");
++	TEST_ASSERT(membrane_mixed_layer_bytes(map, 2, BYTES_Q8, BYTES_Q5,
++			NULL) == 0, "NULL out_total fails closed, not a crash");
++}
++
++static void	test_ranking_policy_top_n_stays_q8(void)
++{
++	int32_t	rank[5] = {3, 0, 4, 1, 2};	/* layer 3 most sensitive */
++	int		map[5];
++
++	TEST_ASSERT(membrane_mixed_layer_policy_from_ranking(rank, 5, 2,
++			map) == 1, "ranking policy resolves");
++	TEST_ASSERT(map[3] == MEMBRANE_MIXED_LAYER_Q8,
++		"rank[0] (layer 3) stays Q8");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q8,
++		"rank[1] (layer 0) stays Q8");
++	TEST_ASSERT(map[4] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[1] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q5,
++		"every layer outside the top q8_count is Q5");
++}
++
++static void	test_ranking_policy_q8_count_clamped(void)
++{
++	int32_t	rank[3] = {0, 1, 2};
++	int		map[3];
++
++	TEST_ASSERT(membrane_mixed_layer_policy_from_ranking(rank, 3, 99,
++			map) == 1, "an over-large q8_count is clamped, not rejected");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[1] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q8,
++		"clamped to n_layer -- every layer is Q8");
++	TEST_ASSERT(membrane_mixed_layer_policy_from_ranking(rank, 3, -5,
++			map) == 1, "a negative q8_count is clamped to 0, not rejected");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[1] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q5,
++		"clamped to 0 -- every layer is Q5");
++}
++
++static void	test_ranking_policy_invalid_permutation_fails_closed(void)
++{
++	int32_t	dup[3] = {0, 0, 1};		/* 0 repeated, 2 missing */
++	int32_t	oob[3] = {0, 1, 5};		/* 5 out of range */
++	int		map[3];
++
++	TEST_ASSERT(membrane_mixed_layer_policy_from_ranking(dup, 3, 1,
++			map) == 0, "a repeated layer index is rejected -- not a "
++		"valid permutation");
++	TEST_ASSERT(membrane_mixed_layer_policy_from_ranking(oob, 3, 1,
++			map) == 0, "an out-of-range layer index is rejected");
++}
++
++static void	test_contiguous_layout(void)
++{
++	int	map[6];
++
++	TEST_ASSERT(membrane_mixed_layer_contiguous(6, 3, map) == 1,
++		"contiguous layout resolves");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[1] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q8,
++		"first 3 layers are Q8");
++	TEST_ASSERT(map[3] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[4] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[5] == MEMBRANE_MIXED_LAYER_Q5,
++		"remaining layers are Q5");
++}
++
++static void	test_reverse_contiguous_layout(void)
++{
++	int	map[6];
++
++	TEST_ASSERT(membrane_mixed_layer_reverse_contiguous(6, 3, map) == 1,
++		"reverse-contiguous layout resolves");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[1] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q5,
++		"first 3 layers are Q5");
++	TEST_ASSERT(map[3] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[4] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[5] == MEMBRANE_MIXED_LAYER_Q8,
++		"last 3 layers are Q8");
++}
++
++static void	test_alternating_layout(void)
++{
++	int	map[6];
++	int	q8_count;
++	int	i;
++
++	TEST_ASSERT(membrane_mixed_layer_alternating(6, 3, map) == 1,
++		"alternating layout resolves");
++	TEST_ASSERT(map[0] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[2] == MEMBRANE_MIXED_LAYER_Q8
++			&& map[4] == MEMBRANE_MIXED_LAYER_Q8,
++		"even layers are Q8 at exactly half density");
++	TEST_ASSERT(map[1] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[3] == MEMBRANE_MIXED_LAYER_Q5
++			&& map[5] == MEMBRANE_MIXED_LAYER_Q5,
++		"odd layers are Q5");
++	/* q8_count exceeding half the layers must still be honored exactly
++	 * (falls back to odd indices once even ones are exhausted). */
++	TEST_ASSERT(membrane_mixed_layer_alternating(6, 5, map) == 1,
++		"alternating layout resolves for a high q8_count");
++	q8_count = 0;
++	for (i = 0; i < 6; i++)
++		if (map[i] == MEMBRANE_MIXED_LAYER_Q8)
++			q8_count++;
++	TEST_ASSERT(q8_count == 5,
++		"the exact requested q8_count is honored even beyond the "
++		"even-index density");
++}
++
++static void	test_all_layouts_no_layer_left_unassigned(void)
++{
++	int	map[7];
++	int	i;
++	int	q8;
++	int	q5;
++
++	membrane_mixed_layer_contiguous(7, 3, map);
++	q8 = 0;
++	q5 = 0;
++	for (i = 0; i < 7; i++)
++	{
++		TEST_ASSERT(map[i] == MEMBRANE_MIXED_LAYER_Q8
++				|| map[i] == MEMBRANE_MIXED_LAYER_Q5,
++			"every layer is assigned exactly one of Q8/Q5, never "
++			"anything else (no Q4, no Q5_0, no unassigned value)");
++		q8 += (map[i] == MEMBRANE_MIXED_LAYER_Q8);
++		q5 += (map[i] == MEMBRANE_MIXED_LAYER_Q5);
++	}
++	TEST_ASSERT(q8 + q5 == 7, "every layer accounted for exactly once");
++}
++
++static void	test_bytes_deterministic_repeated_calls(void)
++{
++	int			map[6] = {0, 0, 1, 1, 1, 0};
++	uint64_t	t1;
++	uint64_t	t2;
++
++	membrane_mixed_layer_bytes(map, 6, BYTES_Q8, BYTES_Q5, &t1);
++	membrane_mixed_layer_bytes(map, 6, BYTES_Q8, BYTES_Q5, &t2);
++	TEST_ASSERT(t1 == t2,
++		"identical inputs produce an identical byte total across calls");
++}
++
++static void	test_ranking_policy_deterministic_repeated_calls(void)
++{
++	int32_t	rank[5] = {3, 0, 4, 1, 2};
++	int		map1[5];
++	int		map2[5];
++
++	membrane_mixed_layer_policy_from_ranking(rank, 5, 2, map1);
++	membrane_mixed_layer_policy_from_ranking(rank, 5, 2, map2);
++	TEST_ASSERT(memcmp(map1, map2, sizeof(map1)) == 0,
++		"identical ranking inputs produce a byte-identical type map "
++		"across calls");
++}
++
++int	main(void)
++{
++	test_bytes_all_q8();
++	test_bytes_all_q5();
++	test_bytes_mixed_exact_sum();
++	test_bytes_invalid_type_fails_closed();
++	test_bytes_null_and_degenerate();
++	test_ranking_policy_top_n_stays_q8();
++	test_ranking_policy_q8_count_clamped();
++	test_ranking_policy_invalid_permutation_fails_closed();
++	test_contiguous_layout();
++	test_reverse_contiguous_layout();
++	test_alternating_layout();
++	test_all_layouts_no_layer_left_unassigned();
++	test_bytes_deterministic_repeated_calls();
++	test_ranking_policy_deterministic_repeated_calls();
++	printf("test_mixed_layer_policy: all tests passed\n");
++	return (0);
++}

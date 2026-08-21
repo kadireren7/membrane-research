@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Sections 8/9/10/11: quality at PRIMARY POINT B (ctx=180000, SmolLM2-360M, real GTX 1650 Vulkan, --gpu-layers all, gen_tokens=32), pre-registered 5-prompt subset (quality_methodology.json), measured against a TRUE F16 ground-truth reference (see methodology below), not a self-referential one.",
+  "reference_methodology": "quality_raw.jsonl (the FIRST sweep run) used the whole-cache-Q5-at-ctx=180000 dump itself as the teacher-forcing reference. Its own F_all_q5 self-check control came back as a trivial top1=1.0/rel_l2=0.0/delta_nll=0.0 for every prompt -- Q5 compared against itself is definitionally perfect and CANNOT be used to test whether mixed beats Q5 in quality. This was a real design flaw in the first pass, caught by its own sanity-check control, not a result-driven decision. quality_raw_f16ref.jsonl (this file, the PRIMARY data for the decision) fixes this: the reference dump is genuine whole-cache F16 (GGML_TYPE_F16) generated at ctx=2048 (safe -- well within the host's real memory budget), and BOTH whole-cache Q5 and every mixed/naive candidate are then loaded at the real PRIMARY POINT B context (ctx=180000) and teacher-forced against that F16 dump's tokens/logits. ctx=2048 is a valid, comparable reference for logits produced at ctx=180000 because RoPE position encoding and KV-cache math depend only on each token's actual sequence position (here, ~9-16 prompt tokens + 32 generated tokens, i.e. well under 50 real positions either way), not on the allocated KV buffer's reserved capacity -- ctx only sizes the buffer, exactly per the disclosed methodology note in hardware_state.json. Determinism of this claim was checked directly (see stability_check below): repeated compare invocations against the same dump produced bit-identical logit_rel_l2/top1/delta_nll.",
+  "same_5_prompts_and_configs_both_passes": true,
+  "summary_by_config": {
+    "F_all_q5": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.99375,
+      "mean_logit_rel_l2": 0.06679500000000001,
+      "mean_delta_nll": -0.006732,
+      "n_token_identity_true": 4
+    },
+    "A_profile_sensitivity": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.9375,
+      "mean_logit_rel_l2": 0.0748868,
+      "mean_delta_nll": 0.0097104,
+      "n_token_identity_true": 1
+    },
+    "B_early_contiguous": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.95,
+      "mean_logit_rel_l2": 0.08524860000000001,
+      "mean_delta_nll": 0.0078966,
+      "n_token_identity_true": 1
+    },
+    "C_late_contiguous": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.9375,
+      "mean_logit_rel_l2": 0.0855776,
+      "mean_delta_nll": 0.0006588,
+      "n_token_identity_true": 1
+    },
+    "D_alternating": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.9375,
+      "mean_logit_rel_l2": 0.086032,
+      "mean_delta_nll": 0.0056226,
+      "n_token_identity_true": 1
+    },
+    "E_random_seeded": {
+      "n_prompts": 5,
+      "mean_top1_preservation": 0.94375,
+      "mean_logit_rel_l2": 0.0824538,
+      "mean_delta_nll": 0.016526199999999998,
+      "n_token_identity_true": 1
+    }
+  },
+  "primary_h1_test": {
+    "definition": "mixed (A_profile_sensitivity, top-8 Q8 layers) vs whole-cache-Q5, both measured against the true F16 reference, mean logit_rel_l2 across the 5 pre-registered prompts",
+    "q5_mean_rel_l2": 0.06679500000000001,
+    "mixed_profile_mean_rel_l2": 0.0748868,
+    "mixed_beats_q5_on_mean_rel_l2": false,
+    "q5_mean_top1_preservation": 0.99375,
+    "mixed_profile_mean_top1_preservation": 0.9375,
+    "per_prompt": {
+      "factual_recall_3": {
+        "q5_rel_l2": 0.094332,
+        "mixed_A_rel_l2": 0.092629,
+        "mixed_better": true
+      },
+      "instruction_following_3": {
+        "q5_rel_l2": 0.058798,
+        "mixed_A_rel_l2": 0.065319,
+        "mixed_better": false
+      },
+      "multistep_reasoning_3": {
+        "q5_rel_l2": 0.051741,
+        "mixed_A_rel_l2": 0.061089,
+        "mixed_better": false
+      },
+      "arithmetic_reasoning_3": {
+        "q5_rel_l2": 0.057158,
+        "mixed_A_rel_l2": 0.068963,
+        "mixed_better": false
+      },
+      "logical_reasoning_3": {
+        "q5_rel_l2": 0.071946,
+        "mixed_A_rel_l2": 0.086434,
+        "mixed_better": false
+      }
+    },
+    "n_prompts_where_mixed_beats_q5": 1,
+    "n_prompts_total": 5,
+    "finding": "Against the true F16 reference, whole-cache Q5 has LOWER mean error than the profile-based mixed Q8/Q5 layout on the primary metric (logit_rel_l2) and on top1_preservation, at PRIMARY POINT B. Mixed beat Q5 on only 1 of 5 prompts. This directly falsifies H1's core quality claim in this regime: adding 8 Q8-precision layers on top of a Q5 base did not bring the cache closer to F16 ground truth than staying uniformly Q5 -- the opposite of the naive expectation that more Q8 bytes should monotonically improve fidelity. This is a real, measured, disclosed finding, not a null/no-effect result."
+  },
+  "layout_comparison_section10": {
+    "definition": "at the SAME q8_count=8 / SAME KV-byte budget / SAME residency, does profile-sensitivity placement beat naive placements on mean logit_rel_l2 (measured against the same true F16 reference)?",
+    "profile_sensitivity_mean_rel_l2": 0.0748868,
+    "naive_layouts_mean_rel_l2": {
+      "B_early_contiguous": 0.08524860000000001,
+      "C_late_contiguous": 0.0855776,
+      "D_alternating": 0.086032,
+      "E_random_seeded": 0.0824538
+    },
+    "best_naive_mean_rel_l2": 0.0824538,
+    "sensitivity_beats_all_naive": true,
+    "finding": "Yes -- profile-sensitivity placement still beats every naive equal-budget layout on mean logit_rel_l2 in the forced-Q5 constrained regime (consistent with Phase 11C/11D's finding in the comfortable-memory regime). But ALL mixed layouts, sensitivity-based or naive, are worse than whole-cache Q5 on this metric at PRIMARY POINT B -- sensitivity placement is the best mixed strategy, but 'best mixed' is still not competitive with the simpler whole-cache-Q5 fallback here."
+  }
+}

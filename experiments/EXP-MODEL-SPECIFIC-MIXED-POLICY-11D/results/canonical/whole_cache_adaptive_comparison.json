@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #104: measured (not assumed) comparison between the product's real, shipped whole-cache --kv adaptive policy (invoked as an unmodified black box via build-cpu-rc1/tools/membrane-run/membrane-run --kv adaptive --compare-kv) and the research-only per-layer mixed profile from Task #102, on the identical 5-prompt subset, CPU backend, ctx=2048, gen_tokens=32. This does NOT modify or extend the product CLI in any way -- membrane-run is called exactly as any user would call it.",
+  "byte_budget_positions": {
+    "135m": {"all_q5_bytes": 17694720, "mixed_q8_count15_bytes": 21381120, "all_q8_bytes": 25067520, "mixed_pct_of_q8": 0.853, "mixed_pct_above_q5": 0.208},
+    "360m": {"all_q5_bytes": 31457280, "mixed_q8_count16_bytes": 38010880, "all_q8_bytes": 44564480, "mixed_pct_of_q8": 0.853, "mixed_pct_above_q5": 0.208}
+  },
+  "adaptive_resolution": {
+    "135m": {"requested": "adaptive", "selected": "q8", "reason": "CPU_ADAPTIVE_Q8_DEFAULT", "note": "adaptive always resolved to whole-cache Q8 at this ctx/backend across all 5 prompts -- CPU with no --kv-budget-mib comfortably fits Q8, so adaptive never had a reason to drop to Q5"},
+    "360m": {"requested": "adaptive", "selected": "q8", "reason": "CPU_ADAPTIVE_Q8_DEFAULT", "note": "same as 135M -- adaptive resolved to Q8 for every prompt"}
+  },
+  "mean_logit_rel_l2_5_prompts": {
+    "135m": {"whole_cache_q5": 0.056970, "mixed_q8_count15": 0.0474, "whole_cache_adaptive_q8": 0.010179},
+    "360m": {"whole_cache_q5": 0.046880, "mixed_q8_count16": 0.0401, "whole_cache_adaptive_q8": 0.008149}
+  },
+  "findings": [
+    "Whole-cache adaptive resolved to Q8 for every single prompt tested on both models at this ctx (CPU, no memory pressure, no --kv-budget-mib) -- it never had reason to consider Q5. In this comfortable-memory regime, adaptive's resolved quality (rel_l2 ~0.010 for 135M, ~0.008 for 360M) clearly beats the mixed profile's quality (~0.047 for 135M, ~0.040 for 360M) despite mixed using FEWER bytes (85.3% of Q8's bytes). Per-layer mixing at a 50%-layer budget is NOT a free win over adaptive when adaptive can simply pick whole-cache Q8 -- adaptive's binary choice, when it can afford the higher option, beats a partial mix at nearly the same byte cost.",
+    "The mixed profile clearly beats whole-cache Q5 at every measured point: for 20.8% more bytes than all-Q5, mixed KV recovers roughly 17% (135M) to 14% (360M) of the rel_l2 gap toward Q8 quality, matching the pattern Phase 11C's held-out results already established.",
+    "Quality does not degrade linearly with bytes between Q5 and Q8: mixed uses 85.3% of Q8's bytes but its rel_l2 is 4.1x-4.9x WORSE than Q8's, not a proportionally-close approximation. Per-layer mixing at a 50/50 layer split is a genuine interpolation point, not a way to buy Q8-adjacent quality cheaply.",
+    "The scenario where mixed KV would have a genuine, measured advantage over the PRODUCT's adaptive policy is specifically when adaptive would be forced down to whole-cache Q5 by memory pressure (a byte budget between all-Q5 and all-Q8 that adaptive cannot occupy, since it only ever picks one of the two discrete endpoints) -- that scenario was not reproduced in this comparison (CPU, ctx=2048 never pressured adaptive off Q8) and would require the kind of real memory-pressure boundary test Task #103 runs, applied to an adaptive-vs-mixed comparison specifically, to measure directly rather than assume."
+  ],
+  "conclusion": "Whole-cache adaptive is not measured to be beaten by per-layer mixed KV in the memory-comfortable regime tested here -- adaptive's Q8 resolution wins on quality at a similar byte cost. Mixed KV's real, measured advantage is over whole-cache Q5 specifically, not over adaptive's own best-case resolution. This is a real, disclosed finding that constrains how much practical value model-specific mixed KV would add on top of the already-shipped adaptive policy, and should weigh into the Task #110 decision gate."
+}

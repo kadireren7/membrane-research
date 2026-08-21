@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Phase 11D: model-specific offline sensitivity policy research (model -> fingerprint -> offline profile -> memory/Q8-budget -> layer selection -> mixed KV). RESEARCH ONLY -- experiment/model-specific-mixed-policy branch, built on experiment/layer-sensitivity-generalization (Phase 11C), never merged, never a product CLI. No --kv mixed flag exists; --kv adaptive is unmodified. All new inference in this phase used the real membrane-kv-mixed-layer research probe or the real, unmodified membrane-run product CLI on this host's real SmolLM2-135M/360M GGUF files.",
+  "branch_lineage": "main -> experiment/mixed-q8-q5-layer-feasibility (11B) -> experiment/layer-sensitivity-generalization (11C) -> experiment/model-specific-mixed-policy (11D, this artifact set)",
+  "as_of_membrane_commit": "eaeb25fed8c12bf924f5f42a3d78cd151cd130ca (experiment/layer-sensitivity-generalization tip this branch was created from; this phase's own work is uncommitted at manifest-write time -- see git log on experiment/model-specific-mixed-policy for the actual commit(s) once created)",
+  "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "files": {
+    "manifest.json": "this file",
+    "profile_135m_train21.json": "SmolLM2-135M offline sensitivity profile: real GGUF-derived fingerprint, train21 ranking (rel_l2_delta_mean, most-sensitive-first), independent raw per-layer metrics -- built by pure reanalysis of Phase 11C's raw ablation data, no new inference",
+    "profile_360m_train21.json": "same as above, SmolLM2-360M",
+    "calibration_sizes.json": "pre-registered calibration-prompt-subsets (sizes 5/10/15/21/31), round-robin category selection rule, fixed before any Phase 11D ranking/quality result",
+    "calibration_size_analysis.json": "rank-correlation (Spearman/Kendall/top-k-overlap) of each calibration size's ranking vs the size-31 and size-21 references, both models -- pure reanalysis",
+    "calibration_size_holdout_quality.json": "real held-out quality (10 never-touched prompts) for calibration sizes 5/10/21 at Q8 budgets 8 and 15, 135M -- sizes 5/10 are new CPU inference, size 21 reused directly from Phase 11C's holdout_policy.json",
+    "raw_calibration_size_holdout_135m.jsonl": "raw per-prompt records behind calibration_size_holdout_quality.json's new (size 5/10) runs",
+    "budget_sweep.json": "Q8-layer-count and byte-budget policy sweeps against the REAL train21 profiles/byte constants for both models, verifying exact ggml byte math and the actual<=budget invariant",
+    "cross_model_safety.json": "cross-model safety rejection tests against membrane_profile_validate() using real GGUF fingerprints -- every wrong-model/malformed scenario fails closed with the correct reason code",
+    "reproducibility.json": "profile-generation determinism check (byte-identical reruns) and the documented rank tie-break rule (lower layer index wins)",
+    "profile_generation_performance.json": "measured profile-generation cost, split into the genuinely-cheap reanalysis step and the NOT-cheap raw-ablation-sweep cost a brand-new model would require",
+    "holdout_policy_360m.json": "360M held-out naive-layout comparison (A_sensitivity vs early/late/alternating/random), same methodology as Phase 11C's 135M-only holdout_policy.json -- new CPU inference, 32 configs x 10 held-out prompts",
+    "raw_holdout_policy_360m.jsonl": "raw per-config records behind holdout_policy_360m.json",
+    "cpu_vulkan_validation.json": "CPU + Vulkan validation of profile-derived mixed layouts for both models on the Phase 11B 5-prompt subset -- quality consistency and exact byte-accounting cross-check across backends",
+    "raw_cpu_vulkan_validation.jsonl": "raw per-run records behind cpu_vulkan_validation.json",
+    "whole_cache_adaptive_comparison.json": "measured comparison between the real, unmodified product --kv adaptive policy and the profile-based mixed layout, both models, CPU -- discloses that adaptive's Q8 resolution beats mixed KV on quality at a similar byte cost when adaptive can freely choose Q8; mixed's real advantage is over whole-cache Q5 specifically",
+    "raw_whole_cache_adaptive_comparison.jsonl": "raw per-run records (membrane-run --compare-kv --json) behind whole_cache_adaptive_comparison.json",
+    "memory_pressure_360m.json": "real memory-pressure test at the known 360M ctx=180000 Vulkan boundary using profile-selected layers -- finds the real safe margin is far tighter (8 succeeds, 9 fails) than theoretical KV-byte math alone would suggest",
+    "raw_memory_pressure_360m.jsonl": "raw per-config records behind memory_pressure_360m.json",
+    "performance.json": "throughput stability (5 CPU + 7 Vulkan repeated runs) for one representative profile-based mixed config per model",
+    "raw_performance_11d.jsonl": "raw per-run records behind performance.json",
+    "regression_sanitizers.json": "regression/sanitizer results across all 5 build configs after adding model_profile.h/.c -- test_model_profile passes everywhere; the only other failure (test_mem_guard) is explained as real, reproducible host swap pressure unrelated to this phase's changes",
+    "summary.json": "top-level findings summary, all research questions answered, decision-gate verdict and rationale, recommended next step, explicit not-done list"
+  }
+}

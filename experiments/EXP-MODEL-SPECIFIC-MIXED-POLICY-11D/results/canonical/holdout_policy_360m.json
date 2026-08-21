@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #98: 360M held-out naive-layout comparison, same methodology as Phase 11C's holdout_policy.json (135M) -- A_sensitivity uses the real train21 ranking (profile_360m_train21.json), B/C/D/E are naive comparison layouts, all evaluated on the same 10 held-out prompts never touched during ranking construction.",
+  "provenance": {
+    "membrane_commit": "eaeb25fed8c12bf924f5f42a3d78cd151cd130ca",
+    "model_identity": "SmolLM2-360M-Instruct-f16",
+    "backend": "CPU",
+    "context_size": 2048,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1"
+  },
+  "train_ranking_used": {
+    "source": "results/phase11/model-specific-policy/profile_360m_train21.json",
+    "n_train_prompts": 21,
+    "metric": "rel_l2_delta_mean"
+  },
+  "layouts_evaluated": {
+    "A_sensitivity": "top-N most sensitive layers (by profile_360m_train21.json) stay Q8",
+    "B_early_contiguous": "layers [0, N) stay Q8",
+    "C_late_contiguous": "last N layers stay Q8",
+    "D_alternating": "every other layer, starting at 0",
+    "E_random": "deterministic seeded random (seed=42)",
+    "budget0_all_q5": "budget=0 endpoint",
+    "budget32_all_q8": "budget=32 endpoint"
+  },
+  "results": [
+    {
+      "config_name": "budget0_all_q5",
+      "q8_layer_count": 0,
+      "kv_bytes": 31457280,
+      "mean_top1_preservation": 0.946875,
+      "mean_logit_rel_l2": 0.080585,
+      "mean_delta_nll": 0.015356,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget32_all_q8",
+      "q8_layer_count": 32,
+      "kv_bytes": 44564480,
+      "mean_top1_preservation": 0.9875,
+      "mean_logit_rel_l2": 0.017491,
+      "mean_delta_nll": 0.001209,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_A_sensitivity",
+      "q8_layer_count": 4,
+      "kv_bytes": 33095680,
+      "mean_top1_preservation": 0.953125,
+      "mean_logit_rel_l2": 0.069512,
+      "mean_delta_nll": 0.015504,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_B_early_contiguous",
+      "q8_layer_count": 4,
+      "kv_bytes": 33095680,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.073946,
+      "mean_delta_nll": 0.013789,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_C_late_contiguous",
+      "q8_layer_count": 4,
+      "kv_bytes": 33095680,
+      "mean_top1_preservation": 0.9375,
+      "mean_logit_rel_l2": 0.07303,
+      "mean_delta_nll": 0.017685,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_D_alternating",
+      "q8_layer_count": 4,
+      "kv_bytes": 33095680,
+      "mean_top1_preservation": 0.95,
+      "mean_logit_rel_l2": 0.077142,
+      "mean_delta_nll": 0.013223,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget4_E_random",
+      "q8_layer_count": 4,
+      "kv_bytes": 33095680,
+      "mean_top1_preservation": 0.96875,
+      "mean_logit_rel_l2": 0.075646,
+      "mean_delta_nll": 0.003971,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget9_A_sensitivity",
+      "q8_layer_count": 9,
+      "kv_bytes": 35143680,
+      "mean_top1_preservation": 0.96875,
+      "mean_logit_rel_l2": 0.060606,
+      "mean_delta_nll": 0.012659,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget9_B_early_contiguous",
+      "q8_layer_count": 9,
+      "kv_bytes": 35143680,
+      "mean_top1_preservation": 0.959375,
+      "mean_logit_rel_l2": 0.072837,
+      "mean_delta_nll": 0.003829,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget9_C_late_contiguous",
+      "q8_layer_count": 9,
+      "kv_bytes": 35143680,
+      "mean_top1_preservation": 0.946875,
+      "mean_logit_rel_l2": 0.0638,
+      "mean_delta_nll": 0.015551,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget9_D_alternating",
+      "q8_layer_count": 9,
+      "kv_bytes": 35143680,
+      "mean_top1_preservation": 0.975,
+      "mean_logit_rel_l2": 0.072332,
+      "mean_delta_nll": 0.002558,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget9_E_random",
+      "q8_layer_count": 9,
+      "kv_bytes": 35143680,
+      "mean_top1_preservation": 0.946875,
+      "mean_logit_rel_l2": 0.072681,
+      "mean_delta_nll": 0.017665,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget13_A_sensitivity",
+      "q8_layer_count": 13,
+      "kv_bytes": 36782080,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.049959,
+      "mean_delta_nll": 0.0066,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget13_B_early_contiguous",
+      "q8_layer_count": 13,
+      "kv_bytes": 36782080,
+      "mean_top1_preservation": 0.95,
+      "mean_logit_rel_l2": 0.065798,
+      "mean_delta_nll": 0.003008,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget13_C_late_contiguous",
+      "q8_layer_count": 13,
+      "kv_bytes": 36782080,
+      "mean_top1_preservation": 0.95625,
+      "mean_logit_rel_l2": 0.057319,
+      "mean_delta_nll": 0.014278,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget13_D_alternating",
+      "q8_layer_count": 13,
+      "kv_bytes": 36782080,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.063519,
+      "mean_delta_nll": 0.00063,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget13_E_random",
+      "q8_layer_count": 13,
+      "kv_bytes": 36782080,
+      "mean_top1_preservation": 0.978125,
+      "mean_logit_rel_l2": 0.072434,
+      "mean_delta_nll": 0.012537,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget16_A_sensitivity",
+      "q8_layer_count": 16,
+      "kv_bytes": 38010880,
+      "mean_top1_preservation": 0.984375,
+      "mean_logit_rel_l2": 0.044224,
+      "mean_delta_nll": 0.004676,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget16_B_early_contiguous",
+      "q8_layer_count": 16,
+      "kv_bytes": 38010880,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.062989,
+      "mean_delta_nll": 0.007626,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget16_C_late_contiguous",
+      "q8_layer_count": 16,
+      "kv_bytes": 38010880,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.050879,
+      "mean_delta_nll": 0.00877,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget16_D_alternating",
+      "q8_layer_count": 16,
+      "kv_bytes": 38010880,
+      "mean_top1_preservation": 0.975,
+      "mean_logit_rel_l2": 0.056827,
+      "mean_delta_nll": 0.00035,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget16_E_random",
+      "q8_layer_count": 16,
+      "kv_bytes": 38010880,
+      "mean_top1_preservation": 0.9625,
+      "mean_logit_rel_l2": 0.065156,
+      "mean_delta_nll": 0.01086,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget21_A_sensitivity",
+      "q8_layer_count": 21,
+      "kv_bytes": 40058880,
+      "mean_top1_preservation": 0.975,
+      "mean_logit_rel_l2": 0.034004,
+      "mean_delta_nll": -0.001741,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget21_B_early_contiguous",
+      "q8_layer_count": 21,
+      "kv_bytes": 40058880,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.053308,
+      "mean_delta_nll": 0.001376,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget21_C_late_contiguous",
+      "q8_layer_count": 21,
+      "kv_bytes": 40058880,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.039224,
+      "mean_delta_nll": 0.005113,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget21_D_alternating",
+      "q8_layer_count": 21,
+      "kv_bytes": 40058880,
+      "mean_top1_preservation": 0.971875,
+      "mean_logit_rel_l2": 0.050475,
+      "mean_delta_nll": 0.004748,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget21_E_random",
+      "q8_layer_count": 21,
+      "kv_bytes": 40058880,
+      "mean_top1_preservation": 0.959375,
+      "mean_logit_rel_l2": 0.052626,
+      "mean_delta_nll": 0.011012,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget26_A_sensitivity",
+      "q8_layer_count": 26,
+      "kv_bytes": 42106880,
+      "mean_top1_preservation": 0.984375,
+      "mean_logit_rel_l2": 0.026617,
+      "mean_delta_nll": 0.002099,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget26_B_early_contiguous",
+      "q8_layer_count": 26,
+      "kv_bytes": 42106880,
+      "mean_top1_preservation": 0.975,
+      "mean_logit_rel_l2": 0.041664,
+      "mean_delta_nll": -0.000738,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget26_C_late_contiguous",
+      "q8_layer_count": 26,
+      "kv_bytes": 42106880,
+      "mean_top1_preservation": 0.98125,
+      "mean_logit_rel_l2": 0.032723,
+      "mean_delta_nll": 0.004199,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget26_D_alternating",
+      "q8_layer_count": 26,
+      "kv_bytes": 42106880,
+      "mean_top1_preservation": 0.984375,
+      "mean_logit_rel_l2": 0.040098,
+      "mean_delta_nll": 0.005166,
+      "n_holdout_prompts": 10
+    },
+    {
+      "config_name": "budget26_E_random",
+      "q8_layer_count": 26,
+      "kv_bytes": 42106880,
+      "mean_top1_preservation": 0.965625,
+      "mean_logit_rel_l2": 0.041272,
+      "mean_delta_nll": 0.007442,
+      "n_holdout_prompts": 10
+    }
+  ],
+  "sensitivity_vs_naive_by_budget_rel_l2": {
+    "4": {
+      "sensitivity_rel_l2": 0.069512,
+      "best_naive_rel_l2": 0.07303,
+      "sensitivity_beats_all_naive": true
+    },
+    "9": {
+      "sensitivity_rel_l2": 0.060606,
+      "best_naive_rel_l2": 0.0638,
+      "sensitivity_beats_all_naive": true
+    },
+    "13": {
+      "sensitivity_rel_l2": 0.049959,
+      "best_naive_rel_l2": 0.057319,
+      "sensitivity_beats_all_naive": true
+    },
+    "16": {
+      "sensitivity_rel_l2": 0.044224,
+      "best_naive_rel_l2": 0.050879,
+      "sensitivity_beats_all_naive": true
+    },
+    "21": {
+      "sensitivity_rel_l2": 0.034004,
+      "best_naive_rel_l2": 0.039224,
+      "sensitivity_beats_all_naive": true
+    },
+    "26": {
+      "sensitivity_rel_l2": 0.026617,
+      "best_naive_rel_l2": 0.032723,
+      "sensitivity_beats_all_naive": true
+    }
+  },
+  "headline_finding": "On logit_rel_l2, the sensitivity-based (train21) policy beat every naive layout at every intermediate Q8-layer budget tested (4, 9, 13, 16, 21, 26) on 360M, on prompts never used to build the ranking.",
+  "all_budgets_sensitivity_beats_all_naive": true
+}

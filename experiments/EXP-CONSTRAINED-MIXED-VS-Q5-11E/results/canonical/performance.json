@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 17: performance at PRIMARY POINT B (ctx=180000, SmolLM2-360M, real GTX 1650 Vulkan, --gpu-layers all).",
+  "product_whole_cache_q5": {
+    "method": "membrane-run --kv q5 --gpu-layers all --ctx 180000 --gen-tokens 32, prompt 'The largest planet in our solar system is', 7 fresh runs, real product performance.prompt_tok_per_s / generation_tok_per_s fields",
+    "n_runs": 7,
+    "prompt_tok_per_s": {"mean": 323.699, "median": 338.838, "min": 240.353, "max": 368.770, "stddev": 43.347},
+    "generation_tok_per_s": {"mean": 128.174, "median": 130.433, "min": 117.519, "max": 133.131, "stddev": 6.472},
+    "note_on_variance": "prompt_tok_per_s has a visibly high first-run outlier (240.35 on run 1 vs 300-369 on runs 2-7), consistent with one-time GPU/driver warmup (shader compilation, first-allocation cache-miss) rather than genuine steady-state variance; not discarded as an outlier here, reported as measured."
+  },
+  "research_mixed_top8_vs_whole_q5_wall_clock": {
+    "method": "membrane-kv-sequential-compare --mode compare (teacher-forced pass + a free-running pass, i.e. MORE total decode work per invocation than membrane-run's single pass), --ctx 180000 --gpu-layers all, 7 fresh runs each, external wall-clock via the POSIX `time` utility -- this is NOT directly comparable to the product prompt/generation_tok_per_s numbers above (different code path, does two passes not one); reported only as an internal, apples-to-apples Q5-vs-mixed comparison using the identical tool for both.",
+    "caveat": "--kv mixed has no product CLI exposure (by design, this phase must not expose it), so no product-level tok/s number exists for mixed; this research-tool wall-clock timing is the closest available like-for-like signal.",
+    "whole_q5_seconds": {"runs": [1.60, 1.38, 1.32, 1.33, 1.31, 1.32, 1.32], "mean": 1.3971, "median": 1.32, "min": 1.31, "max": 1.60, "stddev": 0.1055},
+    "mixed_top8_seconds": {"runs": [1.34, 1.40, 1.39, 1.38, 1.35, 1.35, 1.35], "mean": 1.3657, "median": 1.35, "min": 1.34, "max": 1.40, "stddev": 0.0233}
+  },
+  "conclusion": "No material performance difference between whole-Q5 and mixed top-8 at PRIMARY POINT B (within run-to-run noise, whole-Q5's mean is skewed slightly high by one first-run warmup outlier; medians are within 2%). Performance does not favor or penalize either config meaningfully here, consistent with Section 17's instruction not to let performance dominate the decision -- it doesn't, because there is nothing here for it to dominate."
+}

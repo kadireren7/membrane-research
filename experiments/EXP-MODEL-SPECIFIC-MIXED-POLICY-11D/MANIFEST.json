@@ -1,0 +1,212 @@
+{
+  "experiment_id": "EXP-MODEL-SPECIFIC-MIXED-POLICY-11D",
+  "phase": "11D",
+  "source_repository": "kadireren7/membrane",
+  "source_branch": "experiment/model-specific-mixed-policy",
+  "source_head_sha": "bb0b69a290c8de609bdce5494bb9b616972f39b9",
+  "parent_experiment": "EXP-LAYER-SENSITIVITY-GENERALIZATION-11C",
+  "parent_head_sha": "eaeb25fed8c12bf924f5f42a3d78cd151cd130ca",
+  "base_sha": "eaeb25fed8c12bf924f5f42a3d78cd151cd130ca",
+  "date": "2026-08-16",
+  "purpose": "Build a real offline per-model policy pipeline (fingerprint -> sensitivity profile -> mixed-layout policy) and measure it head-to-head against the product's already-shipped, unmodified whole-cache adaptive Q8/Q5 policy -- not just against naive layouts as in 11C -- across calibration-set sizes, held-out prompts, and both tested models.",
+  "literal_verdict": "MODEL_SPECIFIC_POLICY_WORKS_BUT_NO_ADAPTIVE_ADVANTAGE",
+  "verdict_summary": "The full offline pipeline is real, safe, reproducible (byte-identical profiles across repeated runs), and generalizes across calibration sizes, held-out prompts, and both tested models -- not a fragile or backend-limited result. But measured head-to-head against the shipped, unmodified whole-cache adaptive policy, profile-based mixed KV does not win in the regime that matters most in practice: in comfortable memory (where adaptive resolves to whole-cache Q8), adaptive clearly beats mixed KV on quality at similar byte cost. Mixed KV's one genuine advantage -- filling the quality gap between whole-cache Q5 and Q8 -- only matters in the narrower case where adaptive would otherwise be forced down to whole-cache Q5 by memory pressure, which this phase did not reproduce at an apples-to-apples boundary (left to Phase 11E). The real memory-pressure margin at the one boundary tested was also found to be tighter than the pure byte-budget policy math suggested -- a real caveat on how far this mechanism could be pushed.",
+  "verdict_source": "results/canonical/summary.json: decision_gate.verdict, decision_gate.rationale (literal source fields, not synthesized)",
+  "productized": false,
+  "product_pr": null,
+  "product_commit": null,
+  "reproducibility": "PARTIALLY_REPRODUCIBLE",
+  "hardware": "Real GTX 1650 (Vulkan backend) and same host's CPU",
+  "models": [
+    "SmolLM2-135M-Instruct-f16",
+    "SmolLM2-360M-Instruct-f16"
+  ],
+  "llama_cpp_pin": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "follow_up": "The one open question this phase explicitly left (does mixed KV beat whole-cache Q5, specifically, at the memory-pressure boundary where adaptive is forced down to Q5) directly set up Phase 11E's constrained, apples-to-apples comparison at exactly that boundary. Source HEAD 96b93b1de8acd35cce50055b91ce2ae8d6246039.",
+  "artifacts": [
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/budget_sweep.json",
+      "source_path": "results/phase11/model-specific-policy/budget_sweep.json",
+      "source_sha256": "af7e855b3f19208e402d7c882c03e787c8d85b3d565d13d380aa4204ad0ed17f",
+      "migrated_sha256": "af7e855b3f19208e402d7c882c03e787c8d85b3d565d13d380aa4204ad0ed17f",
+      "size_bytes": 5057,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/calibration_size_analysis.json",
+      "source_path": "results/phase11/model-specific-policy/calibration_size_analysis.json",
+      "source_sha256": "694c9213fa4fdd3bcfc0f159111e6947ebaec7adbdaa1cfbb11b96b8ae2527c2",
+      "migrated_sha256": "694c9213fa4fdd3bcfc0f159111e6947ebaec7adbdaa1cfbb11b96b8ae2527c2",
+      "size_bytes": 8959,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/calibration_size_holdout_quality.json",
+      "source_path": "results/phase11/model-specific-policy/calibration_size_holdout_quality.json",
+      "source_sha256": "57397fb4f1aa93bd3f01228be7a50a269d5b205dec93c235e3cc1b4acaaa723b",
+      "migrated_sha256": "57397fb4f1aa93bd3f01228be7a50a269d5b205dec93c235e3cc1b4acaaa723b",
+      "size_bytes": 3653,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/calibration_sizes.json",
+      "source_path": "results/phase11/model-specific-policy/calibration_sizes.json",
+      "source_sha256": "c635a1d2e3a73dc71bce9c8a6644c461915f0619053bf113f0a003a47bd2a31e",
+      "migrated_sha256": "c635a1d2e3a73dc71bce9c8a6644c461915f0619053bf113f0a003a47bd2a31e",
+      "size_bytes": 4864,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/cpu_vulkan_validation.json",
+      "source_path": "results/phase11/model-specific-policy/cpu_vulkan_validation.json",
+      "source_sha256": "05bfc09181ca68edea293aad972bc4cb323e44d2d22ed0fa1d449425ef8eb78a",
+      "migrated_sha256": "05bfc09181ca68edea293aad972bc4cb323e44d2d22ed0fa1d449425ef8eb78a",
+      "size_bytes": 3819,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/cross_model_safety.json",
+      "source_path": "results/phase11/model-specific-policy/cross_model_safety.json",
+      "source_sha256": "e8cc80c9eb395ea6b7100bd2a3a5011a1cddf83247043c722ab49b2426a87cae",
+      "migrated_sha256": "e8cc80c9eb395ea6b7100bd2a3a5011a1cddf83247043c722ab49b2426a87cae",
+      "size_bytes": 2705,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/holdout_policy_360m.json",
+      "source_path": "results/phase11/model-specific-policy/holdout_policy_360m.json",
+      "source_sha256": "b3292f7310e8a1257979d024b1336ecc581c2e4c3bca564804ee479963f8064b",
+      "migrated_sha256": "b3292f7310e8a1257979d024b1336ecc581c2e4c3bca564804ee479963f8064b",
+      "size_bytes": 10614,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/manifest.json",
+      "source_path": "results/phase11/model-specific-policy/manifest.json",
+      "source_sha256": "ee3ce93dbc611d436b0b141f1ca720c0eedfbaa72364ed3c672487060fc96cd0",
+      "migrated_sha256": "ee3ce93dbc611d436b0b141f1ca720c0eedfbaa72364ed3c672487060fc96cd0",
+      "size_bytes": 5336,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/memory_pressure_360m.json",
+      "source_path": "results/phase11/model-specific-policy/memory_pressure_360m.json",
+      "source_sha256": "8a7fdae98b2c3dfb1bb0c79a77cb7598ab3f14cc5f66371ee07923fb6ce9a8d9",
+      "migrated_sha256": "8a7fdae98b2c3dfb1bb0c79a77cb7598ab3f14cc5f66371ee07923fb6ce9a8d9",
+      "size_bytes": 5974,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/performance.json",
+      "source_path": "results/phase11/model-specific-policy/performance.json",
+      "source_sha256": "2b29efa2b4f0293eb8791ed74bf44cb6016f0706364191642cdd3d99c8d385db",
+      "migrated_sha256": "2b29efa2b4f0293eb8791ed74bf44cb6016f0706364191642cdd3d99c8d385db",
+      "size_bytes": 2456,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/profile_135m_train21.json",
+      "source_path": "results/phase11/model-specific-policy/profile_135m_train21.json",
+      "source_sha256": "0604273325187cb7814c9c4d65caf4373cb029bdb8d869662fe6789d5d614e07",
+      "migrated_sha256": "0604273325187cb7814c9c4d65caf4373cb029bdb8d869662fe6789d5d614e07",
+      "size_bytes": 7507,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/profile_360m_train21.json",
+      "source_path": "results/phase11/model-specific-policy/profile_360m_train21.json",
+      "source_sha256": "244941dd73fb7eb15f5fd8251a9fa200b35e2546afc9c571a9d8446fe73f92a4",
+      "migrated_sha256": "244941dd73fb7eb15f5fd8251a9fa200b35e2546afc9c571a9d8446fe73f92a4",
+      "size_bytes": 7827,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/profile_generation_performance.json",
+      "source_path": "results/phase11/model-specific-policy/profile_generation_performance.json",
+      "source_sha256": "54c4b8b05bf986f98afefee70a07bc984e684dba7abb02378200451fe64985c0",
+      "migrated_sha256": "54c4b8b05bf986f98afefee70a07bc984e684dba7abb02378200451fe64985c0",
+      "size_bytes": 2868,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/raw_calibration_size_holdout_135m.jsonl",
+      "source_path": "results/phase11/model-specific-policy/raw_calibration_size_holdout_135m.jsonl",
+      "source_sha256": "dfd53386a3189171a6f9d6d839e4bc2bdc6cc7aad400520655c7d1bd03018e53",
+      "migrated_sha256": "dfd53386a3189171a6f9d6d839e4bc2bdc6cc7aad400520655c7d1bd03018e53",
+      "size_bytes": 10012,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/raw_cpu_vulkan_validation.jsonl",
+      "source_path": "results/phase11/model-specific-policy/raw_cpu_vulkan_validation.jsonl",
+      "source_sha256": "db54b08ff042f89ff38fa99e5b16bb9f96d7003ec23e4da9273e33618c8413df",
+      "migrated_sha256": "db54b08ff042f89ff38fa99e5b16bb9f96d7003ec23e4da9273e33618c8413df",
+      "size_bytes": 7152,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/raw_holdout_policy_360m.jsonl",
+      "source_path": "results/phase11/model-specific-policy/raw_holdout_policy_360m.jsonl",
+      "source_sha256": "9574216c0bda3a8dde80ac62bbfd55bbba805dee7d579fcacdda572e46aef076",
+      "migrated_sha256": "9574216c0bda3a8dde80ac62bbfd55bbba805dee7d579fcacdda572e46aef076",
+      "size_bytes": 81356,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/raw_memory_pressure_360m.jsonl",
+      "source_path": "results/phase11/model-specific-policy/raw_memory_pressure_360m.jsonl",
+      "source_sha256": "aca3ec701d749a9a376c59ba8923313795e6b0f4e0a43946d7a8205744d7cc70",
+      "migrated_sha256": "aca3ec701d749a9a376c59ba8923313795e6b0f4e0a43946d7a8205744d7cc70",
+      "size_bytes": 1851,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/raw_performance_11d.jsonl",
+      "source_path": "results/phase11/model-specific-policy/raw_performance_11d.jsonl",
+      "source_sha256": "39ff7b163634826b85bba59c1a41176c1b616d3072e20bcc0dbea0caf7ee6500",
+      "migrated_sha256": "39ff7b163634826b85bba59c1a41176c1b616d3072e20bcc0dbea0caf7ee6500",
+      "size_bytes": 25595,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/raw_whole_cache_adaptive_comparison.jsonl",
+      "source_path": "results/phase11/model-specific-policy/raw_whole_cache_adaptive_comparison.jsonl",
+      "source_sha256": "7b275a2d4d93529e75d6ce10e0b86a7a257afc817a1a37f467878662c275a500",
+      "migrated_sha256": "7b275a2d4d93529e75d6ce10e0b86a7a257afc817a1a37f467878662c275a500",
+      "size_bytes": 22948,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/regression_sanitizers.json",
+      "source_path": "results/phase11/model-specific-policy/regression_sanitizers.json",
+      "source_sha256": "ff739f43b878b6a36e2b1777bff703e37de536f23515ce0a363d41eb592a05ae",
+      "migrated_sha256": "ff739f43b878b6a36e2b1777bff703e37de536f23515ce0a363d41eb592a05ae",
+      "size_bytes": 2907,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/reproducibility.json",
+      "source_path": "results/phase11/model-specific-policy/reproducibility.json",
+      "source_sha256": "dc7d89099507ecc7dfdd02039f8fdd2be6f8106a08af4f6dc613f824e939943d",
+      "migrated_sha256": "dc7d89099507ecc7dfdd02039f8fdd2be6f8106a08af4f6dc613f824e939943d",
+      "size_bytes": 1452,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/results/canonical/whole_cache_adaptive_comparison.json",
+      "source_path": "results/phase11/model-specific-policy/whole_cache_adaptive_comparison.json",
+      "source_sha256": "dad89ffaac48a759271f96fd05e34ef633b41c3c9755a305d167f0f266ee56d8",
+      "migrated_sha256": "dad89ffaac48a759271f96fd05e34ef633b41c3c9755a305d167f0f266ee56d8",
+      "size_bytes": 4014,
+      "category": "A_essential_evidence"
+    },
+    {
+      "research_path": "experiments/EXP-MODEL-SPECIFIC-MIXED-POLICY-11D/patches/phase11d-model-specific-mixed-policy.patch",
+      "source_path": "(derived) git diff eaeb25fed8c12bf924f5f42a3d78cd151cd130ca..bb0b69a290c8de609bdce5494bb9b616972f39b9 -- . ':(exclude)results/phase11/model-specific-policy/*'",
+      "source_sha256": "c55f880538a7a3536dd8a86eb4c93b7172b40f1ebaf9fce1c8957452fb1bfebf",
+      "migrated_sha256": "c55f880538a7a3536dd8a86eb4c93b7172b40f1ebaf9fce1c8957452fb1bfebf",
+      "size_bytes": 60456,
+      "category": "B_experiment_implementation"
+    }
+  ]
+}

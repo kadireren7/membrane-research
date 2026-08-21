@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #103: real memory-pressure test with model-specific-profile-selected layers, 360M, ctx=180000, real GTX 1650 (Vulkan), the same known Phase 11B/11C boundary. --capacity-only mode (single candidate context, no F16 reference) to avoid risking a real OOM while probing right at the boundary. Quality-at-boundary is NOT measured here (same disclosed limitation as Phase 11C's pressure_boundary.json) -- this answers only the memory question.",
+  "provenance": {
+    "membrane_commit": "see git log for experiment/model-specific-mixed-policy HEAD at artifact time",
+    "model_identity": "SmolLM2-360M-Instruct-f16",
+    "backend": "Vulkan (real GTX 1650)",
+    "context_size": 180000,
+    "gpu_layers": "all"
+  },
+  "real_byte_constants_at_ctx_180000": {
+    "bytes_per_layer_q8": 122400000,
+    "bytes_per_layer_q5": 86400000,
+    "derived_from": "all_q5 (32*bq5=2764800000) and all_q8 (32*bq8=3916800000) capacity-only runs at this exact ctx -- these differ substantially from the ctx=2048 constants (835584/589824 for 135M scale, 1392640/983040 for 360M) since KV bytes scale with context size"
+  },
+  "results": [
+    {"config_name": "profile_top8_q8", "q8_layers": [1, 13, 18, 19, 23, 24, 25, 30], "source": "profile_360m_train21.json top-8", "theoretical_mixed_bytes": 3052800000, "context_creation_succeeded": true},
+    {"config_name": "profile_top8_q8_recheck", "q8_layers": [1, 13, 18, 19, 23, 24, 25, 30], "source": "reproducibility recheck of the same config", "theoretical_mixed_bytes": 3052800000, "context_creation_succeeded": true},
+    {"config_name": "top9q8", "q8_layers": [1, 13, 18, 19, 21, 23, 24, 25, 30], "source": "profile_360m_train21.json top-9", "theoretical_mixed_bytes": 3088800000, "context_creation_succeeded": false, "failure_stage": "compute buffer allocation (ggml_gallocr_reserve_n_impl), not the KV tensor allocation itself"},
+    {"config_name": "top10q8", "q8_layers": [1, 13, 16, 18, 19, 21, 23, 24, 25, 30], "source": "profile_360m_train21.json top-10", "theoretical_mixed_bytes": 3124800000, "context_creation_succeeded": false, "failure_stage": "compute buffer allocation"},
+    {"config_name": "top12q8", "q8_layers": [1, 13, 15, 16, 18, 19, 21, 22, 23, 24, 25, 30], "source": "profile_360m_train21.json top-12", "theoretical_mixed_bytes": 3196800000, "context_creation_succeeded": false, "failure_stage": "KV cache tensor allocation (ErrorOutOfDeviceMemory)"},
+    {"config_name": "budget_selected_17q8", "q8_layers": [1, 4, 7, 13, 14, 15, 16, 18, 19, 21, 22, 23, 24, 25, 26, 29, 30], "source": "membrane_memory_budget_policy at budget=3.4e9 bytes (real ctx=180000 constants) -- theoretically well under the all-Q8 total of 3.9168e9", "theoretical_mixed_bytes": 3376800000, "context_creation_succeeded": false, "failure_stage": "KV cache tensor allocation (ErrorOutOfDeviceMemory)"},
+    {"config_name": "all_q5", "q8_layers": [], "theoretical_mixed_bytes": 2764800000, "context_creation_succeeded": true},
+    {"config_name": "all_q8", "q8_layers": "all 32", "theoretical_mixed_bytes": 3916800000, "context_creation_succeeded": false, "failure_stage": "KV cache tensor allocation (ErrorOutOfDeviceMemory)"}
+  ],
+  "real_boundary_found": {
+    "last_succeeding_q8_count": 8,
+    "first_failing_q8_count": 9,
+    "boundary_bytes_succeeding": 3052800000,
+    "boundary_bytes_failing": 3088800000,
+    "margin_bytes": 36000000,
+    "margin_pct_of_all_q8_total": 0.0092,
+    "reproducible": "profile_top8_q8 config re-run once more (profile_top8_q8_recheck) with identical result"
+  },
+  "findings": [
+    "The model-specific profile's own top-8 layer selection sits EXACTLY at this host's real GPU memory boundary at ctx=180000 -- it succeeds, and adding even one more Q8 layer (top-9, only 36MB more theoretical KV bytes, <1% of the all-Q8 total) fails. This is a razor-thin real margin, not a big safety cushion.",
+    "Theoretical KV-byte totals alone do NOT reliably predict allocation success this close to the boundary: the memory-budget-policy-selected 17-layer config (3.3768e9 bytes) has a theoretical byte total comfortably below the all-Q8 total (3.9168e9 bytes, ~14% headroom) yet still fails to allocate -- because the real constraint near this boundary is the COMBINED KV + compute-buffer + driver-overhead footprint, not KV bytes in isolation. membrane_memory_budget_policy's pure byte-budget math (Task #99) is exact for KV bytes specifically but does not, and was never claimed to, account for this additional non-KV allocation overhead.",
+    "The failure MODE itself changes with layer count: 12+ Q8 layers fail at the KV tensor allocation step (ErrorOutOfDeviceMemory), while 9-10 Q8 layers fail one step later, at compute-buffer allocation (ggml_gallocr_reserve_n_impl) -- both are real, cleanly-reported failures (no crash, no silent fallback, context_creation_succeeded correctly reported as false in both cases), but they are two different resource pools running out, which is itself informative for anyone trying to build a safety margin on top of this.",
+    "Compared to Phase 11C's own earlier 8-layer pressure_boundary.json test (which used a differently-derived 8-layer set, '1,13,18,19,22,23,25,30'), this phase's TRAIN21-derived profile selects a very similar but not identical set ('1,13,18,19,23,24,25,30' -- differs only in layer 22 vs 24), and both succeed at this exact boundary -- consistent, not contradictory, evidence."
+  ],
+  "conclusion": "The model-specific profile's layer selection is confirmed to work at the real, known 360M ctx=180000 memory-pressure boundary on real Vulkan/GTX 1650 hardware, at exactly the same 8-layer budget Phase 11C already established as safe. The margin above that point is far tighter than pure theoretical byte math suggests, which is a real, disclosed constraint on how aggressively any future memory-budget policy could push toward the all-Q8 boundary without an explicit non-KV overhead margin."
+}

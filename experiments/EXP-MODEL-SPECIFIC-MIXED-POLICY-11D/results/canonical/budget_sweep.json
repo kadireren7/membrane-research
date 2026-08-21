@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Task #99: Q8-layer-count budget sweep and byte-budget sweep applied to REAL train21 profiles (135M, 360M), using the already-unit-tested membrane_mixed_layer_policy_from_ranking/membrane_mixed_layer_bytes (Q8-count) and membrane_memory_budget_policy (byte-budget) functions directly, via a thin CLI driver (scratch, not committed) -- no new logic, just concrete verification against real ggml byte constants and real train21 rankings rather than only synthetic test fixtures.",
+  "q8_count_sweep": {
+    "135m": {
+      "n_layer": 30,
+      "bytes_per_layer_q8": 835584,
+      "bytes_per_layer_q5": 589824,
+      "ranking_source": "results/phase11/model-specific-policy/profile_135m_train21.json",
+      "results": [
+        {"q8_count": 0, "total_bytes": 17694720},
+        {"q8_count": 4, "total_bytes": 18677760},
+        {"q8_count": 8, "total_bytes": 19660800},
+        {"q8_count": 12, "total_bytes": 20643840},
+        {"q8_count": 15, "total_bytes": 21381120},
+        {"q8_count": 20, "total_bytes": 22609920},
+        {"q8_count": 24, "total_bytes": 23592960},
+        {"q8_count": 30, "total_bytes": 25067520}
+      ],
+      "all_ok": true,
+      "matches_phase11c_theoretical_bytes_at_q8_count_30": true
+    },
+    "360m": {
+      "n_layer": 32,
+      "bytes_per_layer_q8": 1392640,
+      "bytes_per_layer_q5": 983040,
+      "ranking_source": "results/phase11/model-specific-policy/profile_360m_train21.json",
+      "results": [
+        {"q8_count": 0, "total_bytes": 31457280},
+        {"q8_count": 4, "total_bytes": 33095680},
+        {"q8_count": 9, "total_bytes": 35143680},
+        {"q8_count": 13, "total_bytes": 36782080},
+        {"q8_count": 16, "total_bytes": 38010880},
+        {"q8_count": 21, "total_bytes": 40058880},
+        {"q8_count": 26, "total_bytes": 42106880},
+        {"q8_count": 32, "total_bytes": 44564480}
+      ],
+      "all_ok": true
+    }
+  },
+  "byte_budget_sweep": {
+    "135m": {
+      "all_q5_bytes": 17694720,
+      "all_q8_bytes": 25067520,
+      "results": [
+        {"budget_bytes": 15000000, "ok": false, "selected_q8_count": 0, "actual_bytes": 0, "note": "below all-Q5 floor, fails closed"},
+        {"budget_bytes": 17694720, "ok": true, "selected_q8_count": 0, "actual_bytes": 17694720, "note": "exact all-Q5 boundary"},
+        {"budget_bytes": 18000000, "ok": true, "selected_q8_count": 1, "actual_bytes": 17940480},
+        {"budget_bytes": 19000000, "ok": true, "selected_q8_count": 5, "actual_bytes": 18923520},
+        {"budget_bytes": 20000000, "ok": true, "selected_q8_count": 9, "actual_bytes": 19906560},
+        {"budget_bytes": 21000000, "ok": true, "selected_q8_count": 13, "actual_bytes": 20889600},
+        {"budget_bytes": 22000000, "ok": true, "selected_q8_count": 17, "actual_bytes": 21872640},
+        {"budget_bytes": 23000000, "ok": true, "selected_q8_count": 21, "actual_bytes": 22855680},
+        {"budget_bytes": 24000000, "ok": true, "selected_q8_count": 25, "actual_bytes": 23838720},
+        {"budget_bytes": 25067520, "ok": true, "selected_q8_count": 30, "actual_bytes": 25067520, "note": "exact all-Q8 boundary"}
+      ],
+      "actual_never_exceeds_budget": true
+    },
+    "360m": {
+      "all_q5_bytes": 31457280,
+      "all_q8_bytes": 44564480,
+      "results": [
+        {"budget_bytes": 30000000, "ok": false, "selected_q8_count": 0, "actual_bytes": 0, "note": "below all-Q5 floor, fails closed"},
+        {"budget_bytes": 31457280, "ok": true, "selected_q8_count": 0, "actual_bytes": 31457280, "note": "exact all-Q5 boundary"},
+        {"budget_bytes": 32000000, "ok": true, "selected_q8_count": 1, "actual_bytes": 31866880},
+        {"budget_bytes": 34000000, "ok": true, "selected_q8_count": 6, "actual_bytes": 33914880},
+        {"budget_bytes": 36000000, "ok": true, "selected_q8_count": 11, "actual_bytes": 35962880},
+        {"budget_bytes": 38000000, "ok": true, "selected_q8_count": 15, "actual_bytes": 37601280},
+        {"budget_bytes": 40000000, "ok": true, "selected_q8_count": 20, "actual_bytes": 39649280},
+        {"budget_bytes": 42000000, "ok": true, "selected_q8_count": 25, "actual_bytes": 41697280},
+        {"budget_bytes": 44564480, "ok": true, "selected_q8_count": 32, "actual_bytes": 44564480, "note": "exact all-Q8 boundary"}
+      ],
+      "actual_never_exceeds_budget": true
+    }
+  },
+  "findings": [
+    "Both q8-count and byte-budget policy functions behave identically (deterministic, exact) whether driven from synthetic unit-test fixtures or real per-model train21 rankings and real ggml per-layer byte constants.",
+    "actual_bytes <= budget_bytes holds at every tested budget for both models, including at exact boundaries.",
+    "Below the all-Q5 floor, both models fail closed (ok=false, no partial map) rather than returning an infeasible or clamped layout.",
+    "135M q8_count=30 total_bytes (25067520) exactly matches Phase 11C's raw_135m_ctx2048.jsonl theoretical_mixed_bytes for the all-Q8 baseline -- cross-check against independently-generated Phase 11C data."
+  ]
+}

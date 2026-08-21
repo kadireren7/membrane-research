@@ -1,0 +1,292 @@
+{
+  "quality_axis": "mean_top1_preservation and mean_logit_rel_l2 (both reported, non-dominance checked independently -- Section 15 explicit requirement not to force a single scalar)",
+  "pareto_by_top1": [
+    "budget0_all_q5",
+    "budget4_D_alternating",
+    "budget8_E_random",
+    "budget12_A_sensitivity",
+    "budget24_E_random",
+    "budget30_all_q8"
+  ],
+  "pareto_by_rel_l2": [
+    "budget0_all_q5",
+    "budget4_A_sensitivity",
+    "budget8_A_sensitivity",
+    "budget12_A_sensitivity",
+    "budget15_A_sensitivity",
+    "budget20_A_sensitivity",
+    "budget24_A_sensitivity",
+    "budget30_all_q8"
+  ],
+  "all_points": [
+    {
+      "config": "budget0_all_q5",
+      "bytes": 17694720,
+      "q8_layer_count": 0,
+      "top1": 0.93125,
+      "rel_l2": 0.083776,
+      "delta_nll": 0.022378
+    },
+    {
+      "config": "budget4_A_sensitivity",
+      "bytes": 18677760,
+      "q8_layer_count": 4,
+      "top1": 0.9375,
+      "rel_l2": 0.074205,
+      "delta_nll": 0.014369
+    },
+    {
+      "config": "budget4_B_early_contiguous",
+      "bytes": 18677760,
+      "q8_layer_count": 4,
+      "top1": 0.94375,
+      "rel_l2": 0.084481,
+      "delta_nll": 0.022284
+    },
+    {
+      "config": "budget4_C_late_contiguous",
+      "bytes": 18677760,
+      "q8_layer_count": 4,
+      "top1": 0.940625,
+      "rel_l2": 0.081599,
+      "delta_nll": 0.016174
+    },
+    {
+      "config": "budget4_D_alternating",
+      "bytes": 18677760,
+      "q8_layer_count": 4,
+      "top1": 0.946875,
+      "rel_l2": 0.088676,
+      "delta_nll": 0.015296
+    },
+    {
+      "config": "budget4_E_random",
+      "bytes": 18677760,
+      "q8_layer_count": 4,
+      "top1": 0.940625,
+      "rel_l2": 0.077772,
+      "delta_nll": 0.009721
+    },
+    {
+      "config": "budget8_A_sensitivity",
+      "bytes": 19660800,
+      "q8_layer_count": 8,
+      "top1": 0.95625,
+      "rel_l2": 0.0588,
+      "delta_nll": 0.014118
+    },
+    {
+      "config": "budget8_B_early_contiguous",
+      "bytes": 19660800,
+      "q8_layer_count": 8,
+      "top1": 0.946875,
+      "rel_l2": 0.071639,
+      "delta_nll": 0.019561
+    },
+    {
+      "config": "budget8_C_late_contiguous",
+      "bytes": 19660800,
+      "q8_layer_count": 8,
+      "top1": 0.95625,
+      "rel_l2": 0.072052,
+      "delta_nll": 0.011421
+    },
+    {
+      "config": "budget8_D_alternating",
+      "bytes": 19660800,
+      "q8_layer_count": 8,
+      "top1": 0.95,
+      "rel_l2": 0.077926,
+      "delta_nll": 0.007531
+    },
+    {
+      "config": "budget8_E_random",
+      "bytes": 19660800,
+      "q8_layer_count": 8,
+      "top1": 0.959375,
+      "rel_l2": 0.072737,
+      "delta_nll": 0.003337
+    },
+    {
+      "config": "budget12_A_sensitivity",
+      "bytes": 20643840,
+      "q8_layer_count": 12,
+      "top1": 0.975,
+      "rel_l2": 0.050626,
+      "delta_nll": 0.004409
+    },
+    {
+      "config": "budget12_B_early_contiguous",
+      "bytes": 20643840,
+      "q8_layer_count": 12,
+      "top1": 0.959375,
+      "rel_l2": 0.071702,
+      "delta_nll": 0.019723
+    },
+    {
+      "config": "budget12_C_late_contiguous",
+      "bytes": 20643840,
+      "q8_layer_count": 12,
+      "top1": 0.9625,
+      "rel_l2": 0.05975,
+      "delta_nll": 0.007698
+    },
+    {
+      "config": "budget12_D_alternating",
+      "bytes": 20643840,
+      "q8_layer_count": 12,
+      "top1": 0.95625,
+      "rel_l2": 0.067591,
+      "delta_nll": 0.008879
+    },
+    {
+      "config": "budget12_E_random",
+      "bytes": 20643840,
+      "q8_layer_count": 12,
+      "top1": 0.965625,
+      "rel_l2": 0.0683,
+      "delta_nll": 0.002511
+    },
+    {
+      "config": "budget15_A_sensitivity",
+      "bytes": 21381120,
+      "q8_layer_count": 15,
+      "top1": 0.965625,
+      "rel_l2": 0.046194,
+      "delta_nll": 0.005303
+    },
+    {
+      "config": "budget15_B_early_contiguous",
+      "bytes": 21381120,
+      "q8_layer_count": 15,
+      "top1": 0.95,
+      "rel_l2": 0.064115,
+      "delta_nll": 0.011976
+    },
+    {
+      "config": "budget15_C_late_contiguous",
+      "bytes": 21381120,
+      "q8_layer_count": 15,
+      "top1": 0.9625,
+      "rel_l2": 0.05183,
+      "delta_nll": 0.005123
+    },
+    {
+      "config": "budget15_D_alternating",
+      "bytes": 21381120,
+      "q8_layer_count": 15,
+      "top1": 0.9625,
+      "rel_l2": 0.066958,
+      "delta_nll": 0.009369
+    },
+    {
+      "config": "budget15_E_random",
+      "bytes": 21381120,
+      "q8_layer_count": 15,
+      "top1": 0.965625,
+      "rel_l2": 0.057744,
+      "delta_nll": 0.007279
+    },
+    {
+      "config": "budget20_A_sensitivity",
+      "bytes": 22609920,
+      "q8_layer_count": 20,
+      "top1": 0.971875,
+      "rel_l2": 0.035793,
+      "delta_nll": 0.000905
+    },
+    {
+      "config": "budget20_B_early_contiguous",
+      "bytes": 22609920,
+      "q8_layer_count": 20,
+      "top1": 0.965625,
+      "rel_l2": 0.055589,
+      "delta_nll": 0.007714
+    },
+    {
+      "config": "budget20_C_late_contiguous",
+      "bytes": 22609920,
+      "q8_layer_count": 20,
+      "top1": 0.96875,
+      "rel_l2": 0.041541,
+      "delta_nll": 0.002776
+    },
+    {
+      "config": "budget20_D_alternating",
+      "bytes": 22609920,
+      "q8_layer_count": 20,
+      "top1": 0.959375,
+      "rel_l2": 0.061761,
+      "delta_nll": 0.010439
+    },
+    {
+      "config": "budget20_E_random",
+      "bytes": 22609920,
+      "q8_layer_count": 20,
+      "top1": 0.971875,
+      "rel_l2": 0.049351,
+      "delta_nll": 0.004243
+    },
+    {
+      "config": "budget24_A_sensitivity",
+      "bytes": 23592960,
+      "q8_layer_count": 24,
+      "top1": 0.971875,
+      "rel_l2": 0.028575,
+      "delta_nll": -0.0008
+    },
+    {
+      "config": "budget24_B_early_contiguous",
+      "bytes": 23592960,
+      "q8_layer_count": 24,
+      "top1": 0.9625,
+      "rel_l2": 0.040824,
+      "delta_nll": 0.004625
+    },
+    {
+      "config": "budget24_C_late_contiguous",
+      "bytes": 23592960,
+      "q8_layer_count": 24,
+      "top1": 0.971875,
+      "rel_l2": 0.038277,
+      "delta_nll": 0.004471
+    },
+    {
+      "config": "budget24_D_alternating",
+      "bytes": 23592960,
+      "q8_layer_count": 24,
+      "top1": 0.9625,
+      "rel_l2": 0.055591,
+      "delta_nll": 0.010564
+    },
+    {
+      "config": "budget24_E_random",
+      "bytes": 23592960,
+      "q8_layer_count": 24,
+      "top1": 0.984375,
+      "rel_l2": 0.042957,
+      "delta_nll": 0.007018
+    },
+    {
+      "config": "budget30_all_q8",
+      "bytes": 25067520,
+      "q8_layer_count": 30,
+      "top1": 0.990625,
+      "rel_l2": 0.017956,
+      "delta_nll": -0.000227
+    }
+  ],
+  "provenance": {
+    "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+    "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "model_identity": "SmolLM2-135M-Instruct-f16",
+    "backend": "CPU",
+    "context_size": 2048,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1",
+    "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+    "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede"
+  },
+  "note": "Pareto frontier computed on the HELD-OUT prompt results (never seen during ranking construction). By rel_l2, every intermediate-budget Pareto-optimal point (4/8/12/15/20/24 Q8 layers) is a sensitivity-based configuration -- naive layouts (early/late/alternating/random) are dominated at every one of those budgets. By top1_preservation (noisier), the sensitivity-based point is Pareto-optimal at budget=12 specifically; other budgets' Pareto points on that axis are mixed (random_deterministic appears at budget=8/24). Both frontiers are reported, not collapsed into one, per Section 15's requirement not to force a single scalar."
+}

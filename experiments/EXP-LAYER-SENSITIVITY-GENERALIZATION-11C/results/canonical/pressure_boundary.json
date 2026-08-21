@@ -1,0 +1,63 @@
+{
+  "provenance": {
+    "membrane_commit": "8fc37408685ac8dac2d1e59edcfab5961136177b",
+    "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+    "model_identity": "SmolLM2-360M-Instruct-f16",
+    "backend": "Vulkan (real GTX 1650)",
+    "context_size": 180000,
+    "random_seed": 42,
+    "q8_type": "Q8_0",
+    "q5_type": "Q5_1",
+    "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+    "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede"
+  },
+  "method": "--capacity-only mode: creates ONLY the candidate mixed context (no F16 reference context) to avoid risking real GPU OOM while probing right at the known Phase 11B memory-pressure boundary (ctx=180000, all-Q8 fails raw allocation, all-Q5 and up-to-8-Q8-layers-mixed both succeed -- see Phase 11B's own mixed-layer-q8-q5-feasibility.json). Quality-at-boundary was NOT measured (disclosed limitation, not fabricated) -- this test answers only the MEMORY question: do all 4 layer-selection strategies for the same 8-layer budget cost the same memory.",
+  "sensitivity_8_layers_used": "1,13,18,19,22,23,25,30",
+  "results": [
+    {
+      "schema_version": 1,
+      "capacity_only": true,
+      "n_layer": 32,
+      "ctx": 180000,
+      "gpu_layers_requested": -1,
+      "q8_layer_count": 8,
+      "theoretical_mixed_bytes": 3052800000,
+      "context_creation_succeeded": true,
+      "_config_name": "early_8q8"
+    },
+    {
+      "schema_version": 1,
+      "capacity_only": true,
+      "n_layer": 32,
+      "ctx": 180000,
+      "gpu_layers_requested": -1,
+      "q8_layer_count": 8,
+      "theoretical_mixed_bytes": 3052800000,
+      "context_creation_succeeded": true,
+      "_config_name": "late_8q8"
+    },
+    {
+      "schema_version": 1,
+      "capacity_only": true,
+      "n_layer": 32,
+      "ctx": 180000,
+      "gpu_layers_requested": -1,
+      "q8_layer_count": 8,
+      "theoretical_mixed_bytes": 3052800000,
+      "context_creation_succeeded": true,
+      "_config_name": "random_8q8_seed42"
+    },
+    {
+      "schema_version": 1,
+      "capacity_only": true,
+      "n_layer": 32,
+      "ctx": 180000,
+      "gpu_layers_requested": -1,
+      "q8_layer_count": 8,
+      "theoretical_mixed_bytes": 3052800000,
+      "context_creation_succeeded": true,
+      "_config_name": "sensitivity_8q8"
+    }
+  ],
+  "finding": "All 4 strategies (early-8, late-8, random-8 seed=42, sensitivity-8) select exactly 8 of 32 layers as Q8 and therefore allocate the IDENTICAL KV byte total (3052800000 bytes) -- confirmed exactly equal across all 4 rows. All 4 achieve full 32/32-layer GPU residency at ctx=180000 (the same memory envelope Phase 11A's whole-cache adaptive policy reaches only by dropping to 100% Q5). Since the memory cost is identical across WHICH 8 layers are chosen, and Sections 13-15's held-out evidence shows sensitivity-based selection produces meaningfully better quality than naive selections at matched Q8-layer budgets on the smaller model, there is a real, if not directly quality-measured-at-this-exact-boundary, case that sensitivity-based placement is a free quality improvement at this real memory-pressure point."
+}

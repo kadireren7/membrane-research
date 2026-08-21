@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "phase": "11D",
+  "note": "Model-specific offline sensitivity profile. RESEARCH ARTIFACT ONLY -- not consumed by any product CLI, --kv mixed does not exist as a public flag. Built by pure reanalysis of Phase 11C raw ablation data (results/phase11/generalization/), zero new inference. Ranking metric is rel_l2_delta_mean alone (most-sensitive-first); delta_nll_delta_mean and top1_loss_mean are independent raw metrics preserved alongside it, not combined into any formula.",
+  "model_identity": "SmolLM2-360M-Instruct-f16",
+  "model_fingerprint": {
+    "architecture": "llama",
+    "n_layer": 32,
+    "n_embd": 960,
+    "n_head": 15,
+    "n_head_kv": 5,
+    "n_embd_head": 64
+  },
+  "calibration": {
+    "label": "train21",
+    "n_prompts": 21,
+    "prompts": [
+      "factual_recall_1",
+      "factual_recall_2",
+      "instruction_following_1",
+      "instruction_following_2",
+      "multistep_reasoning_1",
+      "multistep_reasoning_2",
+      "arithmetic_reasoning_1",
+      "arithmetic_reasoning_2",
+      "logical_reasoning_1",
+      "logical_reasoning_2",
+      "code_completion_1",
+      "code_completion_2",
+      "code_reasoning_1",
+      "code_explanation_1",
+      "code_explanation_2",
+      "structured_output_1",
+      "structured_output_2",
+      "summarization_1",
+      "summarization_2",
+      "prose_continuation_1",
+      "prose_continuation_2"
+    ],
+    "source": "results/phase11/generalization/prompts.json train_holdout_split"
+  },
+  "ranking_metric": "rel_l2_delta_mean",
+  "ranking_most_sensitive_first": [
+    30,
+    23,
+    1,
+    24,
+    18,
+    19,
+    25,
+    13,
+    21,
+    16,
+    15,
+    22,
+    26,
+    29,
+    7,
+    14,
+    4,
+    31,
+    2,
+    12,
+    8,
+    27,
+    28,
+    17,
+    10,
+    6,
+    11,
+    5,
+    20,
+    3,
+    9,
+    0
+  ],
+  "per_layer_raw_metrics": [
+    {
+      "layer": 0,
+      "rel_l2_delta_mean": 0.0008469999999999997,
+      "delta_nll_delta_mean": -0.0016743809523809524,
+      "top1_loss_mean": -0.002976190476190476
+    },
+    {
+      "layer": 1,
+      "rel_l2_delta_mean": 0.006583428571428571,
+      "delta_nll_delta_mean": 0.0009480000000000001,
+      "top1_loss_mean": 0.002976190476190476
+    },
+    {
+      "layer": 2,
+      "rel_l2_delta_mean": 0.003823190476190476,
+      "delta_nll_delta_mean": 0.0002795714285714284,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 3,
+      "rel_l2_delta_mean": 0.0016728095238095235,
+      "delta_nll_delta_mean": -0.001021714285714285,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 4,
+      "rel_l2_delta_mean": 0.0038539523809523807,
+      "delta_nll_delta_mean": 0.00025919047619047634,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 5,
+      "rel_l2_delta_mean": 0.0019570476190476187,
+      "delta_nll_delta_mean": -0.0009012857142857143,
+      "top1_loss_mean": 0.004464285714285714
+    },
+    {
+      "layer": 6,
+      "rel_l2_delta_mean": 0.0025306666666666663,
+      "delta_nll_delta_mean": -0.0009950000000000002,
+      "top1_loss_mean": -0.004464285714285714
+    },
+    {
+      "layer": 7,
+      "rel_l2_delta_mean": 0.0047539999999999995,
+      "delta_nll_delta_mean": -0.0012502857142857146,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 8,
+      "rel_l2_delta_mean": 0.0035595714285714284,
+      "delta_nll_delta_mean": 0.0008440952380952381,
+      "top1_loss_mean": 0.001488095238095238
+    },
+    {
+      "layer": 9,
+      "rel_l2_delta_mean": 0.0013592857142857141,
+      "delta_nll_delta_mean": -0.0002609047619047619,
+      "top1_loss_mean": 0.002976190476190476
+    },
+    {
+      "layer": 10,
+      "rel_l2_delta_mean": 0.002605333333333333,
+      "delta_nll_delta_mean": 0.00022404761904761908,
+      "top1_loss_mean": 0.001488095238095238
+    },
+    {
+      "layer": 11,
+      "rel_l2_delta_mean": 0.002401952380952381,
+      "delta_nll_delta_mean": -0.0006409523809523809,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 12,
+      "rel_l2_delta_mean": 0.003656619047619046,
+      "delta_nll_delta_mean": 0.001086952380952381,
+      "top1_loss_mean": 0.001488095238095238
+    },
+    {
+      "layer": 13,
+      "rel_l2_delta_mean": 0.0054513809523809515,
+      "delta_nll_delta_mean": -0.0008432380952380951,
+      "top1_loss_mean": 0.00744047619047619
+    },
+    {
+      "layer": 14,
+      "rel_l2_delta_mean": 0.003903238095238096,
+      "delta_nll_delta_mean": 4.409523809523796e-05,
+      "top1_loss_mean": 0.002976190476190476
+    },
+    {
+      "layer": 15,
+      "rel_l2_delta_mean": 0.005254285714285714,
+      "delta_nll_delta_mean": -0.00021766666666666668,
+      "top1_loss_mean": 0.002976190476190476
+    },
+    {
+      "layer": 16,
+      "rel_l2_delta_mean": 0.005337761904761905,
+      "delta_nll_delta_mean": -0.00023461904761904766,
+      "top1_loss_mean": 0.005952380952380952
+    },
+    {
+      "layer": 17,
+      "rel_l2_delta_mean": 0.003166666666666666,
+      "delta_nll_delta_mean": 0.00044309523809523804,
+      "top1_loss_mean": 0.004464285714285714
+    },
+    {
+      "layer": 18,
+      "rel_l2_delta_mean": 0.006022571428571428,
+      "delta_nll_delta_mean": -0.0004390952380952381,
+      "top1_loss_mean": 0.010416666666666666
+    },
+    {
+      "layer": 19,
+      "rel_l2_delta_mean": 0.005849571428571429,
+      "delta_nll_delta_mean": -0.001119047619047619,
+      "top1_loss_mean": 0.001488095238095238
+    },
+    {
+      "layer": 20,
+      "rel_l2_delta_mean": 0.0018224761904761901,
+      "delta_nll_delta_mean": -0.0006699047619047617,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 21,
+      "rel_l2_delta_mean": 0.005354285714285713,
+      "delta_nll_delta_mean": 0.002077809523809524,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 22,
+      "rel_l2_delta_mean": 0.005189904761904764,
+      "delta_nll_delta_mean": -0.0006915714285714285,
+      "top1_loss_mean": -0.002976190476190476
+    },
+    {
+      "layer": 23,
+      "rel_l2_delta_mean": 0.008153238095238097,
+      "delta_nll_delta_mean": -0.0007813333333333336,
+      "top1_loss_mean": 0.002976190476190476
+    },
+    {
+      "layer": 24,
+      "rel_l2_delta_mean": 0.006278333333333333,
+      "delta_nll_delta_mean": -0.00022885714285714325,
+      "top1_loss_mean": -0.001488095238095238
+    },
+    {
+      "layer": 25,
+      "rel_l2_delta_mean": 0.005619904761904763,
+      "delta_nll_delta_mean": 0.001086952380952381,
+      "top1_loss_mean": 0.00744047619047619
+    },
+    {
+      "layer": 26,
+      "rel_l2_delta_mean": 0.004946142857142857,
+      "delta_nll_delta_mean": -0.00048047619047619056,
+      "top1_loss_mean": -0.001488095238095238
+    },
+    {
+      "layer": 27,
+      "rel_l2_delta_mean": 0.003302190476190476,
+      "delta_nll_delta_mean": 0.0005454285714285714,
+      "top1_loss_mean": 0.005952380952380952
+    },
+    {
+      "layer": 28,
+      "rel_l2_delta_mean": 0.0032219047619047618,
+      "delta_nll_delta_mean": -0.0001362380952380952,
+      "top1_loss_mean": 0.0
+    },
+    {
+      "layer": 29,
+      "rel_l2_delta_mean": 0.0049392380952380955,
+      "delta_nll_delta_mean": 0.0010991904761904763,
+      "top1_loss_mean": 0.001488095238095238
+    },
+    {
+      "layer": 30,
+      "rel_l2_delta_mean": 0.012472428571428572,
+      "delta_nll_delta_mean": -0.001134857142857143,
+      "top1_loss_mean": 0.002976190476190476
+    },
+    {
+      "layer": 31,
+      "rel_l2_delta_mean": 0.003824,
+      "delta_nll_delta_mean": 0.0006696666666666666,
+      "top1_loss_mean": 0.0
+    }
+  ],
+  "provenance": {
+    "membrane_commit": "eaeb25fed8c12bf924f5f42a3d78cd151cd130ca",
+    "source_rankings_file": "results/phase11/generalization/rankings.json",
+    "source_rankings_sha256": "66b8ee48fa8a53cb887335d5277d83c8ca4a3065bb3c9dec445dd58381d2f035",
+    "source_prompts_file": "results/phase11/generalization/prompts.json",
+    "generated_by": "scripts/build_model_profile.py"
+  }
+}

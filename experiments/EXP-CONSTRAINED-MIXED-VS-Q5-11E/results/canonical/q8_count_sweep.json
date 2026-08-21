@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 5: mixed Q8-layer budget search at PRIMARY POINT B (ctx=180000, real GTX 1650 Vulkan, SmolLM2-360M, --gpu-layers all, --capacity-only research probe). Layer selection is profile_360m_train21.json's train21 ranking, top-N most sensitive.",
+  "method": "membrane-kv-mixed-layer --capacity-only, single candidate context only (no F16 reference, avoiding real OOM risk while probing the boundary), each Q8 count tested exactly once, sequential (never two heavy GPU allocations concurrently).",
+  "results": [
+    {"q8_count": 0, "q8_layers": [], "context_creation_succeeded": true, "theoretical_mixed_bytes": 2764800000},
+    {"q8_count": 1, "q8_layers": [30], "context_creation_succeeded": true, "theoretical_mixed_bytes": 2800800000},
+    {"q8_count": 2, "q8_layers": [23, 30], "context_creation_succeeded": true, "theoretical_mixed_bytes": 2836800000},
+    {"q8_count": 4, "q8_layers": [1, 23, 24, 30], "context_creation_succeeded": true, "theoretical_mixed_bytes": 2908800000},
+    {"q8_count": 6, "q8_layers": [1, 18, 19, 23, 24, 30], "context_creation_succeeded": true, "theoretical_mixed_bytes": 2980800000},
+    {"q8_count": 7, "q8_layers": [1, 18, 19, 23, 24, 25, 30], "context_creation_succeeded": true, "theoretical_mixed_bytes": 3016800000},
+    {"q8_count": 8, "q8_layers": [1, 13, 18, 19, 23, 24, 25, 30], "context_creation_succeeded": true, "theoretical_mixed_bytes": 3052800000},
+    {"q8_count": 9, "q8_layers": [1, 13, 18, 19, 21, 23, 24, 25, 30], "context_creation_succeeded": false, "theoretical_mixed_bytes": 3088800000, "failure_stage": "compute buffer allocation (ggml_gallocr_reserve_n_impl, size 102111232, ErrorOutOfDeviceMemory)"},
+    {"q8_count": 10, "q8_layers": [1, 13, 16, 18, 19, 21, 23, 24, 25, 30], "context_creation_succeeded": false, "theoretical_mixed_bytes": 3124800000, "failure_stage": "compute buffer allocation (identical failure signature to q8_count=9)"}
+  ],
+  "boundary": {
+    "last_succeeding_q8_count": 8,
+    "first_failing_q8_count": 9,
+    "boundary_bytes_succeeding": 3052800000,
+    "boundary_bytes_failing": 3088800000,
+    "margin_bytes": 36000000,
+    "reproducibility": "This exact boundary (top-8 succeeds, top-9 fails, identical byte totals and identical failure signature) was independently confirmed in Phase 11D's memory_pressure_360m.json and reproduced again here in a completely fresh process/session -- the boundary is stable, not a one-off measurement artifact."
+  },
+  "matched_residency_confirmation": "The research probe requests --gpu-layers all (gpu_layers_requested=-1) exactly like the product's own whole-cache Q5 run at this ctx (see boundary_scan.json point_b_primary_constrained.explicit_q5, which explicitly reports gpu_layers_selected=32). The probe's JSON schema does not itself report a separate 'selected layer count' field, but its underlying llama.cpp init path has no silent partial-offload fallback for an 'all layers' request (confirmed by this same probe's own consistent failure-not-partial-success behavior at q8_count=9/10 above) -- so context_creation_succeeded=true for q8_count 0 through 8 means full 32/32 GPU residency was achieved, by construction, matching the product's Q5 residency exactly. This satisfies Section 4's matched-residency requirement."
+}

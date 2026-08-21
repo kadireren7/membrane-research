@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "source": "results/v0.4/derisk_prompts.txt + derisk_prompt_labels.txt (Phase 10C, reused verbatim -- exact text preserved)",
+  "prompt_set_sha256_prompts_file": "b2bbf106ab8130e842f4b722798241e1075358eecab828d89bd808a48b22fb91",
+  "prompt_set_sha256_labels_file": "a4819e0abd82191a90d17d2a3cb8e4ea9beab63162bd004b1fba9b9709337ede",
+  "total_prompts": 31,
+  "categories": {
+    "factual_recall": [
+      "factual_recall_1",
+      "factual_recall_2",
+      "factual_recall_3"
+    ],
+    "instruction_following": [
+      "instruction_following_1",
+      "instruction_following_2",
+      "instruction_following_3"
+    ],
+    "multistep_reasoning": [
+      "multistep_reasoning_1",
+      "multistep_reasoning_2",
+      "multistep_reasoning_3"
+    ],
+    "arithmetic_reasoning": [
+      "arithmetic_reasoning_1",
+      "arithmetic_reasoning_2",
+      "arithmetic_reasoning_3"
+    ],
+    "logical_reasoning": [
+      "logical_reasoning_1",
+      "logical_reasoning_2",
+      "logical_reasoning_3"
+    ],
+    "code_completion": [
+      "code_completion_1",
+      "code_completion_2",
+      "code_completion_3"
+    ],
+    "code_reasoning": [
+      "code_reasoning_1"
+    ],
+    "code_explanation": [
+      "code_explanation_1",
+      "code_explanation_2",
+      "code_explanation_3"
+    ],
+    "structured_output": [
+      "structured_output_1",
+      "structured_output_2",
+      "structured_output_3"
+    ],
+    "summarization": [
+      "summarization_1",
+      "summarization_2",
+      "summarization_3"
+    ],
+    "prose_continuation": [
+      "prose_continuation_1",
+      "prose_continuation_2",
+      "prose_continuation_3"
+    ]
+  },
+  "prompts_and_labels": [
+    {
+      "label": "factual_recall_1",
+      "prompt": "The capital of Japan is"
+    },
+    {
+      "label": "factual_recall_2",
+      "prompt": "Water boils at a temperature of"
+    },
+    {
+      "label": "factual_recall_3",
+      "prompt": "The largest planet in our solar system is"
+    },
+    {
+      "label": "instruction_following_1",
+      "prompt": "List three colors of the rainbow:"
+    },
+    {
+      "label": "instruction_following_2",
+      "prompt": "Name two programming languages:"
+    },
+    {
+      "label": "instruction_following_3",
+      "prompt": "Give one example of a mammal:"
+    },
+    {
+      "label": "multistep_reasoning_1",
+      "prompt": "Tom has 3 apples. He buys 5 more, then gives away 2. How many apples does Tom have now? Answer:"
+    },
+    {
+      "label": "multistep_reasoning_2",
+      "prompt": "A store sells pens for $2 each. If Sarah buys 4 pens and pays with a $10 bill, her change is"
+    },
+    {
+      "label": "multistep_reasoning_3",
+      "prompt": "First add 10 and 20, then subtract 5 from the result. The final answer is"
+    },
+    {
+      "label": "arithmetic_reasoning_1",
+      "prompt": "12 plus 15 equals"
+    },
+    {
+      "label": "arithmetic_reasoning_2",
+      "prompt": "7 times 8 equals"
+    },
+    {
+      "label": "arithmetic_reasoning_3",
+      "prompt": "100 divided by 4 equals"
+    },
+    {
+      "label": "logical_reasoning_1",
+      "prompt": "All cats are animals. Fluffy is a cat. Therefore, Fluffy is"
+    },
+    {
+      "label": "logical_reasoning_2",
+      "prompt": "If it is raining, the ground is wet. It is raining. So the ground is"
+    },
+    {
+      "label": "logical_reasoning_3",
+      "prompt": "Either the light is on or it is off. The light is not on. So the light is"
+    },
+    {
+      "label": "code_completion_1",
+      "prompt": "def multiply(a, b): return a *"
+    },
+    {
+      "label": "code_completion_2",
+      "prompt": "def greet(name): return \"Hello, \" + name +"
+    },
+    {
+      "label": "code_completion_3",
+      "prompt": "def is_positive(n): return n >"
+    },
+    {
+      "label": "code_reasoning_1",
+      "prompt": "x = [1, 2, 3]; y = sum(x); print(y) # y equals"
+    },
+    {
+      "label": "code_explanation_1",
+      "prompt": "The following Python code prints numbers from 1 to 5: for i in range(1, 6): print(i). This code works by"
+    },
+    {
+      "label": "code_explanation_2",
+      "prompt": "In programming, a for loop is used to"
+    },
+    {
+      "label": "code_explanation_3",
+      "prompt": "The purpose of a function in code is to"
+    },
+    {
+      "label": "structured_output_1",
+      "prompt": "Format the following as a bulleted list: apples, bananas, cherries. Output:"
+    },
+    {
+      "label": "structured_output_2",
+      "prompt": "Convert to JSON: name is Alice, age is 30. Output:"
+    },
+    {
+      "label": "structured_output_3",
+      "prompt": "Write the numbers 1 to 3 as a comma-separated list:"
+    },
+    {
+      "label": "summarization_1",
+      "prompt": "The quick brown fox jumps over the lazy dog while the sun sets slowly behind the mountains. In one sentence, this describes"
+    },
+    {
+      "label": "summarization_2",
+      "prompt": "Photosynthesis is the process by which plants convert sunlight into energy. In short, this means plants"
+    },
+    {
+      "label": "summarization_3",
+      "prompt": "The meeting covered budget, timeline, and staffing. In summary, the meeting was about"
+    },
+    {
+      "label": "prose_continuation_1",
+      "prompt": "Once upon a time, in a small village,"
+    },
+    {
+      "label": "prose_continuation_2",
+      "prompt": "The old lighthouse stood at the edge of the cliff, watching over"
+    },
+    {
+      "label": "prose_continuation_3",
+      "prompt": "In the depths of the ancient forest, a young explorer discovered"
+    }
+  ],
+  "train_holdout_split": {
+    "selection_rule": "For each of the 10 categories that have exactly 3 numbered prompts, the highest-numbered prompt (suffix _3) is assigned to holdout; the other two (_1, _2) go to train. code_reasoning has only one prompt (code_reasoning_1, no _3 sibling) and is assigned to train. This rule was fixed and written to disk BEFORE any Phase 11C ablation, ranking, or quality result was computed or observed -- it depends only on prompt LABELS (fixed since Phase 10C), never on any Phase 11C measurement.",
+    "fixed_before_any_phase11c_results": true,
+    "train": [
+      "factual_recall_1",
+      "factual_recall_2",
+      "instruction_following_1",
+      "instruction_following_2",
+      "multistep_reasoning_1",
+      "multistep_reasoning_2",
+      "arithmetic_reasoning_1",
+      "arithmetic_reasoning_2",
+      "logical_reasoning_1",
+      "logical_reasoning_2",
+      "code_completion_1",
+      "code_completion_2",
+      "code_reasoning_1",
+      "code_explanation_1",
+      "code_explanation_2",
+      "structured_output_1",
+      "structured_output_2",
+      "summarization_1",
+      "summarization_2",
+      "prose_continuation_1",
+      "prose_continuation_2"
+    ],
+    "holdout": [
+      "factual_recall_3",
+      "instruction_following_3",
+      "multistep_reasoning_3",
+      "arithmetic_reasoning_3",
+      "logical_reasoning_3",
+      "code_completion_3",
+      "code_explanation_3",
+      "structured_output_3",
+      "summarization_3",
+      "prose_continuation_3"
+    ],
+    "train_count": 21,
+    "holdout_count": 10,
+    "train_pct": 67.7,
+    "holdout_pct": 32.3,
+    "note": "code_reasoning (1 prompt total) has no holdout representative -- disclosed limitation, not hidden."
+  }
+}

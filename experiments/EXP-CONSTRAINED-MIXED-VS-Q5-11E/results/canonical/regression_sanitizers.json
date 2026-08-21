@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 24: what was actually run in this phase, and what was explicitly NOT re-run, with reasons. This host is a shared, memory-constrained dev machine (5.6GiB total RAM; free -h showed as little as ~170-320MiB free / ~400-700MiB available throughout this session, heavy swap usage) -- see the persistent 'Dev machine memory constraints' note this project already tracks.",
+  "run_llama_free_release_and_asan_ubsan": {
+    "build_dir": "build-free-asan (MEMBRANE_ENABLE_LLAMA=OFF, MEMBRANE_ENABLE_SANITIZERS=ON, Debug+ASan+UBSan)",
+    "reconfigured_and_rebuilt": true,
+    "new_targets_added_this_phase": ["membrane_constrained_policy_sim", "test_constrained_policy_sim"],
+    "full_ctest_result": "67/68 passed, 1 failed",
+    "failure": {
+      "test": "test_mem_guard",
+      "assertion": "tools/membrane-kv-exact-sim/test_mem_guard.cpp:58: a budget far above real RSS takes no action",
+      "root_cause_analysis": "mem_guard_t (Phase 6.5) reads REAL /proc/meminfo system-wide MemAvailable/SwapTotal/SwapFree in addition to this process's own RSS vs its declared budget -- the test's premise (a 1 TiB budget, far above any process RSS, should force mem_action_t::NONE) does not hold when the REAL system-wide available memory is itself critically low, which it was throughout this session (as low as ~170-320 MiB free). This is a pre-existing sensitivity of a Phase 6.5 test to real host memory pressure, not something Phase 11E's changes caused -- Phase 11E touched no file under tools/membrane-kv-exact-sim/. Not fixed here: out of this phase's scope (constrained-mixed-vs-q5 research only), and 'fixing' a memory-guard test's behavior under real memory pressure by loosening its assertion would be exactly the kind of scope creep this phase's instructions forbid.",
+      "verified_unrelated_to_this_phase": "git diff shows zero changes to tools/membrane-kv-exact-sim/ on this branch"
+    },
+    "all_other_67_tests": "passed, including all pre-existing Phase 11B/11C/11D llama-free research tests (test_mixed_layer_policy, test_sensitivity_analysis, test_model_profile) alongside this phase's new test_constrained_policy_sim -- no regression introduced by this phase's CMakeLists.txt/library additions"
+  },
+  "not_run_this_session": {
+    "llama_enabled_cpu_release_asan_ubsan": "NOT re-run -- a full llama.cpp recompilation under ASan/UBSan (Debug, instrumented) is a heavy, long, memory-hungry build; judged unsafe to attempt on this host while it was already sitting at 170-320 MiB free RAM with other active processes (VSCode, Firefox, a second Claude session) sharing the same 5.6GiB",
+    "vulkan_release_full_product_regression_matrix": "the specific product paths this phase's H1 measurement itself exercises live (native was not separately re-run; q8, q5, adaptive, and the research probe/compare paths were all exercised for real, repeatedly, as part of Sections 3-20 -- see boundary_scan.json, quality_raw_f16ref.jsonl, adaptive_head_to_head.json, performance.json -- with zero crashes, zero unexpected fallbacks (no_fallback_occurred=true on every real membrane-run invocation), and clean exit codes throughout (0 for every success case, 5 for every real, expected conservative rejection). gpu-bench, auto, and guard specifically were not separately exercised this session.",
+    "recommendation_if_resumed": "run the llama-enabled ASan/UBSan and full Vulkan regression matrix as a follow-up on a moment when this host is not under concurrent desktop-application memory pressure, or on a dedicated CI runner with more headroom -- not blocking for this phase's own H1 decision, which rests on the quality measurement (quality_summary.json), not on sanitizer coverage."
+  }
+}

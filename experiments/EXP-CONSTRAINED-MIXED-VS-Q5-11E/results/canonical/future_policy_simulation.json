@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "phase": "11E",
+  "note": "Section 21: offline simulation only, of a hypothetical future Q8 -> mixed -> Q5 -> fail-closed hierarchy, run against the real measured transition points from this phase. Product --kv adaptive is NOT modified; this is pure post-hoc arithmetic over already-collected data.",
+  "policy_pseudocode": "if Q8 full-resides: Q8 elif mixed profile available and safe: mixed elif Q5 safe: Q5 else: fail closed",
+  "policy_evaluation_note": "This phase's own quality result (quality_summary.json) shows that even when mixed IS safe, it is not measurably better than Q5 at the one constrained point actually measured -- so 'safe' is necessary but not sufficient for the mixed branch to be a good idea. The simulation below reports what the policy AS WRITTEN would select (a mechanical fitness check), separate from whether that selection is actually advisable, which quality_summary.json/adaptive_head_to_head.json already answer for POINT B specifically.",
+  "points": [
+    {
+      "point": "A (comfortable)",
+      "ctx": 100000,
+      "q8_full_resides": true,
+      "policy_selects": "Q8",
+      "matches_real_product_adaptive": true,
+      "source": "boundary_scan.json point_a_comfortable"
+    },
+    {
+      "point": "B (primary constrained)",
+      "ctx": 180000,
+      "q8_full_resides": false,
+      "mixed_profile_available_and_safe": true,
+      "policy_selects_mechanically": "mixed",
+      "but_measured_quality_says": "mixed is worse than Q5 here (quality_summary.json) -- a policy that mechanically selects mixed whenever it merely FITS would make quality strictly worse than today's real adaptive behavior at this point",
+      "real_product_adaptive_selects": "Q5",
+      "source": "boundary_scan.json point_b_primary_constrained, quality_summary.json primary_h1_test"
+    },
+    {
+      "point": "C (extreme, product-defined)",
+      "ctx": 186000,
+      "q8_full_resides": false,
+      "mixed_profile_available_and_safe": "not evaluated live at this ctx in this phase (would require a fresh Q8-budget search at 186000); by extrapolation from Point B's boundary (top-8 succeeds, top-9 fails at a LOWER ctx with more headroom), it is likely that FEWER (or zero) Q8 layers stay safe here, but this is not measured, only inferred",
+      "product_whole_q5_result": "FAILS (exit_code=5, clean rejection -- see boundary_scan.json point_c_extreme.product_explicit_q5)",
+      "policy_selects": "fail closed (Q5 itself already fails the product's own conservative check at this ctx; mixed always costs >= Q5 bytes for any Q8 count > 0, so it cannot be safer)",
+      "matches_real_product_adaptive": "not directly tested (adaptive was not invoked at ctx=186000 in this phase), but follows deterministically from Q5's own rejection",
+      "source": "boundary_scan.json point_c_extreme"
+    }
+  ],
+  "headline_finding": "The mechanical Q8->mixed->Q5->fail hierarchy behaves as designed at the fitness/safety level (correctly identifies when mixed WOULD fit), but this phase's actual quality measurement at the one point where the mixed branch would fire (Point B) shows that firing it would make quality worse, not better, than simply falling through to Q5. A 'fits' check alone is not a sufficient gate for this hierarchy to be a net improvement -- it would need a quality gate as well, and this phase found no evidence that gate would ever pass at the measured point."
+}

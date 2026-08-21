@@ -1,0 +1,1010 @@
+{
+  "schema_version": 1,
+  "phase": "11B",
+  "note": "Phase 11B: per-layer mixed Q8_0/Q5_1 KV storage feasibility research (whole-cache adaptive already shipped in Phase 11A; this phase investigates block/layer-level heterogeneity). RESEARCH ONLY -- experiment/mixed-q8-q5-layer-feasibility branch, never merged, never a stable CLI mode. All data is from real membrane-kv-mixed-layer invocations on this host (CPU: this host's own CPU; GPU: this host's real GTX 1650 via Vulkan), not simulated.",
+  "membrane_commit": "c51b24695dfa56e0740f930f5ece7c79a077e16c",
+  "llama_cpp_commit": "c0bc8591e8815c63cb01dd3f051a8b0df02501c9",
+  "feasibility_classification": "B_MIXED_LAYER_EXISTING_MEMBRANE_INFRA_EXISTS",
+  "architecture_findings": {
+    "note": "Answered primarily by re-verifying Phase 4.1's own documented investigation (docs/phase4-runtime-policy.md section 3), which built and real-runtime-validated this exact per-layer mechanism (for F16/Q8_0/Q4_0) before this phase existed -- not re-derived from scratch. Independently re-confirmed here: the patch still applies to the same pinned llama.cpp commit unchanged, and the exact log line documented for the per-layer path ('attention rotation force disabled ... MEMBRANE kv_type_override') was observed firing on the new Q8_0/Q5_1 mixed context created by this phase's own probe tool.",
+    "q1_type_k_v_global": "By default yes -- llama_context_params.type_k/type_v are flat scalars applied to every layer. The already-tracked kv_type_override callback (patches/llama.cpp-membrane-kv-type-override.patch) overrides this per layer, per K/V, resolved once at allocation time.",
+    "q2_separate_tensors_per_layer": "Yes, always, in stock llama.cpp -- llama_kv_cache's constructor creates one K and one V ggml tensor per layer in a per-layer loop, independent of any MEMBRANE change.",
+    "q3_per_layer_tensors_share_one_type": "No, not structurally -- the ONLY place a single flat type was assumed was the two ggml_new_tensor_3d() calls inside that per-layer loop, which is exactly what the existing patch changes: layer_type_k/layer_type_v resolved via the override callback instead of the flat type_k/type_v scalar, on the same call.",
+    "q4_type_stored_independently_per_tensor": "Yes -- ggml_tensor::type is a per-tensor field by ggml's own design, not cache-level state. layers[il].k/v already carry their own real type after construction, with or without the override.",
+    "q5_kernels_accept_heterogeneous_types": "Yes, per Phase 4.1's own investigation and re-confirmed by this phase's real runs: cpy_k/cpy_v (writes), get_k/get_v (reads), and state_write_data/state_read_data (save/restore) all read the type off each layer's own tensor already, not a cached global -- no kernel-level patch was needed for the F16/Q8_0/Q4_0 case in Phase 4.1, and none was needed here either for Q8_0/Q5_1: every real run in this phase (ratio/position/sensitivity/CPU/Vulkan/ memory-pressure, all real inference through genuinely mixed contexts) completed with real, non-degenerate output and no crash.",
+    "q6_limitation_scope": "Allocation-time only, not compute kernels -- confirmed by construction (the patch is exactly two lines inside the KV-cache constructor) and by this phase's own real runs producing correct, non-degenerate generations across every mixed configuration tested.",
+    "known_scope_limitations_inherited_from_the_existing_patch": [
+      "Only the standard, non-SWA, non-hybrid, non-MLA llama_kv_cache construction path honors kv_type_override (the path SmolLM2/Qwen2 use) -- iSWA/hybrid/DSA/DSv4 architectures are untouched.",
+      "Hadamard KV-rotation (a real accuracy feature) is force-disabled whenever kv_type_override is active, on every layer including ones that stay Q8 -- observed firing on every mixed context this phase created too, not just the original F16/Q8/Q4 case."
+    ]
+  },
+  "public_existing_infrastructure_findings": "kv_type_override is already tracked, already-applied MEMBRANE infrastructure (Phase 4.1, patches/llama.cpp-membrane-kv-type-override.patch, auto-applied by CMakeLists.txt whenever MEMBRANE_ENABLE_LLAMA=ON) -- not a stock upstream public API, but also not a NEW third_party/llama.cpp modification this phase had to make. It was already generalized (any ggml_type per layer, not hardcoded to F16/Q8_0/Q4_0) so extending it to Q8_0/Q5_1 required zero patch changes -- only a new, simpler in-memory layer-type-array callback in a new research tool, reusing the exact same override mechanism membrane-kv-runtime (Phase 4.1) already uses.",
+  "upstream_modification_required": false,
+  "upstream_modification_reason": "Not applicable -- Section 4's stop condition was never triggered. The existing patch's kv_type_override signature (ggml_type (*)(int32_t il, bool is_v, void *ud)) is already type-generic; Q8_0/Q5_1 is just a different pair of return values through the identical mechanism Phase 4.1 already built, real-runtime-validated, and shipped as tracked infrastructure.",
+  "no_code_probe": {
+    "target_model": "SmolLM2-135M-Instruct-f16",
+    "split": "layers 0-14 -> Q8_0, layers 15-29 -> Q5_1",
+    "proof_points": [
+      "One context created for the mixed config (cand_ctx), one context for the separate FP16 quality reference (ref_ctx, not a shadow of the mixed cache) -- never more.",
+      "Real log line 'attention rotation force disabled (LLAMA_ATTN_ROT_DISABLE or MEMBRANE kv_type_override)' fired exactly once per mixed-context creation, confirming kv_type_override was genuinely active.",
+      "type_map echoed back in JSON output shows real per-layer Q8_0/Q5_1 assignment matching the requested split exactly.",
+      "Real generation completed (token_identity=true, top1_preservation=1.0 on the smoke prompt) -- attention genuinely consumed both K/V dtypes in the same forward pass.",
+      "theoretical_mixed_bytes computed from the exact per-layer ggml_row_size()-based formula, no approximation."
+    ]
+  },
+  "storage_math": {
+    "note": "mixed_bytes = sum(Q8 layer bytes) + sum(Q5 layer bytes), using the exact same ggml_row_size()-based per-token formula every other MEMBRANE Q8/Q5 module uses (never re-derived or approximated). Exact-match proof: at ctx=8192/2048, this phase's all-Q8 special case (q8_layer_count=n_layer) produces theoretical_mixed_bytes IDENTICAL to membrane-run's own already-validated --kv q8 total at the same context size (25067520 at ctx=2048, 100270080 at ctx=8192); the all-Q5 special case likewise matches --kv q5 exactly (17694720 / 70778880). Since the mixed formula is the SAME per-layer construction summed across a heterogeneous assignment, this transitively proves the general mixed case is exact, not approximate.",
+    "cross_check_rss_delta": "A real RSS-delta measurement (before/after the mixed context's own creation, isolated from the reference context) at ctx=8192/135M/15-Q8-layers gave 87168 KiB (89,260,032 bytes) real delta vs 85,524,480 bytes theoretical -- 4.4% higher, consistent with compute-buffer/scratch allocation beyond the KV tensors themselves, corroborating (not contradicting) the exact formula.",
+    "all_q8_exact_match_bytes": 25067520,
+    "all_q5_exact_match_bytes": 17694720,
+    "native_bytes_ctx2048_135m": 47185920
+  },
+  "ratio_experiments": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "prompt_subset": "5-prompt deterministic subset (factual_recall_1, instruction_following_1, code_reasoning_1, multistep_reasoning_2, prose_continuation_1)",
+    "note": "Contiguous (early-layers-Q8) splits at 100/75/50/25/0 pct Q8. Memory decreases monotonically with fewer Q8 layers, and logit_rel_l2/delta_nll degrade monotonically and smoothly -- but top1_preservation (a discrete, threshold metric) is noisier at this 5-prompt sample size and is NOT monotonic (q8_count=15 scored better than q8_count=23 on top1 in this run). Disclosed as a real, sample-size-limited observation, not smoothed over.",
+    "rows": [
+      {
+        "q8_layer_count": 30,
+        "theoretical_mixed_bytes": 25067520,
+        "mean_top1_preservation": 0.9875,
+        "mean_logit_rel_l2": 0.018478,
+        "mean_delta_nll": 0.002748,
+        "token_identity_count": 3,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 27904,
+        "pct_of_native": 53.12,
+        "pct_of_all_q8": 100.0,
+        "q5_layer_count": 0
+      },
+      {
+        "q8_layer_count": 23,
+        "theoretical_mixed_bytes": 23347200,
+        "mean_top1_preservation": 0.95625,
+        "mean_logit_rel_l2": 0.044804,
+        "mean_delta_nll": 0.009498,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 26240,
+        "pct_of_native": 49.48,
+        "pct_of_all_q8": 93.14,
+        "q5_layer_count": 7
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.061507,
+        "mean_delta_nll": 0.019242,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "pct_of_native": 45.31,
+        "pct_of_all_q8": 85.29,
+        "q5_layer_count": 15
+      },
+      {
+        "q8_layer_count": 7,
+        "theoretical_mixed_bytes": 19415040,
+        "mean_top1_preservation": 0.94375,
+        "mean_logit_rel_l2": 0.070192,
+        "mean_delta_nll": 0.021174,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 22400,
+        "pct_of_native": 41.15,
+        "pct_of_all_q8": 77.45,
+        "q5_layer_count": 23
+      },
+      {
+        "q8_layer_count": 0,
+        "theoretical_mixed_bytes": 17694720,
+        "mean_top1_preservation": 0.9,
+        "mean_logit_rel_l2": 0.084262,
+        "mean_delta_nll": 0.02683,
+        "token_identity_count": 0,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 20736,
+        "pct_of_native": 37.5,
+        "pct_of_all_q8": 70.59,
+        "q5_layer_count": 30
+      }
+    ]
+  },
+  "layer_position_experiment": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "q8_layer_count": 15,
+    "note": "At IDENTICAL memory (all rows have the same theoretical_mixed_bytes), layout genuinely changes quality: reverse (late layers stay Q8) beat contiguous (early layers stay Q8) on logit_rel_l2 and delta_nll; alternating was worst overall; middle-Q8/outer-Q5 had the best delta_nll among the naive layouts. The sensitivity-based layout (see below) beat every naive layout on 2 of 3 metrics and was competitive on the third. Confirms Section 8's premise: equal memory usage does NOT imply equal quality.",
+    "rows": [
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.061507,
+        "mean_delta_nll": 0.019242,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "contiguous"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.049393,
+        "mean_delta_nll": 0.016615,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "reverse"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9,
+        "mean_logit_rel_l2": 0.065554,
+        "mean_delta_nll": 0.018061,
+        "token_identity_count": 0,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "alternating"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.94375,
+        "mean_logit_rel_l2": 0.056795,
+        "mean_delta_nll": 0.008932,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "middle"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.975,
+        "mean_logit_rel_l2": 0.045997,
+        "mean_delta_nll": 0.00127,
+        "token_identity_count": 2,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "sensitivity_based"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.94375,
+        "mean_logit_rel_l2": 0.058431,
+        "mean_delta_nll": 0.008404,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "random_deterministic"
+      }
+    ]
+  },
+  "layer_sensitivity_ablation": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "baseline": "all-Q8 (30/30 layers)",
+    "method": "for each layer i, flip ONLY layer i to Q5_1, keep every other layer Q8_0, measure vs FP16 reference on the 5-prompt subset",
+    "ranking_metric": "logit_rel_l2 when that layer alone is ablated to Q5 (higher = more sensitive = should stay Q8)",
+    "note": "Ranking is NOT monotonic with layer depth (layer 27 near the end is most sensitive; layer 0 at the very start is LEAST sensitive) -- confirms Section 9's own caution not to assume early/late layers are more important.",
+    "most_sensitive_5": [
+      27,
+      19,
+      14,
+      13,
+      22
+    ],
+    "least_sensitive_5": [
+      9,
+      8,
+      6,
+      7,
+      0
+    ],
+    "full_ranking_most_to_least_sensitive": [
+      27,
+      19,
+      14,
+      13,
+      22,
+      12,
+      16,
+      23,
+      2,
+      15,
+      21,
+      11,
+      18,
+      10,
+      3,
+      17,
+      5,
+      28,
+      20,
+      25,
+      29,
+      4,
+      26,
+      24,
+      1,
+      9,
+      8,
+      6,
+      7,
+      0
+    ],
+    "rows": [
+      {
+        "ablated_layer": 0,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.018201,
+        "delta_nll_when_ablated": 0.002126
+      },
+      {
+        "ablated_layer": 1,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.020949,
+        "delta_nll_when_ablated": -0.002968
+      },
+      {
+        "ablated_layer": 2,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.024336,
+        "delta_nll_when_ablated": 0.001097
+      },
+      {
+        "ablated_layer": 3,
+        "top1_when_ablated": 0.975,
+        "rel_l2_when_ablated": 0.022796,
+        "delta_nll_when_ablated": 0.005169
+      },
+      {
+        "ablated_layer": 4,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.021438,
+        "delta_nll_when_ablated": 0.000434
+      },
+      {
+        "ablated_layer": 5,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.022514,
+        "delta_nll_when_ablated": 0.005122
+      },
+      {
+        "ablated_layer": 6,
+        "top1_when_ablated": 0.99375,
+        "rel_l2_when_ablated": 0.019887,
+        "delta_nll_when_ablated": 0.004262
+      },
+      {
+        "ablated_layer": 7,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.01938,
+        "delta_nll_when_ablated": 0.00326
+      },
+      {
+        "ablated_layer": 8,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.020769,
+        "delta_nll_when_ablated": 0.004438
+      },
+      {
+        "ablated_layer": 9,
+        "top1_when_ablated": 0.99375,
+        "rel_l2_when_ablated": 0.020922,
+        "delta_nll_when_ablated": 0.002817
+      },
+      {
+        "ablated_layer": 10,
+        "top1_when_ablated": 0.99375,
+        "rel_l2_when_ablated": 0.022951,
+        "delta_nll_when_ablated": 0.002073
+      },
+      {
+        "ablated_layer": 11,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.023527,
+        "delta_nll_when_ablated": 0.003751
+      },
+      {
+        "ablated_layer": 12,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.025513,
+        "delta_nll_when_ablated": 0.004234
+      },
+      {
+        "ablated_layer": 13,
+        "top1_when_ablated": 0.9625,
+        "rel_l2_when_ablated": 0.026185,
+        "delta_nll_when_ablated": 0.003713
+      },
+      {
+        "ablated_layer": 14,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.026804,
+        "delta_nll_when_ablated": 0.006507
+      },
+      {
+        "ablated_layer": 15,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.024177,
+        "delta_nll_when_ablated": 0.005889
+      },
+      {
+        "ablated_layer": 16,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.025422,
+        "delta_nll_when_ablated": 0.006978
+      },
+      {
+        "ablated_layer": 17,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.02259,
+        "delta_nll_when_ablated": 0.005193
+      },
+      {
+        "ablated_layer": 18,
+        "top1_when_ablated": 0.975,
+        "rel_l2_when_ablated": 0.02351,
+        "delta_nll_when_ablated": 0.005034
+      },
+      {
+        "ablated_layer": 19,
+        "top1_when_ablated": 0.96875,
+        "rel_l2_when_ablated": 0.030393,
+        "delta_nll_when_ablated": 0.006972
+      },
+      {
+        "ablated_layer": 20,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.02223,
+        "delta_nll_when_ablated": 0.003197
+      },
+      {
+        "ablated_layer": 21,
+        "top1_when_ablated": 0.99375,
+        "rel_l2_when_ablated": 0.023532,
+        "delta_nll_when_ablated": 0.00327
+      },
+      {
+        "ablated_layer": 22,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.026086,
+        "delta_nll_when_ablated": 0.00671
+      },
+      {
+        "ablated_layer": 23,
+        "top1_when_ablated": 0.975,
+        "rel_l2_when_ablated": 0.024699,
+        "delta_nll_when_ablated": 0.008677
+      },
+      {
+        "ablated_layer": 24,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.021038,
+        "delta_nll_when_ablated": 0.003074
+      },
+      {
+        "ablated_layer": 25,
+        "top1_when_ablated": 1.0,
+        "rel_l2_when_ablated": 0.021763,
+        "delta_nll_when_ablated": 0.005195
+      },
+      {
+        "ablated_layer": 26,
+        "top1_when_ablated": 0.975,
+        "rel_l2_when_ablated": 0.021389,
+        "delta_nll_when_ablated": 0.001659
+      },
+      {
+        "ablated_layer": 27,
+        "top1_when_ablated": 0.975,
+        "rel_l2_when_ablated": 0.032025,
+        "delta_nll_when_ablated": 0.002094
+      },
+      {
+        "ablated_layer": 28,
+        "top1_when_ablated": 0.9875,
+        "rel_l2_when_ablated": 0.022359,
+        "delta_nll_when_ablated": 0.001499
+      },
+      {
+        "ablated_layer": 29,
+        "top1_when_ablated": 0.98125,
+        "rel_l2_when_ablated": 0.021754,
+        "delta_nll_when_ablated": 0.002776
+      }
+    ]
+  },
+  "sensitivity_based_policy_vs_naive": {
+    "note": "At q8_layer_count=15 (equal memory across all rows): sensitivity_based achieved the best top1_preservation (0.975) and by far the best delta_nll (0.00127, next-best was middle at 0.0089 -- ~7x worse) of every layout tested, and was competitive (2nd-best) on logit_rel_l2 (0.046 vs reverse's 0.0494). It beat random_deterministic (seed=42, same q8 count) on every metric. This clears Section 12's bar: the sensitivity-based policy outperformed naive layouts at equal memory in this run -- though on a small, 5-prompt sample, not a statistically large one.",
+    "rows": [
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.061507,
+        "mean_delta_nll": 0.019242,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "contiguous"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.049393,
+        "mean_delta_nll": 0.016615,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "reverse"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9,
+        "mean_logit_rel_l2": 0.065554,
+        "mean_delta_nll": 0.018061,
+        "token_identity_count": 0,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "alternating"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.94375,
+        "mean_logit_rel_l2": 0.056795,
+        "mean_delta_nll": 0.008932,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "middle"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.975,
+        "mean_logit_rel_l2": 0.045997,
+        "mean_delta_nll": 0.00127,
+        "token_identity_count": 2,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "sensitivity_based"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.94375,
+        "mean_logit_rel_l2": 0.058431,
+        "mean_delta_nll": 0.008404,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "layout": "random_deterministic"
+      }
+    ]
+  },
+  "pareto_curve": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "columns": [
+      "q8_layer_count",
+      "q5_layer_count",
+      "kv_bytes",
+      "pct_of_native",
+      "pct_of_all_q8",
+      "mean_top1_preservation",
+      "mean_logit_rel_l2",
+      "mean_delta_nll"
+    ],
+    "rows": [
+      {
+        "q8_layer_count": 30,
+        "theoretical_mixed_bytes": 25067520,
+        "mean_top1_preservation": 0.9875,
+        "mean_logit_rel_l2": 0.018478,
+        "mean_delta_nll": 0.002748,
+        "token_identity_count": 3,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 27904,
+        "pct_of_native": 53.12,
+        "pct_of_all_q8": 100.0,
+        "q5_layer_count": 0
+      },
+      {
+        "q8_layer_count": 23,
+        "theoretical_mixed_bytes": 23347200,
+        "mean_top1_preservation": 0.95625,
+        "mean_logit_rel_l2": 0.044804,
+        "mean_delta_nll": 0.009498,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 26240,
+        "pct_of_native": 49.48,
+        "pct_of_all_q8": 93.14,
+        "q5_layer_count": 7
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.061507,
+        "mean_delta_nll": 0.019242,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 24320,
+        "pct_of_native": 45.31,
+        "pct_of_all_q8": 85.29,
+        "q5_layer_count": 15
+      },
+      {
+        "q8_layer_count": 7,
+        "theoretical_mixed_bytes": 19415040,
+        "mean_top1_preservation": 0.94375,
+        "mean_logit_rel_l2": 0.070192,
+        "mean_delta_nll": 0.021174,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 22400,
+        "pct_of_native": 41.15,
+        "pct_of_all_q8": 77.45,
+        "q5_layer_count": 23
+      },
+      {
+        "q8_layer_count": 0,
+        "theoretical_mixed_bytes": 17694720,
+        "mean_top1_preservation": 0.9,
+        "mean_logit_rel_l2": 0.084262,
+        "mean_delta_nll": 0.02683,
+        "token_identity_count": 0,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 20736,
+        "pct_of_native": 37.5,
+        "pct_of_all_q8": 70.59,
+        "q5_layer_count": 30
+      }
+    ],
+    "endpoints": {
+      "all_q8": {
+        "q8_layer_count": 30,
+        "theoretical_mixed_bytes": 25067520,
+        "mean_top1_preservation": 0.9875,
+        "mean_logit_rel_l2": 0.018478,
+        "mean_delta_nll": 0.002748,
+        "token_identity_count": 3,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 27904,
+        "pct_of_native": 53.12,
+        "pct_of_all_q8": 100.0,
+        "q5_layer_count": 0
+      },
+      "all_q5": {
+        "q8_layer_count": 0,
+        "theoretical_mixed_bytes": 17694720,
+        "mean_top1_preservation": 0.9,
+        "mean_logit_rel_l2": 0.084262,
+        "mean_delta_nll": 0.02683,
+        "token_identity_count": 0,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": null,
+        "mean_gen_tok_per_s": null,
+        "rss_delta_cand_ctx_kb": 20736,
+        "pct_of_native": 37.5,
+        "pct_of_all_q8": 70.59,
+        "q5_layer_count": 30
+      }
+    },
+    "note": "No single mixed point dominates all-Q8 on quality (all-Q8 has the best top1/rel_l2/nll by construction, since it is closest to the F16 reference) -- the honest research question is memory-vs-quality trade, not a free win. The curve shows a real, usable trade-off region (e.g. q8_count=15 or the sensitivity-based q8_count=15 mix recovers noticeably more quality than all-Q5 for a modest additional memory cost), not a dominant winner. No winner is forced here beyond what the numbers show."
+  },
+  "cpu_validation_matrix": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "rows": [
+      {
+        "q8_layer_count": 30,
+        "theoretical_mixed_bytes": 25067520,
+        "mean_top1_preservation": 0.9875,
+        "mean_logit_rel_l2": 0.018478,
+        "mean_delta_nll": 0.002748,
+        "token_identity_count": 3,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 699.789521,
+        "mean_gen_tok_per_s": 65.540601,
+        "rss_delta_cand_ctx_kb": 27904,
+        "config_name": "all_q8"
+      },
+      {
+        "q8_layer_count": 0,
+        "theoretical_mixed_bytes": 17694720,
+        "mean_top1_preservation": 0.9,
+        "mean_logit_rel_l2": 0.084262,
+        "mean_delta_nll": 0.02683,
+        "token_identity_count": 0,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 696.061355,
+        "mean_gen_tok_per_s": 67.075846,
+        "rss_delta_cand_ctx_kb": 20736,
+        "config_name": "all_q5"
+      },
+      {
+        "q8_layer_count": 23,
+        "theoretical_mixed_bytes": 23347200,
+        "mean_top1_preservation": 0.95625,
+        "mean_logit_rel_l2": 0.044804,
+        "mean_delta_nll": 0.009498,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 696.588533,
+        "mean_gen_tok_per_s": 66.508108,
+        "rss_delta_cand_ctx_kb": 26240,
+        "config_name": "75_25"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.061507,
+        "mean_delta_nll": 0.019242,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 703.721975,
+        "mean_gen_tok_per_s": 66.587923,
+        "rss_delta_cand_ctx_kb": 24320,
+        "config_name": "50_50"
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.975,
+        "mean_logit_rel_l2": 0.045997,
+        "mean_delta_nll": 0.00127,
+        "token_identity_count": 2,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 613.598169,
+        "mean_gen_tok_per_s": 62.377876,
+        "rss_delta_cand_ctx_kb": 24320,
+        "config_name": "sensitivity_15"
+      }
+    ]
+  },
+  "vulkan_validation_matrix": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "gpu_layers": "all",
+    "device": "Vulkan1 (real NVIDIA GeForce GTX 1650)",
+    "note": "VRAM peak (external nvidia-smi measurement, polled during the run) scales with theoretical KV bytes as expected (433 MiB for all-Q8/largest down to 426 MiB for all-Q5/ smallest) -- a real, physical confirmation that heterogeneous KV genuinely occupies GPU memory proportional to the mix, not a fixed/uniform allocation.",
+    "rows": [
+      {
+        "q8_layer_count": 30,
+        "theoretical_mixed_bytes": 25067520,
+        "mean_top1_preservation": 0.99375,
+        "mean_logit_rel_l2": 0.013832,
+        "mean_delta_nll": -0.000114,
+        "token_identity_count": 4,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 1551.373968,
+        "mean_gen_tok_per_s": 291.8801,
+        "rss_delta_cand_ctx_kb": 0,
+        "config_name": "all_q8",
+        "vram_before_mib": 2,
+        "vram_peak_mib": 433
+      },
+      {
+        "q8_layer_count": 0,
+        "theoretical_mixed_bytes": 17694720,
+        "mean_top1_preservation": 0.95,
+        "mean_logit_rel_l2": 0.091109,
+        "mean_delta_nll": 0.028072,
+        "token_identity_count": 1,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 1567.07809,
+        "mean_gen_tok_per_s": 285.677031,
+        "rss_delta_cand_ctx_kb": 0,
+        "config_name": "all_q5",
+        "vram_before_mib": 2,
+        "vram_peak_mib": 426
+      },
+      {
+        "q8_layer_count": 23,
+        "theoretical_mixed_bytes": 23347200,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.044483,
+        "mean_delta_nll": 0.000344,
+        "token_identity_count": 2,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 1559.260055,
+        "mean_gen_tok_per_s": 288.213865,
+        "rss_delta_cand_ctx_kb": 0,
+        "config_name": "75_25",
+        "vram_before_mib": 2,
+        "vram_peak_mib": 432
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.9625,
+        "mean_logit_rel_l2": 0.063638,
+        "mean_delta_nll": 0.010579,
+        "token_identity_count": 2,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 1566.158455,
+        "mean_gen_tok_per_s": 288.755747,
+        "rss_delta_cand_ctx_kb": 0,
+        "config_name": "50_50",
+        "vram_before_mib": 2,
+        "vram_peak_mib": 430
+      },
+      {
+        "q8_layer_count": 15,
+        "theoretical_mixed_bytes": 21381120,
+        "mean_top1_preservation": 0.95625,
+        "mean_logit_rel_l2": 0.050045,
+        "mean_delta_nll": 0.008022,
+        "token_identity_count": 2,
+        "n_prompts": 5,
+        "mean_prompt_tok_per_s": 1521.033694,
+        "mean_gen_tok_per_s": 286.342648,
+        "rss_delta_cand_ctx_kb": 0,
+        "config_name": "sensitivity_15",
+        "vram_before_mib": 2,
+        "vram_peak_mib": 430
+      }
+    ]
+  },
+  "memory_pressure_result": {
+    "model": "SmolLM2-360M-Instruct-f16",
+    "device": "real GTX 1650, --gpu-layers all",
+    "method": "--capacity-only mode (creates ONLY the candidate mixed context, never a second F16 reference context, to avoid risking real GPU OOM while probing right at the memory limit) -- raw allocation success/failure, no guard/reserve applied (unlike Phase 11A's production adaptive policy, which is deliberately more conservative).",
+    "boundary_ctx_used": 180000,
+    "key_finding": "At ctx=180000 (32-layer 360M, --gpu-layers all): all-Q8 (32/32) FAILS raw allocation; all-Q5 (0/32) SUCCEEDS. A mixed cache with UP TO 8 of 32 layers at Q8 (the rest Q5) ALSO SUCCEEDS at full 32/32-layer residency -- the exact same full-residency outcome whole-cache adaptive achieves only by dropping to all-Q5 (Phase 11A's own Q5_REQUIRED_FOR_FULL_RESIDENCY zone at this ctx range). 10 or more Q8 layers FAILS. This is a real, precisely-characterized YES to Section 16's central question: a mixed cache can retain some high-value layers at Q8 while matching whole-cache adaptive's full-residency memory envelope.",
+    "boundary_layers": {
+      "max_q8_that_fits": 8,
+      "min_q8_that_fails": 10
+    },
+    "rows": [
+      {
+        "config_name": "all_q8_ctx131072",
+        "ctx": 131072,
+        "q8_layer_count": 32,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 2852126720,
+        "context_creation_succeeded": true
+      },
+      {
+        "config_name": "all_q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 32,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 3916800000,
+        "context_creation_succeeded": false
+      },
+      {
+        "config_name": "all_q8_ctx200000",
+        "ctx": 200000,
+        "q8_layer_count": 32,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 4352000000,
+        "context_creation_succeeded": false
+      },
+      {
+        "config_name": "all_q8_ctx220000",
+        "ctx": 220000,
+        "q8_layer_count": 32,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 4787200000,
+        "context_creation_succeeded": false
+      },
+      {
+        "config_name": "all_q5_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 0,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 2764800000,
+        "context_creation_succeeded": true
+      },
+      {
+        "config_name": "mixed_24q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 24,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 3628800000,
+        "context_creation_succeeded": false
+      },
+      {
+        "config_name": "mixed_16q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 16,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 3340800000,
+        "context_creation_succeeded": false
+      },
+      {
+        "config_name": "mixed_8q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 8,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 3052800000,
+        "context_creation_succeeded": true
+      },
+      {
+        "config_name": "mixed_4q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 4,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 2908800000,
+        "context_creation_succeeded": true
+      },
+      {
+        "config_name": "mixed_1q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 1,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 2800800000,
+        "context_creation_succeeded": true
+      },
+      {
+        "config_name": "mixed_10q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 10,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 3124800000,
+        "context_creation_succeeded": false
+      },
+      {
+        "config_name": "mixed_12q8_ctx180000",
+        "ctx": 180000,
+        "q8_layer_count": 12,
+        "n_layer": 32,
+        "theoretical_mixed_bytes": 3196800000,
+        "context_creation_succeeded": false
+      }
+    ]
+  },
+  "performance": {
+    "model": "SmolLM2-135M-Instruct-f16",
+    "ctx": 2048,
+    "note": "Generation throughput is statistically indistinguishable across all-Q8, all-Q5, and the sensitivity-based mixed config on both backends at this small model scale -- differences are within run-to-run noise (stddev), not a systematic penalty or benefit from heterogeneous tensor types. This does NOT closely replicate Phase 4.1's F16/Q8/Q4 finding of measurably higher peak RSS for mixed configs -- this phase's mixed RSS deltas sat BETWEEN the all-Q8 and all-Q5 deltas, not above both (see cpu_validation_matrix rss_delta_cand_ctx_kb).",
+    "vulkan_gen_tok_per_s": {
+      "all_q8": {
+        "n": 7,
+        "mean": 284.412,
+        "median": 288.475,
+        "min": 256.224,
+        "max": 290.538,
+        "stddev": 12.458
+      },
+      "all_q5": {
+        "n": 7,
+        "mean": 282.731,
+        "median": 283.145,
+        "min": 278.662,
+        "max": 284.094,
+        "stddev": 1.859
+      },
+      "mixed_sens15": {
+        "n": 7,
+        "mean": 285.67,
+        "median": 285.438,
+        "min": 284.776,
+        "max": 286.777,
+        "stddev": 0.8
+      }
+    },
+    "cpu_gen_tok_per_s": {
+      "all_q8": {
+        "n": 5,
+        "mean": 67.002,
+        "median": 66.792,
+        "min": 63.129,
+        "max": 70.066,
+        "stddev": 2.771
+      },
+      "all_q5": {
+        "n": 5,
+        "mean": 65.873,
+        "median": 66.532,
+        "min": 62.931,
+        "max": 67.425,
+        "stddev": 1.729
+      },
+      "mixed_sens15": {
+        "n": 5,
+        "mean": 66.616,
+        "median": 66.408,
+        "min": 60.405,
+        "max": 71.384,
+        "stddev": 4.032
+      }
+    }
+  },
+  "implementation_complexity": {
+    "files_touched": [
+      "CMakeLists.txt (purely additive: 2 new library/test registrations, 1 new add_subdirectory line)",
+      "tools/membrane-kv-mixed-layer/ (5 new files, self-contained, ~1170 lines total)"
+    ],
+    "existing_files_modified": 0,
+    "public_api_changes": 0,
+    "new_abstractions": "membrane_mixed_layer_candidate_t-style plain per-layer int array (0/1 flags) plus 6 small pure functions (byte accounting, ranking assignment, 3 naive layouts) -- no new struct/class hierarchy, matching the project's existing pure-policy-module convention (adaptive_kv_policy.h/.c, compat_check.h/.c).",
+    "backend_specific_branching": "None new -- the probe tool passes --gpu-layers straight into llama_model_params.n_gpu_layers exactly like the product CLI already does; no new Vulkan/CPU-specific code path was written.",
+    "llama_cpp_dependency_changes": "None -- reuses the exact already-tracked patch unchanged.",
+    "maintenance_risk": "LOW for the probe tool itself (self-contained, research-only, not linked into any product binary). The real maintenance risk this phase surfaces is inherited from the underlying kv_type_override patch, not new: it only covers the standard (non-SWA/hybrid/MLA) KV-cache construction path, and it force-disables Hadamard KV rotation whenever active -- both already-disclosed, pre-existing constraints (Phase 4.1), not introduced here. Productizing per-layer mixing (not attempted in this phase) would additionally need: a stable policy-assignment surface (the sensitivity ranking used here is model/prompt-set-specific, offline-computed, and was explicitly kept non-adaptive per the phase spec), a product CLI surface distinguishing it from --kv adaptive, and a much larger validation sweep than this feasibility pass performed."
+  },
+  "tests": {
+    "test_mixed_layer_policy": "14 llama-free unit tests -- exact mixed-storage sum (all-Q8, all-Q5, mixed), invalid/unsupported type fails closed, NULL/degenerate inputs, sensitivity-ranking policy (top-N-stays-Q8, q8_count clamping, invalid-permutation rejection), 3 naive layouts (contiguous/reverse/alternating, including an alternating q8_count exceeding even-index density), every-layer-assigned-exactly-once, and determinism (byte-identical repeat calls for both the byte-accounting and ranking-policy functions). All pass."
+  },
+  "sanitizers_and_regression": {
+    "configs_run": [
+      "llama-free Release",
+      "llama-free ASan+UBSan",
+      "llama-enabled CPU Release",
+      "llama-enabled CPU ASan+UBSan",
+      "Vulkan Release"
+    ],
+    "result": "All 5 configs green, test_mixed_layer_policy passing in every one. The one recurring failure (test_mem_guard) is a pre-existing, documented environmental flake from this dev host's own RAM pressure (unrelated to this phase -- it passed cleanly in at least one of the runs performed during this phase's own verification pass).",
+    "product_regression": "Purely additive change (0 existing files modified) means no regression is possible by construction; explicitly re-confirmed anyway with fresh Vulkan smoke runs of --kv native/q8/q5/adaptive, --compare-kv, and --gpu-bench --gpu-layers auto, all behaving identically to Phase 11A."
+  },
+  "limitations": [
+    "5-prompt deterministic subset used throughout the ratio/position/sensitivity/CPU/Vulkan experiments (not the full 31-prompt derisk set) -- a real but small sample; top1_preservation in particular is noisy at this scale.",
+    "Sensitivity ranking, ratio, and position experiments were run on ONE model (SmolLM2-135M) at ONE context size (2048) -- not cross-validated on 360M or other context sizes.",
+    "The sensitivity-based policy is an OFFLINE research policy only (as the phase spec requires) -- not runtime-adaptive, not validated for generalization beyond this exact model/ prompt-set pairing.",
+    "Memory-pressure capacity results use --capacity-only (no F16 reference context, no quality metrics) specifically to avoid risking real GPU OOM -- quality-at-the-memory-boundary was NOT measured, only raw allocation success/failure.",
+    "Performance stability runs used a SINGLE prompt (not the 5-prompt subset) to keep the repeated-run sweep fast -- throughput noise across a broader prompt mix was not characterized.",
+    "Hadamard KV-rotation is disabled whenever any per-layer override is active (inherited from the Phase 4.1 patch, not new to this phase) -- every quality number in this artifact reflects that disclosed limitation, on every configuration including all-Q8.",
+    "This is a feasibility/research artifact -- no product CLI surface, no runtime policy, no merge. Q4_0/Q5_0 remain research-only and were never used anywhere in this phase."
+  ]
+}
